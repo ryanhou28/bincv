@@ -66,8 +66,8 @@
 //
 // * It is NOT a GPU-vs-GPU speed result. There is no `cv::cuda` whole-frontend
 //   counterpart to compare against -- `cv::cuda::ORB` is a different algorithm
-//   over different input -- so the end-to-end GPU speed verdict is OUTSTANDING,
-//   and no substitute bar is invented here.
+//   over different input -- so no end-to-end GPU speed comparison is possible,
+//   and no substitute is invented here.
 // * The optional host arm (BINCV_CUDA_VIO_HOST=1) is a same-machine CPU
 //   measurement against a GPU one. It is CONTEXT, printed with that label.
 // * It is a DETECT-AND-DESCRIBE frontend, not a TRACKING one. A device
@@ -418,7 +418,7 @@ struct ResidentFrontend {
     Pinned<uint8_t> landing;                 // the device result block, mirrored
     Pinned<bc::DeviceCorner> cornerStaging;  // the ROUND-TRIP arm's only buffer
 
-    // The five views into the landed block. Typed accessors rather than raw
+    // The five views into the uploaded block. Typed accessors rather than raw
     // offsets at every use, for the reason the device side has them.
     const bc::DeviceCornerResult& hostResult() const {
         return *reinterpret_cast<const bc::DeviceCornerResult*>(landing.data() + kResultOffset);
@@ -1020,7 +1020,7 @@ int main(int argc, char** argv) {
     // THE COST OF DRIVING THE PIPELINE, which is not on any stage's line and is
     // bigger than most of them. The device clock measures the stream; the wall
     // clock measures the stream PLUS what the host spent enqueueing 15 launches
-    // and waiting on one synchronize. On this host the difference is larger than
+    // and waiting on one synchronize. On the reference host the difference is larger than
     // the whole pipeline outside detection, which is a bound no per-kernel
     // benchmark can show and no kernel change can move.
     std::printf("\n  host-side cost of DRIVING the frame (wall - device): %.4f ms/frame,\n"
@@ -1115,10 +1115,10 @@ int main(int argc, char** argv) {
         std::printf("    ratio                           : %8.1fx\n",
                     (wallMs > 0.0) ? (hostMs / wallMs) : 0.0);
         std::printf("    *** THIS IS NOT A GPU-vs-GPU RESULT AND IS NOT A SHIP BAR. It is a\n"
-                    "    same-machine CPU measurement against a GPU one, and this host is a\n"
+                    "    same-machine CPU measurement against a GPU one, and the reference host is a\n"
                     "    desktop under a hypervisor whose CPU timings carry tens of percent\n"
                     "    of spread. There is no cv::cuda whole-frontend counterpart to put\n"
-                    "    here, so the GPU speed verdict for this pipeline is OUTSTANDING. ***\n");
+                    "    here, so no GPU speed comparison exists for this pipeline. ***\n");
     } else {
         std::printf("\n  No host arm was run, so nothing here checks the device answers\n"
                     "  against the host library. Re-run with BINCV_CUDA_VIO_HOST=1.\n");

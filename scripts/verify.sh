@@ -25,11 +25,10 @@
 # ---------------------------------------------------------------------------
 # Why a fourth configuration
 #
-# The verification set used to be three RELEASE builds, so NDEBUG was defined
-# in every one of them and BINCV_DEBUG_CHECKS was 0 everywhere. Half of the error
-# policy -- every BINCV_ASSERT, which is to say the bounds checks in at() and
-# set() and every kernel precondition -- was therefore never compiled by anything
-# that could fail. `debug` closes that.
+# Three RELEASE builds define NDEBUG in every one of them, so BINCV_DEBUG_CHECKS
+# is 0 everywhere and half of the error policy -- every BINCV_ASSERT, which is to
+# say the bounds checks in at() and set() and every kernel precondition -- is
+# never compiled by anything that could fail. `debug` closes that.
 #
 # It is not redundant with tests/test_assert_abort.cpp. That binary forces the
 # checks on for a handful of deliberately-out-of-range cases; this configuration
@@ -43,14 +42,13 @@
 # longer assumes it: each configuration declares the BINCV_DEBUG_CHECKS and
 # BINCV_EXCEPTIONS_ENABLED values it must produce, and the values are read back
 # out of the built test_error binary. `CXXFLAGS=-DNDEBUG ./scripts/verify.sh
-# --only debug` used to pass while compiling every assertion away; it now fails.
+# --only debug` fails rather than passing with every assertion compiled away.
 #
 # ---------------------------------------------------------------------------
 # Why warnings are fatal here and not by default
 #
-# Nothing in this project used to enable a single warning flag, so the
-# "must build warning-free" requirement in CLAUDE.md and GETTING_STARTED.md
-# passed vacuously. The flags now
+# A "must build warning-free" requirement with no warning flags enabled passes
+# vacuously. The flags
 # live in cmake/BincvWarnings.cmake and this script configures every
 # build with -DBINCV_WERROR=ON, so a warning stops the build here even though a
 # plain `cmake --build` still only prints it.
@@ -448,11 +446,11 @@ run_gate_selfcheck() {
 
     # 3. This script must survive having a lot to report.
     #
-    # The diagnostic printer used to be `... | head -15 | sed`, which gives its
-    # producer a SIGPIPE; under `set -o pipefail` plus `set -e` that killed the
-    # whole run with exit 141 -- no table, no "VERIFICATION FAILED", remaining
-    # configurations never built -- and it did so precisely when the build had the
-    # most warnings to show. Reproduced 3/3 at ~300 diagnostics.
+    # A diagnostic printer of the form `... | head -15 | sed` gives its producer a
+    # SIGPIPE; under `set -o pipefail` plus `set -e` that kills the whole run with
+    # exit 141 -- no table, no "VERIFICATION FAILED", remaining configurations
+    # never built -- and it does so precisely when the build has the most warnings
+    # to show. Reproduced 3/3 at ~300 diagnostics.
     if ! ( set -eo pipefail; seq 1 5000 | print_first 15 > /dev/null ); then
         SELFCHECK_STATUS="FAILED"
         SELFCHECK_DETAIL="print_first died on a long input -- this script would abort mid-run on a build with many diagnostics"
@@ -650,7 +648,7 @@ for name in "${CONFIG_NAMES[@]}"; do
     if [[ "${status}" == "PASS" || "${status}" == "NO-OPENCV" ]]; then
         if [[ "${tests}" == "-" || "${checks}" == "-" || "${backend}" == "?" ]]; then
             echo "  NOTHING WAS VERIFIED -- ctest ran ${tests} cases and ${checks} checks."
-            echo "  ctest exits 0 on an empty test set, so this used to read as a pass."
+            echo "  ctest exits 0 on an empty test set, so without this check it would read as a pass."
             status="NO-TESTS"
         fi
     fi

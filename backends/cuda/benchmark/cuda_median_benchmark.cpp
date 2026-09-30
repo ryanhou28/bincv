@@ -26,8 +26,8 @@
 //   * THE WIDE MEDIAN HAS NO STRUCTURAL ADVANTAGE AND IS NOT REPORTED AS IF IT
 //     DID. Byte in, byte out, on both sides. Its role bar is
 //     cv::cuda::createMedianFilter, which this target does not link; where the
-//     bar cannot be run the verdict is printed as OUTSTANDING rather than
-//     substituted with a CPU number.
+//     bar cannot be run the line says no GPU comparison is possible rather
+//     than substituting a CPU number.
 //
 //   * EVERY ARM RATIO IS AN INTERLEAVED PER-ROUND RATIO, and the printer says
 //     whether the two sample ranges are disjoint -- a fact, not the verdict.
@@ -317,7 +317,7 @@ int main() {
                 " against binCV's 3-sample\n L with zero fill: different images, and not"
                 " a correctness oracle -- that is\n settled against the host library"
                 " alone. This target does not link an OpenCV\n built with cudafilters,"
-                " so THE SPEED VERDICT AGAINST THE ROLE BAR IS\n OUTSTANDING. No"
+                " so NO GPU SPEED COMPARISON AGAINST THE ROLE BAR\n IS POSSIBLE HERE. No"
                 " substitute bar is used and no CPU number is quoted in its\n place.\n"
                 " For uint16_t there is no bar to be outstanding against at all:\n"
                 " createMedianFilter is CV_8UC1-only, so no cv::cuda alternative exists\n"
@@ -423,7 +423,7 @@ int main() {
             },
             20, 20, 9);
         bincv::cuda::impl::medianWideFastArmEnabled() = true;
-        std::printf("\n %zux%zu, kMedianReferenceL, uint16 -- SPEED VERDICT OUTSTANDING:"
+        std::printf("\n %zux%zu, kMedianReferenceL, uint16 -- NO GPU SPEED COMPARISON:"
                     "\n no cv::cuda alternative exists for this input type.\n",
                     w, h);
         cudabench::printPaired("  A = per-pixel reference arm", "  B = 2-pixel fast arm",

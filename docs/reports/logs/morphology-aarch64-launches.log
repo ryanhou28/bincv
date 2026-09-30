@@ -6,6 +6,7 @@
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # commit:   80ff0a8
+# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/morphology_benchmark.cpp=1408324793a9 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/logic.hpp=bd14f7da7dc8 include/bincv/ops/morphology.hpp=2614cc25f268 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6
 # governor: performance
 # throttled before: throttled=0x80000
 # temp before: temp=63.7'C
@@ -4042,3 +4043,141 @@ ns/pixel is mostly made of. It is NOT subtracted from the tables.
 # temp after: temp=63.7'C
 # date:     2026-09-21T16:45:56-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio t1:OpenCV CV_8U/t1:binCV uint32) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                        n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# t1 / OpenCV CV_8U         10     0.7360     0.6886     0.7981  1.159    14.9%      --  [  0.7152,   0.7510]   2.44%   1.029x
+# t1 / binCV composed u32   10     1.5310     1.5286     1.5343  1.004     0.4%      --  [  1.5295,   1.5325]   0.10%   1.001x
+# t1 / binCV uint32         10     0.7219     0.7201     0.7220  1.003     0.3%      --  [  0.7202,   0.7219]   0.12%   1.002x
+# t1 / binCV uint64         10     0.3805     0.3753     0.3844  1.024     2.4%      --  [  0.3784,   0.3820]   0.47%   1.006x
+# t10 / OpenCV CV_8U        10     1.6655     1.6526     1.6946  1.025     2.5%      --  [  1.6585,   1.6793]   0.62%   1.008x
+# t10 / binCV uint32        10     1.2336     1.2264     1.2423  1.013     1.3%      --  [  1.2299,   1.2384]   0.34%   1.004x
+# t10 / binCV uint64        10     0.7011     0.7000     0.7023  1.003     0.3%      --  [  0.7007,   0.7016]   0.07%   1.001x
+# t11 / OpenCV CV_8U        10     0.8002     0.7962     0.8209  1.031     3.1%      --  [  0.7971,   0.8081]   0.69%   1.010x
+# t11 / binCV uint32        10     1.1612     1.1589     1.1618  1.003     0.3%      --  [  1.1600,   1.1614]   0.06%   1.001x
+# t11 / binCV uint64        10     0.8682     0.8676     0.8688  1.001     0.1%      --  [  0.8678,   0.8684]   0.03%   1.000x
+# t12 / OpenCV CV_8U        10     0.8002     0.7947     0.8160  1.027     2.7%      --  [  0.7972,   0.8069]   0.60%   1.008x
+# t12 / binCV uint32        10     1.1872     1.1861     1.1878  1.001     0.1%      --  [  1.1871,   1.1875]   0.01%   1.000x
+# t12 / binCV uint64        10     0.9214     0.9204     0.9229  1.003     0.3%      --  [  0.9209,   0.9223]   0.08%   1.001x
+# t13 / OpenCV CV_8U        10     1.3139     1.2986     1.3357  1.029     2.8%      --  [  1.3027,   1.3315]   1.10%   1.013x
+# t13 / binCV composed u32  10     1.8021     1.8003     1.8084  1.004     0.4%      --  [  1.8009,   1.8073]   0.18%   1.003x
+# t13 / binCV uint32        10     0.7839     0.7833     0.7911  1.010     1.0%      --  [  0.7835,   0.7864]   0.19%   1.003x
+# t13 / binCV uint64        10     0.5585     0.5560     0.5623  1.011     1.1%      --  [  0.5576,   0.5595]   0.17%   1.002x
+# t14 / OpenCV CV_8U        10     1.3217     1.3042     1.3411  1.028     2.8%      --  [  1.3124,   1.3323]   0.75%   1.008x
+# t14 / binCV composed u32  10     1.6745     1.6726     1.6810  1.005     0.5%      --  [  1.6729,   1.6774]   0.13%   1.002x
+# t14 / binCV uint32        10     0.5762     0.5754     0.5839  1.015     1.5%      --  [  0.5757,   0.5790]   0.29%   1.005x
+# t14 / binCV uint64        10     0.4407     0.4383     0.4439  1.013     1.3%      --  [  0.4398,   0.4417]   0.21%   1.002x
+# t15 / OpenCV CV_8U        10     2.3484     2.3043     2.3869  1.036     3.5%      --  [  2.3136,   2.3709]   1.22%   1.015x
+# t15 / binCV composed u32  10     3.4891     3.4871     3.5006  1.004     0.4%      --  [  3.4874,   3.4971]   0.14%   1.002x
+# t15 / binCV uint32        10     4.5690     4.5682     4.5892  1.005     0.5%      --  [  4.5689,   4.5780]   0.10%   1.002x
+# t15 / binCV uint64        10     3.9630     3.9611     3.9654  1.001     0.1%      --  [  3.9626,   3.9638]   0.01%   1.000x
+# t16 / OpenCV CV_8U        10     2.6436     2.6085     2.6946  1.033     3.3%      --  [  2.6264,   2.6689]   0.80%   1.010x
+# t16 / binCV uint32        10     1.3613     1.3588     1.3677  1.007     0.7%      --  [  1.3595,   1.3646]   0.19%   1.002x
+# t16 / binCV uint64        10     0.9967     0.9954     1.0006  1.005     0.5%      --  [  0.9960,   0.9979]   0.10%   1.001x
+# t17 / OpenCV CV_8U        10     1.2535     1.2375     1.3404  1.083     8.2%      --  [  1.2433,   1.2704]   1.08%   1.013x
+# t17 / binCV uint32        10     1.6280     1.6273     1.6346  1.004     0.4%      --  [  1.6275,   1.6305]   0.09%   1.002x
+# t17 / binCV uint64        10     1.4961     1.4931     1.5008  1.005     0.5%      --  [  1.4949,   1.4973]   0.08%   1.001x
+# t18 / OpenCV CV_8U        10     1.2561     1.2388     1.2746  1.029     2.9%      --  [  1.2441,   1.2726]   1.14%   1.013x
+# t18 / binCV uint32        10     1.6799     1.6791     1.6872  1.005     0.5%      --  [  1.6793,   1.6823]   0.09%   1.001x
+# t18 / binCV uint64        10     1.6029     1.5992     1.6073  1.005     0.5%      --  [  1.6014,   1.6063]   0.15%   1.002x
+# t19 / OpenCV CV_8U        10     2.7087     2.6905     2.9560  1.099     9.8%      --  [  2.6958,   2.7613]   1.21%   1.019x
+# t19 / binCV composed u32  10     2.8418     2.8386     2.8588  1.007     0.7%      --  [  2.8403,   2.8431]   0.05%   1.001x
+# t19 / binCV uint32        10     0.9256     0.9255     0.9278  1.002     0.2%      --  [  0.9255,   0.9277]   0.12%   1.002x
+# t19 / binCV uint64        10     0.7904     0.7893     0.7923  1.004     0.4%      --  [  0.7898,   0.7914]   0.10%   1.001x
+# t2 / OpenCV CV_8U         10     0.7342     0.6852     0.7949  1.160    14.9%      --  [  0.7166,   0.7450]   1.93%   1.024x
+# t2 / binCV composed u32   10     1.3703     1.3685     1.3819  1.010     1.0%      --  [  1.3690,   1.3790]   0.37%   1.006x
+# t2 / binCV uint32         10     0.4857     0.4834     0.4895  1.013     1.3%      --  [  0.4839,   0.4871]   0.33%   1.004x
+# t2 / binCV uint64         10     0.2619     0.2619     0.2622  1.001     0.1%      --  [  0.2619,   0.2620]   0.01%   1.000x
+# t20 / OpenCV CV_8U        10     2.7222     2.7153     2.9687  1.093     9.3%      --  [  2.7165,   2.7917]   1.38%   1.026x
+# t20 / binCV composed u32  10     2.7308     2.7289     2.7411  1.004     0.4%      --  [  2.7291,   2.7319]   0.05%   1.001x
+# t20 / binCV uint32        10     0.7527     0.7511     0.7538  1.004     0.4%      --  [  0.7523,   0.7532]   0.06%   1.001x
+# t20 / binCV uint64        10     0.6164     0.6164     0.6186  1.004     0.4%      --  [  0.6164,   0.6170]   0.05%   1.001x
+# t21 / OpenCV CV_8U        10     4.9449     4.8445     5.0302  1.038     3.8%      --  [  4.8668,   4.9659]   1.00%   1.016x
+# t21 / binCV composed u32  10     5.5889     5.5869     5.6123  1.005     0.5%      --  [  5.5880,   5.5921]   0.04%   1.001x
+# t21 / binCV uint32        10     5.7019     5.6880     5.7293  1.007     0.7%      --  [  5.6914,   5.7087]   0.15%   1.002x
+# t21 / binCV uint64        10     5.3121     5.2211     5.3371  1.022     2.2%      --  [  5.2936,   5.3246]   0.29%   1.003x
+# t22 / OpenCV CV_8U        10     5.4534     5.2802     5.5838  1.058     5.6%      --  [  5.4193,   5.5353]   1.06%   1.015x
+# t22 / binCV uint32        10     1.6778     1.6767     1.6808  1.002     0.2%      --  [  1.6772,   1.6795]   0.07%   1.001x
+# t22 / binCV uint64        10     1.4080     1.4077     1.4104  1.002     0.2%      --  [  1.4078,   1.4092]   0.05%   1.001x
+# t23 / OpenCV CV_8U        10     2.5466     2.5254     2.7593  1.093     9.2%      --  [  2.5335,   2.6164]   1.63%   1.027x
+# t23 / binCV uint32        10     2.3741     2.3738     2.3748  1.000     0.0%      --  [  2.3739,   2.3742]   0.01%   1.000x
+# t23 / binCV uint64        10     2.3956     2.3954     2.3971  1.001     0.1%      --  [  2.3955,   2.3958]   0.01%   1.000x
+# t24 / OpenCV CV_8U        10     2.5426     2.5292     2.7592  1.091     9.0%      --  [  2.5337,   2.6018]   1.34%   1.023x
+# t24 / binCV uint32        10     2.4799     2.4792     2.4845  1.002     0.2%      --  [  2.4795,   2.4838]   0.09%   1.002x
+# t24 / binCV uint64        10     2.5819     2.5817     2.5843  1.001     0.1%      --  [  2.5817,   2.5837]   0.04%   1.001x
+# t3 / OpenCV CV_8U         10     1.8520     1.8122     1.8969  1.047     4.6%      --  [  1.8306,   1.8766]   1.24%   1.013x
+# t3 / binCV composed u32   10     2.9676     2.9639     2.9748  1.004     0.4%      --  [  2.9662,   2.9700]   0.06%   1.001x
+# t3 / binCV uint32         10     3.5959     3.5868     3.6021  1.004     0.4%      --  [  3.5878,   3.6006]   0.18%   1.002x
+# t3 / binCV uint64         10     2.5462     2.5345     2.5671  1.013     1.3%      --  [  2.5392,   2.5543]   0.30%   1.003x
+# t4 / OpenCV CV_8U         10     1.3790     1.3338     1.4185  1.063     6.1%      --  [  1.3537,   1.4026]   1.77%   1.019x
+# t4 / binCV uint32         10     1.2035     1.2010     1.2113  1.009     0.9%      --  [  1.2023,   1.2077]   0.22%   1.003x
+# t4 / binCV uint64         10     0.6418     0.6372     0.6459  1.014     1.3%      --  [  0.6381,   0.6430]   0.38%   1.006x
+# t5 / OpenCV CV_8U         10     0.6985     0.6711     0.7623  1.136    13.1%      --  [  0.6888,   0.7152]   1.89%   1.024x
+# t5 / binCV uint32         10     0.9295     0.9294     0.9299  1.001     0.1%      --  [  0.9295,   0.9297]   0.01%   1.000x
+# t5 / binCV uint64         10     0.6135     0.6125     0.6139  1.002     0.2%      --  [  0.6135,   0.6136]   0.01%   1.000x
+# t6 / OpenCV CV_8U         10     0.7002     0.6707     0.7561  1.127    12.2%      --  [  0.6858,   0.7162]   2.17%   1.023x
+# t6 / binCV uint32         10     0.9437     0.9436     0.9439  1.000     0.0%      --  [  0.9437,   0.9437]   0.00%   1.000x
+# t6 / binCV uint64         10     0.6346     0.6344     0.6347  1.000     0.0%      --  [  0.6345,   0.6347]   0.01%   1.000x
+# t7 / OpenCV CV_8U         10     0.8300     0.8206     0.8479  1.033     3.3%      --  [  0.8279,   0.8364]   0.51%   1.008x
+# t7 / binCV composed u32   10     1.6000     1.5885     1.6136  1.016     1.6%      --  [  1.5958,   1.6094]   0.43%   1.006x
+# t7 / binCV uint32         10     0.7401     0.7322     0.7449  1.017     1.7%      --  [  0.7353,   0.7415]   0.42%   1.006x
+# t7 / binCV uint64         10     0.3989     0.3984     0.3995  1.003     0.3%      --  [  0.3986,   0.3990]   0.06%   1.001x
+# t8 / OpenCV CV_8U         10     0.8333     0.8235     0.8530  1.036     3.5%      --  [  0.8299,   0.8389]   0.54%   1.007x
+# t8 / binCV composed u32   10     1.3570     1.3457     1.3645  1.014     1.4%      --  [  1.3517,   1.3625]   0.40%   1.004x
+# t8 / binCV uint32         10     0.4979     0.4969     0.4985  1.003     0.3%      --  [  0.4978,   0.4983]   0.05%   1.001x
+# t8 / binCV uint64         10     0.3033     0.3030     0.3039  1.003     0.3%      --  [  0.3031,   0.3034]   0.06%   1.001x
+# t9 / OpenCV CV_8U         10     1.8766     1.8530     1.9815  1.069     6.8%      --  [  1.8554,   1.8958]   1.08%   1.011x
+# t9 / binCV composed u32   10     3.1030     3.0744     3.1594  1.028     2.7%      --  [  3.0849,   3.1400]   0.89%   1.012x
+# t9 / binCV uint32         10     4.0203     4.0166     4.0430  1.007     0.7%      --  [  4.0172,   4.0248]   0.09%   1.001x
+# t9 / binCV uint64         10     2.8484     2.8384     2.8659  1.010     1.0%      --  [  2.8400,   2.8627]   0.40%   1.005x
+# 
+# RATIO  t1:OpenCV CV_8U  /  t1:binCV uint32   over 10 launches
+#   paired per launch (the published estimator)
+#     median 1.0207   min 0.9562   max 1.1054   scatter 14.6%
+#     bootstrap 95% CI of the median: [0.9907, 1.0403]   +/- 2.43%
+#     launches with the ratio above 1.00: 6 of 10
+#     smallest resolvable difference at 10 launches: 1.030x
+#   ratio of the two medians, same launches
+#     point 1.0195   bootstrap 95% CI: [0.9920, 1.0355]
+#     the two intervals differ by 0.12% and 0.47% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     t1       composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t10      OpenCV CV_8U 153600 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t11      OpenCV CV_8U 153600 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t12      OpenCV CV_8U 153600 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t13      composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t14      composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t15      composed spelling: shift + bitwise per cell, 33 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t16      OpenCV CV_8U 38400 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t17      OpenCV CV_8U 38400 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t18      OpenCV CV_8U 38400 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t19      composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t2       composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t20      composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t21      composed spelling: shift + bitwise per cell, 33 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t22      OpenCV CV_8U 11280 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t23      OpenCV CV_8U 11280 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t24      OpenCV CV_8U 11280 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t3       composed spelling: shift + bitwise per cell, 33 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t4       OpenCV CV_8U 614400 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t5       OpenCV CV_8U 614400 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t6       OpenCV CV_8U 614400 B (2 frames) | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t7       composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t8       composed spelling: shift + bitwise per cell, 17 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum
+#     t9       composed spelling: shift + bitwise per cell, 33 traversals | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  vs OpenCV  checksum

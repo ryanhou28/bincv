@@ -25,7 +25,8 @@
 // to the floor that the floor is part of reading the number rather than a
 // footnote under it.
 //
-// THE GATE-EXCLUDED ARM is the last section. Project rule (CLAUDE.md): a
+// THE GATE-EXCLUDED ARM is the last section. The rule every vector arm here
+// follows: a
 // benchmark must carry a case the fast path's own gate REJECTS, and that case
 // must read ~1.00x -- otherwise the switch positions above are not selecting
 // what their lines claim.
@@ -347,7 +348,7 @@ int main() {
     // ----------------------------------------------------------------------
     // THE GATE-EXCLUDED ARM: the case that MUST read ~1.00x.
     //
-    // CLAUDE.md requires a benchmark to include a case where the fast path's
+    // A benchmark of a vector arm must include a case where the fast path's
     // own gate excludes it, because that is the only cheap check that the
     // switch above is selecting anything at all. A mis-attached `#define` once
     // compiled a host vector block out entirely here and three consecutive

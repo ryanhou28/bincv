@@ -71,7 +71,7 @@ stated decision rule.
 - **Report memory and speed together** — they trade off, so one alone cannot be weighed
   against goals that conflict.
 - **Commit the benchmark.** Every performance claim must be reproducible.
-- **A published figure names the commit it was taken at, and a change to the kernel
+- **A published figure records the code it was taken on, and a change to the kernel
   behind it re-takes it or marks it stale.** A figure is only true of the code it was
   measured on. `verify.sh` gates whether a kernel is CORRECT; **`check_figure_staleness.py`
   gates whether a number is still TRUE.** The two come apart exactly when an optimization
@@ -80,20 +80,24 @@ stated decision rule.
   `goodFeaturesToTrack` 18% faster on both architectures and left the reports publishing a
   LOSS the library did not have, for three weeks, while `features.md` carried a note saying
   the rows were stale. The note was not enough; only the stamp and the re-take are.
-  `scripts/run_launches.sh` records the commit in every log it writes, and the gate compares
-  that commit's code against the current tree — so a figure whose kernel moved now fails a
-  check instead of waiting for a reader to notice. Already-stale logs are listed in
+  `scripts/run_launches.sh` writes into every log a `# sources:` line — each first-party
+  file the benchmark measured, with a hash of its comment-stripped content — and the gate
+  compares those hashes against the current tree, so a figure whose kernel moved fails a
+  check instead of waiting for a reader to notice. The hashes live in the log rather than
+  in git because this repository squash-merges: the commit a sweep ran from is never on
+  `main`, so a log that named only the commit could be checked on one machine and no
+  other. The commit line is still written, as a note for a person. Already-stale logs are listed in
   `docs/reports/logs/expected-stale.txt` **with the files that moved under them**, so being
   listed does not excuse the next change to the same code.
 - **Pick the right baseline.** The bar for a new implementation is the best existing
   option, not the worst. Measuring against a fallback nobody would use makes anything
   look like a win.
 
-**An operation SHIPS only when it holds up on both axes (owner's rule,
-2026-09-15).** Correct-but-far-behind is a stage, not a product: a kernel that
-loses its role comparison badly against the best existing option does not merge
-on the strength of a stated price -- it gets optimized first, or the owner
-explicitly accepts the gap with the memory-side argument stated. The premise of
+**An operation SHIPS only when it holds up on both axes.** Correct-but-far-behind
+is a stage, not a product: a kernel that loses its role comparison badly against
+the best existing option does not merge on the strength of a stated price -- it
+gets optimized first, or the gap is explicitly accepted, in review, with the
+memory-side argument stated. The premise of
 this library is fast AND lightweight out of the box; half of that is not a
 smaller claim, it is a different product.
 
@@ -217,9 +221,9 @@ that is their choice, and binCV's job is to make the one they chose cheaper.
 **The operation set follows what users need, not a fixed taxonomy.** binCV is not
 trying to replace OpenCV. An operation is in scope when it sits on a path **users**
 run *and* binCV can make it smaller or faster. A library's users include people
-outside this repository, so "no in-repo caller yet" is not a veto — that reading was
-corrected by the owner (2026-09-11); an in-repo caller is what *prices* an operation
-honestly (the benchmark-at-birth rule below), not a gate on whether it may exist. An
+outside this repository, so "no in-repo caller yet" is not a veto; an in-repo caller is
+what *prices* an operation honestly (the benchmark-at-birth rule below), not a gate on
+whether it may exist. An
 operation is out of scope when binCV would add nothing but a second implementation to
 keep correct.
 
@@ -244,8 +248,9 @@ binary dense path beats `cv::cuda::StereoBM` on both speed and device memory
 
 ## Style
 
-- OpenCV conventions: `camelCase` functions, `PascalCase` types, `UPPER_CASE` constants,
-  lowercase namespaces, destination as out-parameter.
+- OpenCV conventions: `camelCase` functions, `PascalCase` types, lowercase namespaces,
+  destination as out-parameter. Enumerators are `UPPER_CASE` as in OpenCV
+  (`MORPH_OPEN`); named constants are `kCamelCase` (`kDenseDisparityInvalid`).
 - Tier 3 operations (no OpenCV equivalent) must **not** borrow OpenCV names.
 - Match the comment density and idiom of surrounding code.
 - **Comments explain the code, not the project's history.** No task numbers, no experiment

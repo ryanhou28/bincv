@@ -1,5 +1,5 @@
 // ===========================================================================
-// -- WHERE `track` TIME ACTUALLY GOES ON THE REFERENCE DEVICE, BY STAGE.
+// WHERE `track` TIME ACTUALLY GOES ON THE REFERENCE DEVICE, BY STAGE.
 //
 // An iteration-cap sweep on the device put roughly 45% of `track` OUTSIDE the
 // iteration loop:
@@ -119,6 +119,8 @@ int main(int argc, char** argv) {
     const int w = first.cols, h = first.rows;
 
     bincv::LKParams lk;                     // the reference pipeline's parameters verbatim
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     bincv::GoodFeaturesParams gftt;
     const int kMinTracks = 60;
     // (the ladder depth; the stage counters are per point-level, not per level)

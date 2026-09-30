@@ -25,10 +25,23 @@
 #
 #   ./scripts/verify_cuda.sh
 #
-# The toolkit is found through CMake, or pointed at explicitly:
+# THE TOOLCHAIN. nvcc is BINCV_CUDA_NVCC if set, else the nvcc on PATH, else
+# /usr/local/cuda/bin/nvcc (the toolkit's own symlink), else the reference
+# toolkit at /usr/local/cuda-11.1/bin/nvcc. The reference pairing -- CUDA 11.1
+# with g++-9 as nvcc's host compiler -- is what every committed figure was built
+# with; newer toolkits and host compilers are not tested by this gate, and nvcc
+# refuses a host compiler newer than it supports, so name both when in doubt:
 #
 #   BINCV_CUDA_NVCC=/usr/local/cuda-11.1/bin/nvcc ./scripts/verify_cuda.sh
 #   BINCV_CUDA_HOST_COMPILER=g++-9 ./scripts/verify_cuda.sh   # nvcc's -ccbin
+#
+# THE GPU ARCHITECTURE. The backend builds SASS for one architecture and no
+# PTX, so the build must name the GPU it will run on. The default is sm_86, the
+# reference RTX 3070 Ti; on any other part the kernels do not load and every
+# suite fails with cudaErrorNoKernelImageForDevice. Name yours:
+#
+#   BINCV_CUDA_ARCH=75 ./scripts/verify_cuda.sh        # T4, RTX 20xx
+#   BINCV_CUDA_ARCH=native ./scripts/verify_cuda.sh    # CMake 3.24+: the installed GPU
 #
 # A CUDA build tree is large and a machine's root filesystem may not be where it
 # belongs, so the build directory is overridable:
@@ -60,7 +73,8 @@ UPDATE_BASELINE=0
 for arg in "$@"; do
     case "${arg}" in
         --update-checks-baseline) UPDATE_BASELINE=1 ;;
-        -h|--help) sed -n '3,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) awk 'NR >= 3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' \
+                       "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "verify_cuda.sh: unknown argument '${arg}'" >&2; exit 2 ;;
     esac
 done
@@ -81,11 +95,14 @@ skip() {
     exit 77
 }
 
-# nvcc: explicit, on PATH, or the reference install.
+# nvcc: explicit, on PATH, the toolkit's symlink, or the reference install --
+# the order the header documents.
 NVCC="${BINCV_CUDA_NVCC:-}"
 if [ -z "${NVCC}" ]; then
     if command -v nvcc >/dev/null 2>&1; then
         NVCC="$(command -v nvcc)"
+    elif [ -x /usr/local/cuda/bin/nvcc ]; then
+        NVCC=/usr/local/cuda/bin/nvcc
     elif [ -x /usr/local/cuda-11.1/bin/nvcc ]; then
         NVCC=/usr/local/cuda-11.1/bin/nvcc
     else
@@ -93,17 +110,22 @@ if [ -z "${NVCC}" ]; then
     fi
 fi
 echo "  nvcc: ${NVCC}"
+HOST_CC_TEXT="${BINCV_CUDA_HOST_COMPILER:-}"
+[ -n "${HOST_CC_TEXT}" ] || HOST_CC_TEXT="nvcc default; set BINCV_CUDA_HOST_COMPILER to choose one"
+ARCH_TEXT="${BINCV_CUDA_ARCH:-}"
+[ -n "${ARCH_TEXT}" ] || ARCH_TEXT="86 by default; set BINCV_CUDA_ARCH for another GPU"
+echo "  host compiler: ${HOST_CC_TEXT}"
+echo "  architecture:  ${ARCH_TEXT}"
 
 # ---------------------------------------------------------------------------
 # The suites, named once
 #
-# They used to be named twice -- once in the `cmake --build --target` list and
-# once in the loop that runs them -- and the two lists could disagree in
-# silence. A suite missing from the first is run by nobody; a suite missing from
-# the second is built by nobody; either way this gate stays green over a suite
-# that never executed, which is the one failure a verification script must not
-# have. Every op family added to the backend adds a suite, so the two lists had
-# a drift scheduled for the next one.
+# Named twice -- once in a `cmake --build --target` list and once in the loop
+# that runs them -- two lists can disagree in silence. A suite missing from the
+# first is run by nobody; a suite missing from the second is built by nobody;
+# either way the gate stays green over a suite that never executed, which is
+# the one failure a verification script must not have. Every op family added
+# to the backend adds a suite, so two lists would drift at the next one.
 #
 # Derived from the tests' own CMakeLists.txt rather than written here, for the
 # reason scripts/verify_cross.sh gives for deriving its manifest: a list kept in
@@ -184,6 +206,9 @@ run_configuration() {
     )
     if [ -n "${BINCV_CUDA_HOST_COMPILER:-}" ]; then
         args+=(-DCMAKE_CUDA_HOST_COMPILER="${BINCV_CUDA_HOST_COMPILER}")
+    fi
+    if [ -n "${BINCV_CUDA_ARCH:-}" ]; then
+        args+=(-DCMAKE_CUDA_ARCHITECTURES="${BINCV_CUDA_ARCH}")
     fi
 
     rm -rf "${dir}"
@@ -272,6 +297,11 @@ run_configuration() {
             skip "built cleanly, but no CUDA device is available to run ${suite}"
         elif [ ${RC} -ne 0 ]; then
             echo "  DEVICE-VS-HOST SUITE FAILED: ${suite} (${name})"
+            if grep -qi 'no kernel image' "${out}"; then
+                echo "  The kernels were built for another GPU architecture than the one"
+                echo "  present (default sm_86). Re-run with BINCV_CUDA_ARCH=<this GPU's"
+                echo "  compute capability>, or BINCV_CUDA_ARCH=native on CMake 3.24+."
+            fi
             exit 1
         fi
         local line n k

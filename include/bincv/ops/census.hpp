@@ -38,9 +38,8 @@
 ///   stereo module); this borrows no name and answers to a per-pixel reference.
 ///
 /// The FULL-FRAME spelling here is the convenience form -- 24 planes of 752x480
-/// at uint32 are ~1.08 MB. The dense pipeline streams a band of rows instead;
-/// the memory rule recorded for it makes the band, not the frame, the resident
-/// object.
+/// at uint32 are ~1.08 MB. The dense pipeline streams a band of rows instead, so
+/// the band and not the frame is its resident object.
 
 #include <cstddef>
 #include <cstdint>
@@ -68,11 +67,12 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief One census comparison offset, relative to the pixel being written.
+/// **API TIER 3.**
 struct CensusOffset {
     int8_t dx, dy;
 };
 
-/// @brief A census neighbourhood: `K` offsets, none of them (0, 0).
+/// @brief A census neighbourhood: `K` offsets, none of them (0, 0). **API TIER 3.**
 template <size_t K>
 struct CensusPattern {
     CensusOffset at[K];
@@ -97,23 +97,8 @@ inline constexpr CensusPattern<24> kCensus5x5 = {
      {-2, 1},  {-1, 1},  {0, 1}, {1, 1},  {2, 1},
      {-2, 2},  {-1, 2},  {0, 2}, {1, 2},  {2, 2}}};
 
-/// @brief Census transform: plane `k` of `planes` gets
-/// `I(p + pattern.at[k]) > I(p)` at every pixel `p`. **API TIER 3.**
-/// @param img Row-major, `stride` ELEMENTS between rows, like every wide input.
-/// @param planes `K` caller-owned plane views, each `width x height`. Every word
-/// of every plane is written; padding bits end zero.
-/// @note Never allocates, never throws. The per-pixel loop is the shipped v1 --
-/// correct, and priced by its benchmark arm from birth; the word-parallel
-/// restructuring is the dense pipeline's optimization to claim once a
-/// caller's share is known.
 namespace impl {
 
-/// @brief One plane-row of the census: the comparisons of image row `y` against
-/// its `(dx, dy)` neighbours, packed into `dst`. **INTERNAL.**
-/// @note THE one definition of the census row, shared by the full-frame
-/// transform and the dense-disparity pipeline's streaming band -- a second
-/// copy is how the two would silently diverge. Writes every word of the
-/// row; padding bits end zero.
 #if defined(BINCV_CENSUS_SIMD)
 /// @brief Force the portable row, for the benchmark and the tests: the rule is
 /// that a vector arm is switchable off and the benchmark shows it is on.
@@ -146,6 +131,12 @@ inline unsigned censusMask16(const uint8_t* c, const uint8_t* n) {
 }
 #endif  // BINCV_CENSUS_SIMD
 
+/// @brief One plane-row of the census: the comparisons of image row `y` against
+/// its `(dx, dy)` neighbours, packed into `dst`. **INTERNAL.**
+/// @note THE one definition of the census row, shared by the full-frame
+/// transform and the dense-disparity pipeline's streaming band -- a second
+/// copy is how the two would silently diverge. Writes every word of the
+/// row; padding bits end zero.
 template <typename SrcT, typename WordType>
 inline void censusRow(const SrcT* img, size_t width, size_t height, size_t stride,
                       long long dx, long long dy, size_t y, WordType* dst) {
@@ -163,10 +154,10 @@ inline void censusRow(const SrcT* img, size_t width, size_t height, size_t strid
     const SrcT* rowN = img + static_cast<size_t>(yn) * stride;
 #if defined(BINCV_CENSUS_SIMD)
     // Sixteen comparisons per step over the interior; the scalar body keeps the
-    // border columns and every non-byte source. This transform priced at
-    // 27.5 ms/frame on the reference device (5x5, u32) with the bit built one
-    // pixel at a time -- pure byte compares, the same shape edgeThreshold's arm
-    // serves.
+    // border columns and every non-byte source. With the bit built one pixel at
+    // a time the transform costs 27.5 ms/frame on the reference device (a
+    // Raspberry Pi 4, 752x480, 5x5, uint32) -- pure byte compares, the same
+    // shape edgeThreshold's arm serves.
     if constexpr (sizeof(SrcT) == 1) {
         if (kBits >= 16 && censusSimdEnabled()) {
             const uint8_t* c8 = reinterpret_cast<const uint8_t*>(rowC);
@@ -218,6 +209,15 @@ inline void censusRow(const SrcT* img, size_t width, size_t height, size_t strid
 
 } // namespace impl
 
+/// @brief Census transform: plane `k` of `planes` gets
+/// `I(p + pattern.at[k]) > I(p)` at every pixel `p`. **API TIER 3.**
+/// @param img Row-major, `stride` ELEMENTS between rows, like every wide input.
+/// @param planes `K` caller-owned plane views, each `width x height`. Every word
+/// of every plane is written; padding bits end zero.
+/// @note Never allocates, never throws. On a byte source the interior of each row
+/// runs sixteen comparisons per step (SSE2 on x86-64, NEON on aarch64); the
+/// border columns and every wider source take the scalar body, which is
+/// also the oracle the vector arm is held to.
 template <size_t K, typename SrcT, typename WordType>
 inline void censusTransform(const SrcT* img, size_t width, size_t height, size_t stride,
                             const CensusPattern<K>& pattern,

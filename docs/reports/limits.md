@@ -11,8 +11,7 @@ separate columns** and are never averaged.
 
 **Every x86-64 figure here is the median of thirty pinned launches**, with the bootstrap 95%
 interval those thirty put around each ratio; aarch64 is the median of ten, with the same
-interval. The three
-threading rows near the end are the exception and say so.
+interval. Times are quoted to four significant figures, ratios and intervals to three.
 
 ## 1. At eight bits per pixel, the idea is gone
 
@@ -21,15 +20,16 @@ skip, and both sides store a byte.
 
 **Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
 
-`pyrDown`, 640×480 → 320×240, against `cv::pyrDown` on `CV_8U` at one thread:
+`pyrDown`, 640×480 → 320×240, against `cv::pyrDown` on `CV_8U` at one thread. Bold marks
+the shipped configuration:
 
 | arm | x86-64 (µs) | x86-64 ratio | aarch64 (µs) | aarch64 ratio |
 |---|---|---|---|---|
 | `cv::pyrDown`, `CV_8U` (the denominator) | 47.70 | — | 516.5 | — |
-| **binCV `BOX_2x2`, 1 bit in → 3 bits out (shipped)** | **30.70** | 1.556× [1.536, 1.597] | **93.8** | **5.509× [5.480, 5.549]** |
-| binCV `GAUSSIAN_5x5`, 1 → 3 | 184.95 | 0.259× [0.255, 0.266] | 599.1 | 0.862× [0.858, 0.868] |
-| binCV `BOX_2x2`, 8 → 8 | 651.9 | 0.0746× [0.0733, 0.0760] | 2571.9 | 0.2007× [0.2001, 0.2019] |
-| binCV `GAUSSIAN_5x5`, 8 → 8 (`cv::pyrDown`'s shape) | 2040.0 | **0.0235× [0.0233, 0.0242]** | 7359.9 | **0.0701× [0.0698, 0.0706]** |
+| **binCV `BOX_2x2`, 1 bit in → 3 bits out (shipped)** | 30.70 | 1.56× [1.54, 1.60] | 93.8 | 5.51× [5.48, 5.55] |
+| binCV `GAUSSIAN_5x5`, 1 → 3 | 185.0 | 0.259× [0.255, 0.266] | 599.1 | 0.862× [0.858, 0.868] |
+| binCV `BOX_2x2`, 8 → 8 | 651.9 | 0.0746× [0.0733, 0.0760] | 2572 | 0.201× [0.200, 0.202] |
+| binCV `GAUSSIAN_5x5`, 8 → 8 (`cv::pyrDown`'s shape) | 2040 | 0.0235× [0.0233, 0.0242] | 7360 | 0.0701× [0.0698, 0.0706] |
 
 An `8 → 8` call is **correct, not fast**, and it is documented that way rather than hidden.
 The structural reason is accumulator width: a bit-sliced filter needs enough accumulator
@@ -40,28 +40,46 @@ does in one instruction. Past a certain depth that is simply the better machine.
 
 ## 2. The crossover is real, and it moves with the architecture
 
-The same geometry across input and output bit widths, one process per arm because the sweep
-is cache-invalid in a single one. Each machine has its own `cv::pyrDown` denominator in the
-first row:
+The same geometry across input and output bit widths, through the generic filtered path
+(`pyrDownFiltered<Box2x2, NOut, NIn>`), one process per arm — timing every width in one
+process leaves all of their planes resident and inflates the cheap arms. Each machine has its
+own `cv::pyrDown` denominator in the first row:
 
 | arm | x86-64 (µs) | x86-64 ratio | aarch64 (µs) | aarch64 ratio |
 |---|---|---|---|---|
-| `cv::pyrDown`, `CV_8U` (the denominator) | 47.85 | — | 517.75 | — |
-| **box filter, 1 → 3 (shipped shape)** | **32.20** | **1.474× [1.455, 1.504]** | **275.85** | **1.878× [1.870, 1.923]** |
-| box filter, 1 → 1 | 79.05 | 0.605× [0.597, 0.617] | 319.70 | **1.633× [1.613, 1.696]** |
-| box filter, 2 → 2 | 62.35 | 0.772× [0.758, 0.779] | 205.00 | **2.526× [2.518, 2.588]** |
-| box filter, 3 → 3 | 94.30 | 0.508× [0.495, 0.516] | 306.50 | **1.689× [1.685, 1.730]** |
-| box filter, 4 → 4 | 132.65 | 0.358× [0.352, 0.364] | 444.15 | **1.166× [1.162, 1.195]** |
-| box filter, 5 → 5 | 176.40 | 0.272× [0.268, 0.277] | 647.30 | 0.801× [0.799, 0.820] |
-| box filter, 8 → 8 | 645.30 | 0.0736× [0.0723, 0.0753] | 2574.75 | 0.201× [0.201, 0.205] |
+| `cv::pyrDown`, `CV_8U` (the denominator) | 47.85 | — | 516.3 | — |
+| box filter, 1 → 3 (generic filtered path; the shipped kernel is the row in §1) | 32.20 | 1.47× [1.46, 1.50] | 116.1 | 4.45× [4.43, 4.47] |
+| box filter, 1 → 1 | 79.05 | 0.605× [0.597, 0.617] | 87.70 | 5.89× [5.87, 5.92] |
+| box filter, 2 → 2 | 62.35 | 0.772× [0.758, 0.779] | 205.0 | 2.52× [2.51, 2.53] |
+| box filter, 3 → 3 | 94.30 | 0.508× [0.495, 0.516] | 306.6 | 1.68× [1.68, 1.69] |
+| box filter, 4 → 4 | 132.7 | 0.358× [0.352, 0.364] | 444.2 | 1.16× [1.16, 1.17] |
+| box filter, 5 → 5 | 176.4 | 0.272× [0.268, 0.277] | 648.2 | 0.797× [0.794, 0.802] |
+| box filter, 8 → 8 | 645.3 | 0.0736× [0.0723, 0.0753] | 2574 | 0.201× [0.200, 0.202] |
+
+**The aarch64 column was re-taken after a benchmark-build defect was found and fixed.** The
+column first published read the generic `1 → 3` call at 275.9 µs where `pyrfilter_benchmark`
+read the identical call at 116.1 µs on the same commit. Re-measured in one session, both
+reproduced to 0.1%, and a probe timing the call on four input densities read 116 µs each
+time. The cause was the benchmark's translation unit: fifteen heavy arms instantiated in one
+file exhaust GCC's per-unit inlining budget, the pyramid's row helpers stay out of line, and
+the cheap arms pay a call per row while the compute-bound `8 → 8` arms do not move.
+`benchmark/CMakeLists.txt` now raises the unit-growth caps for that one target, and the
+column above is ten launches of the rebuilt benchmark
+([log](logs/bitwidth_crossover-aarch64-launches.log), taken at `211acaa`): it agrees with
+`pyrfilter_benchmark` on every arm the two share, and the cheap arms read 2.4–3.6× faster
+than first published. The x86-64 column predates the build change; on that host the two
+benchmarks already agreed (32.20 against 32.40 µs), so it stands until it is re-taken.
 
 **The crossover is not a property of the algorithm — it moves by several bits between the two
 machines.** On the reference device the bit-sliced box filter stays ahead of `cv::pyrDown`
-through four bits per pixel and crosses between four and five. On x86-64 the only shape that
-beats it is the shipped one, and even `1 → 1` is behind at 0.605×.
+through four bits per pixel (1.16× at `4 → 4`) and crosses between four and five (0.797× at
+`5 → 5`); at one bit in it is 4.45–5.89× ahead. On x86-64 the only shape that beats it is the
+shipped one, and even `1 → 1` is behind at 0.605×.
 
-The reason is the denominator, not binCV: OpenCV's x86 pyramid is AVX2-dispatched and very
-good, and its aarch64 pyramid is relatively weaker against the same machine. binCV's own
+The reason is the denominator, not binCV: OpenCV's x86-64 build dispatches at run time over
+SSE4.1 through AVX-512 code paths (its build line at the top of every x86-64 log reads
+`Dispatched code generation: SSE4_1 SSE4_2 FP16 AVX AVX2 AVX512_SKX`) and its pyramid is
+very good; its aarch64 pyramid is relatively weaker against the same machine. binCV's own
 times scale about as expected between the two platforms; OpenCV's do not. This is the single
 most important caveat in these reports, and it generalises — **a ratio measured on a desktop
 is not a ratio on a deployment part, in either direction.**
@@ -77,34 +95,21 @@ and where it has done less the same binCV code wins.
 
 | operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | why |
 |---|---|---|---|---|---|---|---|---|
-| FAST, wide-image entry point | `cv::FAST` | 0.359 ms | **0.345 ms** | 1.039× [1.033, 1.048] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] | parity with a mature vectorised kernel |
-| `erode`, 5×5 ellipse | `cv::erode` | 0.2238 ns/px | 0.6985 ns/px | 0.319× [0.318, 0.323] | 1.85196 ns/px | 3.59587 ns/px | 0.514× [0.510, 0.522] | a non-separable element costs one shifted-OR per set element |
-| `erode`, `BORDER_REPLICATE` | `cv::erode` | 0.09870 ns/px | 0.1489 ns/px | 0.666× [0.659, 0.672] | 0.69852 ns/px | 0.92952 ns/px | 0.752× [0.741, 0.769] | a rim pass `BORDER_CONSTANT` does not need |
-| `erode`, `BORDER_REFLECT_101` | `cv::erode` | 0.09931 ns/px | 0.1553 ns/px | 0.635× [0.628, 0.645] | 0.70016 ns/px | 0.94370 ns/px | 0.742× [0.727, 0.759] | the same |
-| `erode`, 3×3 rect | `cv::erode` | 0.1013 ns/px | **0.09595 ns/px** | 1.053× [1.035, 1.066] | 0.73595 ns/px | **0.72189 ns/px** | 1.021× [0.991, 1.040] | a dead heat |
-| `countNonZero` | `cv::countNonZero` | 0.01501 ns/px | **0.009270 ns/px** | 1.62× [1.61, 1.63] | 0.16921 ns/px | **0.06365 ns/px** | 2.658× [2.618, 2.673] | both sides bandwidth-bound; binCV moves less data |
+| FAST, wide-image entry point | `cv::FAST` | 0.359 ms | 0.345 ms | 1.04× [1.03, 1.05] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] | parity with a mature vectorised kernel |
+| `erode`, 5×5 ellipse | `cv::erode` | 0.2238 ns/px | 0.6985 ns/px | 0.319× [0.318, 0.323] | 1.852 ns/px | 3.596 ns/px | 0.514× [0.510, 0.522] | a non-separable element costs one shifted-OR per set element |
+| `erode`, `BORDER_REPLICATE` | `cv::erode` | 0.09870 ns/px | 0.1489 ns/px | 0.666× [0.659, 0.672] | 0.6985 ns/px | 0.9295 ns/px | 0.752× [0.741, 0.769] | a rim pass `BORDER_CONSTANT` does not need |
+| `erode`, `BORDER_REFLECT_101` | `cv::erode` | 0.09931 ns/px | 0.1553 ns/px | 0.635× [0.628, 0.645] | 0.7002 ns/px | 0.9437 ns/px | 0.742× [0.727, 0.759] | the same |
+| `erode`, 3×3 rect | `cv::erode` | 0.1013 ns/px | 0.09595 ns/px | 1.05× [1.04, 1.07] | 0.7360 ns/px | 0.7219 ns/px | 1.02× [0.991, 1.04] | a dead heat |
+| `countNonZero` | `cv::countNonZero` | 0.01501 ns/px | 0.009270 ns/px | 1.62× [1.61, 1.63] | 0.1692 ns/px | 0.06365 ns/px | 2.66× [2.62, 2.67] | OpenCV is bandwidth-bound; binCV moves an eighth of the data at a fifth of the rate |
 
 Parity on FAST ships as parity. A caller who is holding bytes should not be told to pack them
 first, and for that caller the honest answer is that binCV costs nothing to adopt and gains
 nothing either. The [bit-plane overload](features.md#fast) is where the thesis actually
-applies, and it is 1.65× on x86 and 2.371× on the device.
+applies, and it is 1.65× on x86-64 and 2.37× on the device.
 
-**`goodFeaturesToTrack` has left this list, and the way it left is worth keeping.** It was
-published here twice and was wrong both times. The first version read 0.53× on *both*
-architectures and concluded that this was "a property of the operation rather than of one
-machine's dispatch"; in fact it had timed the frame-map spelling while that spelling was
-still on an older response kernel than the streaming form every pipeline here calls. The
-second version read 0.92× on x86 and 1.45× on the device and called that a genuine split.
-It was not: those numbers were taken before the response sweep's tail was rewritten.
-
-**A third thing was wrong with both, and it was the denominator.** All of those figures were
-against a hand-written OpenCV pipeline reproducing binCV's semantics, not against the call a
-caller makes. Against stock `cv::goodFeaturesToTrack` this operation *was* on this page until
-recently — 0.737× on x86-64 — and the page never said so, because the headline column used
-the other baseline. It leaves the list now on the strength of a measurement against the right
-one: **1.383× on x86 and 2.421× on the device**, ahead on both, so the row belongs in
-[features.md](features.md#corner-detection). What survives of the original point is the
-second half of this section's thesis rather than the first: the margin is wider against the
+`goodFeaturesToTrack` is not on this list. Against stock `cv::goodFeaturesToTrack` it reads
+1.38× on x86-64 and 2.42× on the device, and the row is in
+[features.md](features.md#corner-detection). Its margin, like FAST's, is wider against the
 denominator doing less vector work.
 
 ## 4. A footprint win is not a speed win
@@ -116,20 +121,18 @@ arm, so no ratio.
 **The frame-size sweep is the one that isolates the question.** The point count is fixed at
 140, so the compute is identical and only the data grows:
 
-| frame | input, KB at 1 bit | time, x86-64 (µs/point) | time, aarch64 (µs/point) |
+| frame | input, KiB at 1 bit | time, x86-64 (µs/point) | time, aarch64 (µs/point) |
 |---|---|---|---|
 | 320×240 | 9.4 | 4.658 | 25.64 |
 | 640×480 | 37.5 | 4.141 | 23.13 |
 | 1280×960 | 150.0 | 4.792 | 26.99 |
 | 1920×1440 | 337.5 | 4.640 | 27.23 |
 
-Thirty-six times more data moves the per-point cost by **0.4%** on x86 — 4.658 µs/point at
+Thirty-six times more data moves the per-point cost by **0.4%** on x86-64 — 4.658 µs/point at
 320×240 against 4.640 at 1920×1440, which is no change at all — and **6%** on the device,
 which has a 1 MiB shared L2 where a residency effect would show most clearly if there were
-one. The x86 column read 12% before it was taken at thirty launches, and all of that 12% was
-one slow launch at the largest frame; the device column read 5% at one launch and 6% at ten,
-which is the same answer. A 31×31 window is 120 bytes at one bit per pixel, two to four
-cache lines, and it would be two to four cache lines as bytes too.
+one. A 31×31 window is 120 bytes at one bit per pixel, two to four cache lines, and it would
+be two to four cache lines as bytes too.
 
 **The point-count sweep varies the compute as well as the data**, so it is not evidence
 either way. It is here because a per-point cost that stayed flat across a 33-fold change in
@@ -147,11 +150,6 @@ point count is worth seeing:
 **The memory result and the speed result are independent here.** The footprint decides what
 fits on a device; it does not make this kernel fast, and further speed has to come from doing
 less work rather than from touching less data.
-
-Both columns now have all six. The two aarch64 entries that read `—` were point counts the
-old single device launch did not run; ten launches of the same binary give them at no extra
-cost ([x86-64](logs/lk_memorybound-x86_64-launches.log),
-[aarch64](logs/lk_memorybound-aarch64-launches.log)).
 
 ## The algorithm caps the packing advantage
 
@@ -173,42 +171,23 @@ path it claims. On x86-64 the eight-keypoint AVX2 batch in the tracker, toggled 
 in the same binary, **thirty pinned launches per arm over the whole 1709-frame sequence**
 ([off](logs/lk_batch_off-x86_64-launches.log), [on](logs/lk_batch_on-x86_64-launches.log)).
 The two arms are two settings of the same measurement on the same machine, not two
-architectures:
+architectures; bold marks the shipped setting:
 
 | arm | binCV tracking, ms/frame | binCV pipeline, ms/frame | OpenCV pipeline, ms/frame | ratio |
 |---|---|---|---|---|
-| `BINCV_LK_BATCH=0` | 1.3040 | 1.5610 | 3.7725 | 2.415× [2.411, 2.422] |
-| **`BINCV_LK_BATCH=1`** | **0.7070** | **0.9620** | 3.7445 | **3.900× [3.875, 3.917]** |
+| `BINCV_LK_BATCH=0` | 1.304 | 1.561 | 3.773 | 2.42× [2.41, 2.42] |
+| **`BINCV_LK_BATCH=1`** | 0.7070 | 0.9620 | 3.745 | 3.90× [3.88, 3.92] |
 
-**The batch is worth 1.844× [1.822, 1.865] on tracking** and takes the whole pipeline from
-2.42× to 3.90×. It is bit-exact with the scalar path. An earlier reading of the same pair —
-two runs an arm over 400 frames — put the tracking figure between 1.66× and 1.88×; thirty
-launches an arm narrow that to the interval above, which is what the extra launches bought.
-
-**Both arms were re-taken together, and the pipeline column moved for a reason worth
-stating.** Tracking did not change — 0.7050 → 0.7070 with the batch on, 1.3140 → 1.3040 with
-it off — but the pipeline ratio went 3.632× → 3.900×, because **the detect stage is 1.93×
-faster: 0.1390 → 0.0720 ms/frame.** That is `goodFeaturesToTrack`'s selection work
-([#83](https://github.com/ryanhou28/bincv/issues/83),
-[#84](https://github.com/ryanhou28/bincv/issues/84)) arriving in a pipeline figure taken
-before it, and the saving flows through almost exactly: 0.067 ms off detect against 0.0665 ms
-off the pipeline.
-
-**Nothing could have told a reader that.** The `BINCV_LK_BATCH=1` log had been taken from a
-modified tree, so it was stamped `(dirty)`, named no commit, and
-`check_figure_staleness.py` could not map it at all. Given a clean stamp it reports STALE and
-names `ops/corner.hpp` — the file those two PRs changed. The figure sat 1.93× wrong on one
-stage with the one gate that would have caught it switched off by a stray build artifact
-([#89](https://github.com/ryanhou28/bincv/issues/89)).
+**The batch is worth 1.84× [1.82, 1.87] on tracking** and takes the whole pipeline from
+2.42× to 3.90×. It is bit-exact with the scalar path.
 
 The batch-on sweep is also an independent repeat of the pipeline figure in
-[feature-tracking.md](feature-tracking.md), through a different command line: **3.900×
-[3.875, 3.917] here against that page's 3.969× [3.935, 4.004]**, 1.8% apart. The two are not
-at the same commit — this sweep is at `5c6a47d` and that page's at `880704b` — so they are
-not expected to coincide, and 1.8% across an intervening detect-stage change is the check
-that the protocol reproduces rather than just the row. Before the re-take the same pair read
-3.632× against 3.658×, 0.7% apart with overlapping intervals; both readings agree that the
-two command lines measure the same quantity.
+[feature-tracking.md](feature-tracking.md), through a different command line: **3.90×
+[3.88, 3.92] here against that page's 3.97× [3.94, 4.00]**, 1.8% apart. The two are not
+at the same commit — this sweep was taken at `5c6a47d` (on `main` as `0d6e302`) and that
+page's at `880704b` (on `main` as `8729e05`) — so they are not expected to coincide, and
+1.8% across an intervening change to the detect stage is the check that the protocol
+reproduces rather than just the row.
 
 This machinery exists because it has caught real errors. A vector block was once compiled out
 entirely by a mis-attached `#define`, and three consecutive "improvements" were measured
@@ -216,8 +195,8 @@ against it. A build that reaches binCV's headers without linking the `bincv_core
 loses its ISA flags silently — the kernels are still correct, still pass every test, and run
 substantially slower with nothing to indicate why. That is why `simdStatusString()` exists:
 `feature_tracking_sequence` prints it, and the feature tracking logs in [logs/](logs/)
-open with it, showing `NEON=yes` on the device and `AVX2=yes popcount=hardware` on x86. Read that line before
-trusting any number you take from these benchmarks on your own machine.
+open with it, showing `NEON=yes` on the device and `AVX2=yes popcount=hardware` on x86-64.
+Read that line before trusting any number you take from these benchmarks on your own machine.
 
 ## What is not measured at all
 
@@ -227,12 +206,13 @@ Nothing in these reports says anything about them.
 **Cortex-M has been built and partly measured, and none of it is in these reports.** binCV
 runs on an STM32H753ZI (Cortex-M7): the reductions are bit-exact against the library's own
 entry point, a 752×480 frame occupies 46,080 bytes where a `CV_8U` one would occupy 360,960,
-and the tracker's staging buffers measure 4,120 bytes at N = 2 against that board's 16 KB
-stack — so the constraint this section expected to bite did not. What does **not** exist for
-that part is any OpenCV comparison, any pipeline or tracker timing, and any figure at the
-part's full clock; the one operation timed there ran at the reset default of 64 MHz.
-`stagingStackBytes<N, W>()` gives the exact stack figure for a configuration, and the
-build-time budget fails compilation rather than overflowing at run time.
+and the tracker's staging buffers measure 4,120 bytes at the shipped pyramid depth of 2 bits
+per pixel against that board's 16 KiB stack — so the constraint this section expected to
+bite did not. What does **not** exist for that part is any OpenCV comparison, any pipeline or
+tracker timing, and any figure at the part's full clock; the one operation timed there ran at
+the reset default of 64 MHz. `stagingStackBytes<N, W>()` gives the exact stack figure for a
+configuration, and the build-time budget fails compilation rather than overflowing at run
+time.
 
 **No trajectory-accuracy claim is made anywhere in these reports.** binCV produces features
 and flow; what a pose estimator does with them is a property of the whole integration.
@@ -254,7 +234,13 @@ BINCV_LK_BATCH=0 ./build/benchmark/feature_tracking_sequence <dir> 400
 BINCV_LK_BATCH=1 ./build/benchmark/feature_tracking_sequence <dir> 400
 ```
 
-Logs — the sweep behind each column, and the single launch each replaced (thirty launches on
+Taken as a launch sweep — `scripts/run_launches.sh -n 30 ./build/benchmark/<bench>` on
+x86-64, `scripts/run_launches.sh -n 10 -g ./build/benchmark/<bench>` on the device — and
+read back with `scripts/aggregate_launches.py`.
+
+## Logs
+
+The sweep behind each column, and the single launch each replaced (thirty launches on
 x86-64, ten on the device):
 [pyrDown](logs/pyrfilter-x86_64-launches.log), [single](logs/pyrfilter-x86_64.log), [aarch64](logs/pyrfilter-aarch64-launches.log), [single](logs/pyrfilter-aarch64.log) ·
 [crossover](logs/bitwidth_crossover-x86_64-launches.log), [single](logs/bitwidth_crossover-x86_64.log), [aarch64](logs/bitwidth_crossover-aarch64-launches.log), [single](logs/bitwidth_crossover-aarch64.log) ·
@@ -263,3 +249,19 @@ x86-64, ten on the device):
 [features](logs/features-x86_64-launches.log), [single](logs/features-x86_64.log), [aarch64](logs/feature-aarch64-launches.log), [single](logs/features-aarch64.log) ·
 [LK memory bound](logs/lk_memorybound-x86_64-launches.log), [single](logs/lk_memorybound-x86_64.log), [aarch64](logs/lk_memorybound-aarch64-launches.log), [single](logs/lk_memorybound-aarch64.log) ·
 LK batch arm [off](logs/lk_batch_off-x86_64-launches.log), [on](logs/lk_batch_on-x86_64-launches.log), [the two-run reading](logs/lk_batch_arm-x86_64.log)
+
+Logs marked stale in [expected-stale.txt](logs/expected-stale.txt) were taken before a
+bit-identical change to the code beneath them; the file records which files moved and why
+the figure stands.
+
+## Changes to published figures
+
+| date | row | previous | current | why |
+|---|---|---|---|---|
+| 2026-09-21 | every x86-64 cell in §1–§3 | one launch | median of thirty launches, with interval | a single launch is one draw from a distribution no log had characterised |
+| 2026-09-21 | §4 frame-size sweep, x86-64 change in per-point cost | 12% | 0.4% | all of the 12% was one slow launch at the largest frame |
+| 2026-09-21 | §4 frame-size sweep, aarch64 change in per-point cost | 5% (one launch) | 6% (ten launches) | re-taken |
+| 2026-09-22 | `goodFeaturesToTrack`, formerly in §3 | 0.530× on both machines; then 0.920× x86-64 / 1.45× aarch64, both against a hand-written OpenCV pipeline | 1.38× / 2.42× against stock `cv::goodFeaturesToTrack`, in features.md | the first figure timed the frame-map spelling on an older response kernel; the second was taken before the response sweep's tail was rewritten; the denominator was changed to the call a caller makes |
+| 2026-09-24 | LK batch, gain on tracking | 1.66×–1.88× (two runs an arm over 400 frames) | 1.84× [1.82, 1.87] (thirty launches an arm, 1709 frames) | re-taken |
+| 2026-09-24 | LK batch, pipeline ratio with the batch on | 3.63× | 3.90× | the detect stage became 1.93× faster (0.1390 → 0.0720 ms/frame) with the selection-stage optimisation in `ops/corner.hpp`; the earlier log was taken from a modified tree, so the staleness gate could not name the change |
+| 2026-09-29 | crossover table, aarch64 column | `1 → 3` 275.9 µs, 1.88×; `1 → 1` 319.7 µs, 1.63× (and the other box arms) | 116.1 µs, 4.45×; 87.70 µs, 5.89× | the benchmark unit's exhausted inlining budget kept the pyramid's row helpers out of line for the cheap arms; caps raised, re-taken at `211acaa` |

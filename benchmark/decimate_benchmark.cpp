@@ -1,4 +1,4 @@
-// -- horizontal decimation by two: which route, and at what footprint?
+// Horizontal decimation by two: which route, and at what footprint?
 //
 // The decision rule this benchmark feeds was committed BEFORE it ran, and the
 // short form is:
@@ -6,7 +6,7 @@
 // 1. The frame-masked route (C) ships only if it beats the better word-local
 // route by >= 1.5x with non-overlapping spreads at both word types on
 // 640x480 -> 320x240. It is the only one that costs bytes, and below that
-// bar memory wins (CLAUDE.md's tiebreak).
+// bar memory wins (the tiebreak whenever speed and footprint conflict).
 // 2. Between the two zero-byte routes (A, B) speed alone decides, and a
 // difference inside the larger spread is a null result that takes the
 // simpler one -- the gather loop.
@@ -48,9 +48,9 @@
 // between them is the horizontal half alone.
 //
 // On x86_64 this is INDICATIVE ONLY -- a desktop host's spread decides nothing.
-// The authoritative run is
+// The authoritative run is on the reference device, pinned and launched ten times:
 //
-//./scripts/run_on_pi.sh pi4 './benchmark/decimate_benchmark'
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/decimate_benchmark
 
 #include <cstddef>
 #include <cstdint>

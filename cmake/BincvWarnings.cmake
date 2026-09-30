@@ -1,9 +1,7 @@
 # Project warning policy.
 #
-# Nothing in this project used to enable a single warning flag, so the
-# "all three configurations must build warning-free" gate in CLAUDE.md and
-# GETTING_STARTED.md passed vacuously. This file is what gives that sentence
-# teeth.
+# An "every configuration must build warning-free" gate with no warning flags
+# enabled passes vacuously. This file is what gives that sentence teeth.
 #
 # Usage: link `bincv_warnings` PRIVATE into every FIRST-PARTY target. It is
 # deliberately NOT attached to the bincv_core INTERFACE target: a downstream
@@ -79,7 +77,7 @@ else()
     # the kinder default -- but "kinder" is only defensible because the flag is
     # not optional where it counts: scripts/verify.sh configures every
     # configuration with -DBINCV_WERROR=ON, and nothing may be committed until
-    # verify.sh is green (CLAUDE.md).
+    # verify.sh is green.
     #
     # verify.sh ALSO greps its build logs for "warning:". That scan catches
     # diagnostics -Werror does not turn into errors -- linker warnings, CMake's

@@ -30,8 +30,9 @@
 /// **That 4x instruction ratio buys nothing measurable, and the measurement is
 /// the point.** OpenCV also instantiates `matchHamming_gpu<int>`, so a `CV_32S`
 /// header over the IDENTICAL bytes gets eight popcounts too -- and on the
-/// reference GPU the two OpenCV arms are indistinguishable: 5.198 ms against
-/// 5.186 ms at 5000 x 5000, 1.00x, with the ranges overlapping. The profiler
+/// reference GPU (RTX 3070 Ti) the two OpenCV arms are indistinguishable:
+/// 5.198 ms against 5.186 ms at 5000 x 5000 on the default stream, from
+/// cuda_sparse_benchmark, with the ranges overlapping. The profiler
 /// says why in one reading: that kernel's dominant stall is `barrier` (35,540
 /// samples of ~108,000), then long-scoreboard latency; `math_pipe_throttle` --
 /// the stall that would rise if popcount ISSUE were the limit -- is 871, under
@@ -43,8 +44,12 @@
 /// of peak SM throughput with 0.25% DRAM and ~8,000 stall samples, where
 /// `matchUnrolledCached` runs at 62.9% with 12.5% DRAM and ~108,000. Two
 /// `__syncthreads()` per launch against one per descriptor chunk per train
-/// block. Measured end to end: 0.471 ms against 5.19 ms at 5000 x 5000, ranges
-/// disjoint.
+/// block. Measured with both arms on one explicit stream, 5000 x 5000 on the
+/// reference GPU, medians of 7 process runs from cuda_role_benchmark: 0.2105 ms
+/// against `BFMatcher::knnMatchAsync(k=2)`'s 2.0087 ms, **9.51x**. (The
+/// default-stream figures above are larger on both sides because OpenCV pays a
+/// full device synchronization per call there; they are quoted only for the
+/// CV_8U-versus-CV_32S comparison, which is between two OpenCV arms.)
 ///
 /// Memory is NOT a wash, and that was a surprise rather than a claim. By
 /// arithmetic the two sides hold the same arrays -- two descriptor blocks and a
@@ -298,6 +303,11 @@ cudaError_t blockMatchImpl(const DeviceBlockMatchLevel* levels, size_t levelCoun
 /// host's is `size_t`; see features.hpp for the domain and why it is not a
 /// restriction on this backend. `train.count` is checked against it.
 /// @note Never allocates and takes no scratch.
+/// @note Bit-exact against the host `bincv::matchDescriptors` -- every match
+/// record, including the tie rule -- both arms, proven by
+/// test_cuda_sparse_match; so are `matchDescriptorsGated`,
+/// `stereoDescriptorMatch`, `stereoRefineDisparity` and
+/// `calcOpticalFlowBlockMatch` against their host twins.
 inline cudaError_t matchDescriptors(DeviceDescriptorSetConstView query,
                                     DeviceDescriptorSetConstView train,
                                     DeviceDescriptorMatch* dOut, unsigned maxRatio = 80,

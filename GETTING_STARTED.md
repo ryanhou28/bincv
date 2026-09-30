@@ -32,16 +32,24 @@ cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
 | `BINCV_BUILD_TESTS` | ON | Build the suites and register them with ctest |
 | `BINCV_BUILD_BENCHMARKS` | ON | Benchmarks. The binCV-versus-binCV ones build without OpenCV; the comparisons are skipped without it |
 | `BINCV_BUILD_EMBEDDED` | OFF | The bare-metal targets under `targets/`. Needs an arm-none-eabi cross build — see `cmake/toolchain-cortex-m7.cmake` |
-| `BINCV_X86_POPCNT` | ON | Build with `-mpopcnt`. Off is supported and slower; see the comment in `CMakeLists.txt` |
+| `BINCV_X86_POPCNT` | ON | Build with `-mpopcnt`. Every published x86-64 figure has it on; off builds and runs, about 3.75× slower on the tracking pipeline (see `CMakeLists.txt`) |
+| `BINCV_USE_GTEST` | AUTO | The test backend: a system GoogleTest if one is found, else a fetch from GitHub at configure time. `OFF` uses the built-in dependency-free harness, which is what an offline or `-fno-exceptions` build wants |
+| `BINCV_WERROR` | OFF | Warnings fatal. The verify gate turns it on |
+| `BINCV_CUDA` | OFF | The CUDA backend under `backends/cuda/` — see [backends/cuda/README.md](backends/cuda/README.md) |
 
 ## Benchmark
 
+One operation against its OpenCV counterpart, in the OpenCV configuration (the
+`*_opencv_benchmark` binaries and `fill_benchmark` need it; the binCV-only ones build in
+every configuration):
+
 ```bash
+./build/benchmark/logic_benchmark          # bitwise logic against cv::bitwise_*
 ./build/benchmark/fill_benchmark --width 640 --height 480 \
     --iterations 100 --dtype binary --sparsity 0.5
 ```
 
-Or the full sweep, `./scripts/run_all_benchmarks.sh`.
+`./scripts/run_all_benchmarks.sh` runs every benchmark once into a directory you name.
 
 **Always benchmark a Release build**, and read the rules below on the comparison
 denominator before quoting a ratio.
@@ -130,9 +138,17 @@ image-processing half that feeds the optimizer.) It is the best starting point f
 larger than one operation.
 
 ```bash
+./build/examples/vio_frontend tests/images                # two frames shipped in the repo
 ./build/examples/vio_frontend <directory-of-png-frames>   # OpenCV builds
 ./build/examples/vio_frontend frames.bsq                  # any build, core-only included
 ```
+
+The two frames under `tests/images` are enough to see it run. For a real sequence the
+reports use EuRoC MAV `V1_02_medium`, camera `cam0` (see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the dataset's citation and where it
+is published): point the example at the sequence's `mav0/cam0/data` directory, or turn that
+directory into a blob for a core-only build with
+`scripts/make_sequence_blob.py <dir> -o v1_02.bsq` (needs `numpy` and `cv2` or Pillow).
 
 With OpenCV present it reads PNG through `cv::imread` and runs the sensor stage in
 OpenCV's vocabulary — deliberately, to show the caller's half of the input boundary. A
@@ -157,7 +173,7 @@ the RANSAC inlier rate.
 
 ## Embedded targets
 
-Two things to set before you build for a small part:
+One thing to set before you build for a small part:
 
 ```cpp
 // The tracker stages windows on the stack. Declare what you have and the build
@@ -167,8 +183,28 @@ Two things to set before you build for a small part:
 
 `bincv::stagingStackBytes<N, WordType>()` gives the exact figure for a configuration.
 
-binCV never allocates inside a kernel and never throws; scratch buffers, where an
-operation needs one, are parameters you provide.
+Kernels never allocate and never throw; scratch buffers, where an operation needs one, are
+parameters you provide. Container constructors and `wrap` validate their geometry through
+`BINCV_THROW`, which throws when exceptions are enabled and prints and aborts when they are
+not (`-fno-exceptions`, or `BINCV_NO_EXCEPTIONS`), so a core-only build has no exception
+path at all.
+
+### Building for Cortex-M7
+
+The bare-metal target under `targets/stm32h753/` (NUCLEO-H753ZI) builds with an
+`arm-none-eabi` GCC on `PATH`:
+
+```bash
+cmake -S . -B build-m7 \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-cortex-m7.cmake \
+      -DBINCV_BUILD_EMBEDDED=ON -DBINCV_BUILD_TESTS=OFF \
+      -DBINCV_USE_OPENCV=OFF -DBINCV_BUILD_BENCHMARKS=OFF
+cmake --build build-m7 --target bincv_m7
+```
+
+[targets/stm32h753/README.md](targets/stm32h753/README.md) says how to flash the image and
+read its report, and what was measured on that part. `scripts/verify_cortex_m.sh` is the
+compile-only gate for that architecture.
 
 ## Conventions
 

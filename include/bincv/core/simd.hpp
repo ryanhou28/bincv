@@ -5,7 +5,7 @@
 /// stops one of them from going missing. **API TIER 3.**
 ///
 /// ---------------------------------------------------------------------------
-/// THE FAST PATH USED TO RIDE ON A CMAKE TARGET, AND MISSING IT WAS SILENT
+/// A FAST PATH THAT DEPENDS ON A CMAKE TARGET GOES MISSING SILENTLY
 ///
 /// `BINCV_HAVE_NEON` and `-mpopcnt` are INTERFACE properties of the `bincv_core` CMake
 /// target. binCV is header-only, so an integrator can do the natural thing --
@@ -13,16 +13,16 @@
 /// every NEON kernel `#ifdef`-ed out. Nothing warns, and nothing computes a different
 /// answer, because the vector kernels are bit-exact with the scalar ones.
 ///
-/// Reported from outside, measured on a Pi 4:
+/// Measured on a Raspberry Pi 4 (aarch64), keypoint tracking of one frame:
 ///
 /// | keypoint tracking | |
 /// |---|---|
-/// | include path only | **42.83 ms** |
-/// | linking `bincv_core` | **19.03 ms** |
+/// | include path only | 42.83 ms |
+/// | linking `bincv_core` | 19.03 ms |
 ///
-/// **2.25x from one CMake line**, and without catching it they would have reported that
-/// binCV's tracker is slower than OpenCV's on ARM. Same shape as the `uint64_t` trap
-/// and invisible for the same reason.
+/// **2.25× from one CMake line**, with no diagnostic in between -- an integrator who
+/// misses it reports that binCV's tracker is slower than OpenCV's on ARM. The
+/// `uint64_t` word-type trap (core/types.hpp) is invisible for the same reason.
 ///
 /// ---------------------------------------------------------------------------
 /// THE FIX IS DETECTION, NOT A DIAGNOSTIC
@@ -31,7 +31,7 @@
 /// `__ARM_NEON` and `__aarch64__` are defined with no flags at all -- which means
 /// `BINCV_HAVE_NEON` never needed to come from CMake on that target, and making it do so
 /// is what tied the fast path to a link line. This header defines it from the
-/// compiler's own macros, so **an include-only integration on aarch64 now gets the NEON
+/// compiler's own macros, so **an include-only integration on aarch64 gets the NEON
 /// kernels**. The CMake definition stays for armv7, where `__ARM_NEON` appears only with
 /// `-mfpu=neon` and the flag genuinely is a build-system choice.
 ///
@@ -45,9 +45,9 @@
 /// USE IT
 ///
 /// ```cpp
-/// std::printf("binCV: %s\n", bincv::simdStatusString);
-/// // binCV SIMD: NEON=yes AVX2=n/a popcount=hardware (all fast paths active)
-/// // binCV SIMD: NEON=NO AVX2=n/a popcount=software (SLOW -- link bincv_core)
+/// std::printf("%s\n", bincv::simdStatusString());
+/// // binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+/// // binCV SIMD: NEON=NO AVX2=yes popcount=SOFTWARE (SLOW -- link the bincv_core target, do not just add its include path)
 /// ```
 
 // -------------------------------------------------------------------------------
@@ -56,11 +56,10 @@
 // three of them gate BEFORE their first core include, so relying on transitive
 // inclusion would have re-created that silent loss in a new place.
 // -------------------------------------------------------------------------------
-// `BINCV_NO_NEON` forces the scalar arm, and it is not a convenience: CLAUDE.md
-// requires that a vector arm be switchable off so a benchmark can time both and show
-// which one it is running. `BINCV_HAVE_NEON` used to be that switch by accident --
-// leaving it undefined disabled NEON -- and auto-defining it would have taken the
-// ability away. This restores it deliberately instead.
+// `BINCV_NO_NEON` forces the scalar arm, and it is not a convenience: every vector
+// arm must be switchable off so a benchmark can time both and show which one it is
+// running. Auto-defining `BINCV_HAVE_NEON` from the compiler's macros would
+// otherwise leave no way to turn NEON off, so the off-switch is a separate define.
 #if !defined(BINCV_HAVE_NEON) && !defined(BINCV_NO_NEON) && defined(__ARM_NEON) && \
     defined(__aarch64__)
 #define BINCV_HAVE_NEON 1
@@ -97,6 +96,7 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief What this translation unit compiled, and what the CPU under it supports.
+/// **API TIER 3.**
 /// @note Every field is about the BUILD except `avx2Runtime`, which is about the CPU.
 struct SimdStatus {
     bool neon = false;             ///< NEON kernels compiled in (aarch64, or armv7 + flag)
@@ -140,8 +140,9 @@ inline SimdStatus simdStatus() {
 /// @note **LOG THIS ONCE AT START-UP.** It is the whole answer to "why is binCV slower
 /// than I expected" for the two failure modes that produce no other symptom --
 /// and both of them are silent because the fast and slow paths agree exactly.
-/// @note Returns a pointer to a function-local static; valid for the program's lifetime
-/// and not to be freed.
+/// @note Returns a pointer to a function-local static that every call rewrites; valid
+/// for the program's lifetime, not to be freed, and not thread-safe -- call it
+/// once at start-up.
 inline const char* simdStatusString() {
     static char buf[160];
     const SimdStatus s = simdStatus();
@@ -149,10 +150,10 @@ inline const char* simdStatusString() {
                        : !s.avx2Compiled ? "NOT COMPILED"
                        : s.avx2Runtime   ? "yes"
                                          : "compiled, unsupported by this CPU";
-    // The verdict is spelled out because a reader who has to work out which combination
+    // The reading is spelled out because a reader who has to work out which combination
     // is bad is a reader who will not notice the bad one.
     //
-    // Three verdicts, not two. A target with no vector unit and no population count
+    // Three readings, not two. A target with no vector unit and no population count
     // instruction is not misconfigured -- the software path is the ONLY path, and
     // "link bincv_core" is advice that would change nothing there. Cortex-M is that
     // target, and with only the two flags below this line read

@@ -16,33 +16,34 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## Contents
 
-- [`binMat.hpp`](#binMathpp) — 14 entries
-- [`quantMat.hpp`](#quantMathpp) — 29 entries
-- [`ops/bitslice.hpp`](#opsbitslicehpp) — 6 entries
-- [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 5 entries
-- [`ops/census.hpp`](#opscensushpp) — 4 entries
-- [`ops/corner.hpp`](#opscornerhpp) — 18 entries
-- [`ops/covariance.hpp`](#opscovariancehpp) — 3 entries
-- [`ops/denoise.hpp`](#opsdenoisehpp) — 2 entries
-- [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 8 entries
-- [`ops/derivative.hpp`](#opsderivativehpp) — 6 entries
+- [`binMat.hpp`](#binMathpp) — 29 entries
+- [`quantMat.hpp`](#quantMathpp) — 28 entries
+- [`util.hpp`](#utilhpp) — 1 entries
+- [`ops/bitslice.hpp`](#opsbitslicehpp) — 5 entries
+- [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 4 entries
+- [`ops/census.hpp`](#opscensushpp) — 5 entries
+- [`ops/corner.hpp`](#opscornerhpp) — 11 entries
+- [`ops/covariance.hpp`](#opscovariancehpp) — 2 entries
+- [`ops/denoise.hpp`](#opsdenoisehpp) — 1 entries
+- [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 7 entries
+- [`ops/derivative.hpp`](#opsderivativehpp) — 4 entries
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 14 entries
-- [`ops/edge.hpp`](#opsedgehpp) — 6 entries
+- [`ops/edge.hpp`](#opsedgehpp) — 4 entries
 - [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
-- [`ops/fast.hpp`](#opsfasthpp) — 7 entries
-- [`ops/logic.hpp`](#opslogichpp) — 6 entries
-- [`ops/medianWide.hpp`](#opsmedianWidehpp) — 4 entries
-- [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
+- [`ops/fast.hpp`](#opsfasthpp) — 2 entries
+- [`ops/logic.hpp`](#opslogichpp) — 4 entries
+- [`ops/medianWide.hpp`](#opsmedianWidehpp) — 3 entries
+- [`ops/morphology.hpp`](#opsmorphologyhpp) — 17 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
-- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 25 entries
+- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 10 entries
 - [`ops/orbPattern.hpp`](#opsorbPatternhpp) — 1 entries
 - [`ops/orientation.hpp`](#opsorientationhpp) — 1 entries
 - [`ops/pack.hpp`](#opspackhpp) — 10 entries
-- [`ops/pyramid.hpp`](#opspyramidhpp) — 43 entries
+- [`ops/pyramid.hpp`](#opspyramidhpp) — 15 entries
 - [`ops/ransac.hpp`](#opsransachpp) — 12 entries
-- [`ops/reduce.hpp`](#opsreducehpp) — 19 entries
-- [`ops/resample.hpp`](#opsresamplehpp) — 6 entries
-- [`ops/shift.hpp`](#opsshifthpp) — 12 entries
+- [`ops/reduce.hpp`](#opsreducehpp) — 12 entries
+- [`ops/resample.hpp`](#opsresamplehpp) — 3 entries
+- [`ops/shift.hpp`](#opsshifthpp) — 5 entries
 - [`ops/stereo.hpp`](#opsstereohpp) — 5 entries
 - [`ops/subpix.hpp`](#opssubpixhpp) — 3 entries
 - [`ops/threshold.hpp`](#opsthresholdhpp) — 2 entries
@@ -61,11 +62,12 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `QuantMat` *(class)* | — | A binary matrix storing one bit per pixel, packed into words |
+| `QuantMat` *(class)* | 3 | A binary matrix storing one bit per pixel, packed into words |
 | `getRowAlignment` | — | Byte alignment this matrix rounds its row stride up to when it allocates |
 | `getAlignedWidth` | — | Row stride in words: the distance from one row to the next |
 | `empty` | — | True if the matrix has no pixels |
 | `ownsMemory` | — | True if this matrix will free its storage; false when it wraps a caller-provided buffer (or is empty) |
+| `rows` | — | The dimensions under the names cv::Mat gives its `rows` and `cols` data members, as accessors |
 | `data` | — | Raw access to the packed storage, for bulk/SIMD operations |
 | `sizeInWords` | — | Total number of words in the backing store (height * alignedWidth) |
 | `view` | — | Non-owning mutable view over this matrix's pixels |
@@ -73,8 +75,22 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `plane` | — | Bit-plane `i` as a view |
 | `constPlane` | — | Plane `i` as a read-only view, from a NON-const matrix |
 | `planeWords` | — | Words occupied by one plane -- here, by the whole matrix |
-| `at` | — | Gets the value of a single element at (row, col) |
-| `set` | — | Sets a single element at (row, col) to value |
+| `fromCVMat` | 3 | Replaces this matrix with a binarized copy of a `CV_8UC1` cv::Mat: any nonzero byte becomes 1 |
+| `toCVMat` | 3 | Writes this matrix as a `CV_8UC1` cv::Mat holding 0 or 1 per pixel |
+| `toCVMatNormalized` | 3 | Writes this matrix as a `CV_8UC1` cv::Mat holding 0 or 255 per pixel, which is what an image viewer or an OpenCV operation expects of a binary image |
+| `at` | 1 | Gets the value of a single element at (row, col) |
+| `set` | 1 | Sets a single element at (row, col) to value |
+| `ptr` | 3 | First word of row `row`, read-only |
+| `resize` | 3 | Reshapes the matrix to `newWidth` x `newHeight`, keeping the pixels that still fit and zero-filling the rest |
+| `pad` | 3 | Adds `top`, `bottom`, `left` and `right` pixels of border, filled with `value` |
+| `transposed` | 3 | A transposed copy of this matrix |
+| `transpose` | 3 | Transposes this matrix |
+| `forEachNonZero` | 3 | Iterates over all non-zero pixels, invoking callback(row, col) |
+| `printMatrix` | 3 | Prints the pixels as 0/1 characters, one row per line, to stdout |
+| `printInternalData` | 3 | Prints the packed words of the backing store, one row per line, to stdout |
+| `fill` | 3 | Sets every pixel to `value` |
+| `countNonZero` | 1 | The number of set pixels |
+| `sparsity` | 3 | The fraction of pixels that are zero, in [0.0, 1.0] |
 
 ## `quantMat.hpp`
 
@@ -82,8 +98,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `signedMagnitude` | — | |value| as an unsigned, computed WITHOUT negating a signed int |
-| `QuantMat` *(class)* | — | An N-bit image, stored as N bit-planes in ONE contiguous allocation |
+| `QuantMat` *(class)* | 3 | An N-bit image, stored as N bit-planes in ONE contiguous allocation |
 | `wrap` | — | Wraps a caller-provided buffer, CHECKING that it is long enough |
 | `getWidth` | — | Width in pixels |
 | `getHeight` | — | Height in pixels, of ONE plane -- not of the plane stack |
@@ -103,7 +118,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `toCVMatNormalized` | 3 | Writes this matrix as CV_8U scaled to the full byte range: round(v * 255 / MaxValue) |
 | `toCVMatWith` | — | The shared export loop: 8 pixels x N planes per transpose, then a table lookup per pixel |
 | `checkedStackHeight` | — | Rows the plane stack needs: N per image row |
-| `SignedQuantMat` *(class)* | — | A signed N-bit image: N magnitude planes plus one sign plane |
+| `SignedQuantMat` *(class)* | 3 | A signed N-bit image: N magnitude planes plus one sign plane |
 | `planes` | — | The underlying uninterpreted container -- this object's only member |
 | `magnitude` | — | Magnitude plane `i`, plane 0 being the least significant bit |
 | `constMagnitude` | — | Magnitude plane `i` as a read-only view, from a NON-const matrix |
@@ -111,6 +126,14 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `constSign` | — | The sign plane as a read-only view, from a NON-const matrix |
 | `magnitudeAt` | — | Reads the magnitude at (row, col), ignoring the sign plane |
 | `SignedQuantMat` | — | Adopts an already-validated container |
+
+## `util.hpp`
+
+[`include/bincv/util.hpp`](../include/bincv/util.hpp)
+
+| | tier | |
+|---|---|---|
+| `save_test_image` | 3 | Writes an 8-bit image to `tests/output/<imageName>` through `cv::imwrite` |
 
 ## `ops/bitslice.hpp`
 
@@ -122,7 +145,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `maj3` | 3 | Bitwise majority of three words: `(a & b) | (b & c) | (a & c)` |
 | `bitSlicedSum` | 3 | Bit-sliced sum of `k` single-bit inputs, lane by lane |
 | `thresholdGE` | 3 | Lanes whose bit-sliced value is >= `threshold`, as a 1-bit mask |
-| `applyMajority3` | — | The majority3 kernel body: dst = maj3(a, b, c), word-wise, padding cleared |
 | `majority3` | 3 | dst = the per-pixel MAJORITY of a, b and c -- which for binary pixels is their MEDIAN |
 
 ## `ops/blockMatch.hpp`
@@ -131,10 +153,9 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `BlockMatchParams` *(struct)* | — | Search and window parameters for `calcOpticalFlowBlockMatch` |
-| `BlockMatchLevel` *(struct)* | — | One pyramid level for route (a): both frames, and no derivative |
+| `BlockMatchParams` *(struct)* | 3 | Search and window parameters for `calcOpticalFlowBlockMatch` |
+| `BlockMatchLevel` *(struct)* | 3 | One pyramid level for block matching: both frames, and no derivative |
 | `blockMatchLevel` | 3 | Names two frames' level into a BlockMatchLevel |
-| `parabolicOffset` | — | The vertex of the parabola through `(-1, cm)`, `(0, c0)`, `(+1, cp)` |
 | `calcOpticalFlowBlockMatch` | 3 | Pyramidal keypoint tracking by integer Hamming block matching |
 
 ## `ops/census.hpp`
@@ -143,10 +164,11 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `CensusOffset` *(struct)* | — | One census comparison offset, relative to the pixel being written |
-| `CensusPattern` *(struct)* | — | A census neighbourhood: `K` offsets, none of them (0, 0) |
+| `CensusOffset` *(struct)* | 3 | One census comparison offset, relative to the pixel being written |
+| `CensusPattern` *(struct)* | 3 | A census neighbourhood: `K` offsets, none of them (0, 0) |
 | `kCensus3x3` *(constant)* | 3 | The 8-neighbour census (3x3 minus center), raster order |
 | `kCensus5x5` *(constant)* | 3 | The 24-comparison census (5x5 minus center), raster order -- the neighbourhood the dense-stereo design is written against |
+| `censusTransform` | 3 | Census transform: plane `k` of `planes` gets `I(p + pattern.at[k]) > I(p)` at every pixel `p` |
 
 ## `ops/corner.hpp`
 
@@ -155,22 +177,15 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `ResponseMap` *(struct)* | 3 | A caller-owned, non-owning view of a `float` response map |
-| `ConstResponseMap` *(struct)* | — | The read-only spelling of ResponseMap (the two-view-types rule) |
-| `Corner` *(struct)* | — | One detected corner: integer pixel coordinates and its response |
-| `GoodFeaturesParams` *(struct)* | — | The four parameters `goodFeaturesToTrack` takes, defaulted to the values the reference pipeline actually runs |
-| `CornerResult` *(struct)* | — | What `goodFeaturesToTrack` / `selectGoodFeatures` report back |
-| `minEigenValue` | — | The smaller eigenvalue of `[[xx, xy], [xy, yy]]`, from exact integers |
-| `blockWindow` | — | The window OpenCV's box filter of side `blockSize` reduces at pixel `(x, y)`, anchored where `cv::Point(-1, -1)` puts it |
-| `CornerStronger` *(struct)* | — | Strict weak ordering over corners: response DESCENDING, ties broken by DESCENDING raster position -- larger `y` first, then larger `x` |
+| `ConstResponseMap` *(struct)* | 3 | The read-only spelling of ResponseMap (the two-view-types rule) |
+| `Corner` *(struct)* | 2 | One detected corner: integer pixel coordinates and its response |
+| `GoodFeaturesParams` *(struct)* | 2 | The four parameters `goodFeaturesToTrack` takes, defaulted to the values the reference pipeline actually runs |
+| `CornerResult` *(struct)* | 3 | What `goodFeaturesToTrack` / `selectGoodFeatures` report back |
 | `cornerMinEigenVal` | 2 | The minimum-eigenvalue corner response at every pixel, from binarized ternary derivatives |
 | `selectGoodFeatures` | 2 | The quality threshold, 3x3 non-maximum suppression and minimum-distance spacing filter `cv::goodFeaturesToTrack` performs, over an existing response map |
 | `goodFeaturesToTrack` | 2 | `goodFeaturesToTrack` over a binarized ternary derivative pair: the response map, then the selection |
-| `kResponseRingRows` *(constant)* | — | Rows the streaming form's ring must have |
-| `boxHorizontal3` | — | `h = L + C + R` for one bit-plane: one full adder, two output planes |
-| `boxVertical3` | — | Sum three 2-bit numbers into four planes (0..9) |
-| `boxValueAt` | — | The 0..9 value carried by four bit-planes at bit `bit` |
-| `boxWordAt` | — | A word of `row`, or 0 when the row or the index does not exist |
-| `cornerMinEigenValRowSliced` | — | One row of `cornerMinEigenVal` at `blockSize == 3`, bit-sliced |
+| `kResponseRingRows` *(constant)* | 3 | Rows the streaming form's ring must have |
+| `cornerMinEigenValRow` | 2 | One ROW of the minimum-eigenvalue response map |
 | `goodFeaturesToTrackStreaming` | 2 | `goodFeaturesToTrack` over a THREE-ROW ring instead of a frame-sized response map |
 
 ## `ops/covariance.hpp`
@@ -181,7 +196,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `GradientCovariance` *(struct)* | 3 | The 2x2 Lucas-Kanade gradient covariance over one window: `[sumXX, sumXY; sumXY, sumYY]` |
 | `gradientCovariance` | 3 | The 2x2 gradient covariance of a ternary derivative pair over `window`, from ONE traversal and with no scratch |
-| `add` | — | Adds a row's partial counts into this one |
 
 ## `ops/denoise.hpp`
 
@@ -189,7 +203,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `medianRow3` | — | One destination row of the three-pixel median |
 | `denoiseMedian3` | 3 | dst[y][x] = median(src[y-1][x], src[y][x], src[y][x+1]), with the out-of-image neighbours reading 0 |
 
 ## `ops/denseDisparity.hpp`
@@ -199,10 +212,9 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `kDenseDisparityInvalid` *(constant)* | — | The disparity byte written where no candidate could be evaluated |
-| `DenseDisparityParams` *(struct)* | — | Search and aggregation parameters for `denseDisparity` |
+| `DenseDisparityParams` *(struct)* | 3 | Search and aggregation parameters for `denseDisparity` |
 | `denseDisparityScratchWords` | 3 | WordType units of scratch `denseDisparity` needs: the two census bands and the accumulator ladder |
 | `denseDisparityScratchRows` | 3 | uint16_t units of scratch `denseDisparity` needs: the extraction row and the two running-best rows |
-| `DenseStageTiming` *(struct)* | — | Where `denseDisparityBinary`'s time goes, by stage |
 | `denseDisparity` | 3 | Dense disparity over a rectified pair: census cost, box aggregation, winner-take-all, one byte per pixel |
 | `denseDisparityBinaryScratchWords` | 3 | WordType units of scratch `denseDisparityBinary` needs |
 | `denseDisparityBinary` | 3 | Dense disparity over an ALREADY-BINARY rectified pair: the cost is `popcount((L ^ shift(R, d)) over window)` -- one XOR per word of 64 pixels, no census, no wide image anywhere |
@@ -215,10 +227,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `derivativeAdderStages` | 3 | Adder-class stages one destination word of the derivative costs |
 | `derivativeReplicatedInputs` | 3 | Single-bit inputs the REJECTED replication route would need |
-| `checkDerivativeArgs` | — | The shape and aliasing contract both derivative kernels take |
 | `derivativeX` | 3 | Horizontal binarized derivative: `dst(x, y) = src(x+1, y) - src(x-1, y)`, as sign and magnitude |
 | `derivativeY` | 3 | Vertical binarized derivative: `dst(x, y) = src(x, y+1) - src(x, y-1)`, as sign and magnitude |
-| `derivativeContainer` | — | Names `src`'s and `dst`'s planes into the arrays the kernels take |
 
 ## `ops/descriptor.hpp`
 
@@ -226,18 +236,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `BriefPair` *(struct)* | — | One intensity comparison, as offsets from the keypoint |
-| `BriefPattern` *(struct)* | — | `Bits` comparisons |
-| `descriptorWords` | — | Words a `Bits`-bit descriptor occupies |
+| `BriefPair` *(struct)* | 3 | One intensity comparison, as offsets from the keypoint |
+| `BriefPattern` *(struct)* | 3 | `Bits` comparisons |
+| `descriptorWords` | 3 | Words a `Bits`-bit descriptor occupies |
 | `makeBriefPattern` | 3 | Fills a pattern by deterministic Gaussian sampling -- BRIEF's own construction |
 | `computeBrief` | 3 | Computes descriptors for `count` keypoints |
-| `kBriefAngleBins` *(constant)* | — | Rotation bins a steered pattern is built at: 12-degree steps, the ORB paper's own discretization |
+| `kBriefAngleBins` *(constant)* | 3 | Rotation bins a steered pattern is built at: 12-degree steps, the ORB paper's own discretization |
 | `briefAngleBin` | 3 | Which rotation bin an angle selects: the nearest 12-degree step, wrapped |
-| `SteeredBriefPattern` *(struct)* | — | `Bits` comparisons at each of the 30 rotations: ~30 KB at 256 bits, built once and reused for every frame |
+| `SteeredBriefPattern` *(struct)* | 3 | `Bits` comparisons at each of the 30 rotations: ~30 KB at 256 bits, built once and reused for every frame |
 | `makeSteeredBriefPattern` | 3 | Builds the 30 rotated copies of `base` |
 | `computeBriefSteered` | 3 | `computeBrief` steered by per-keypoint angles |
 | `hammingDistance` | 3 | `popcount(a ^ b)` over `words` |
-| `DescriptorMatch` *(struct)* | — | One query's best and second-best match |
+| `DescriptorMatch` *(struct)* | 3 | One query's best and second-best match |
 | `matchDescriptors` | 3 | Brute-force nearest neighbour with Lowe's ratio test |
 | `matchDescriptorsGated` | 3 | `matchDescriptors` restricted to candidates a pipeline's priors admit: a position window, and optionally an octave band |
 
@@ -247,11 +257,9 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `EdgeCombine` *(enum)* | — | How the two axes' results are combined |
-| `EdgeRelation` *(enum)* | — | How a gradient is compared with the threshold |
-| `EdgeSpatial` *(enum)* | — | Which pixels are differenced |
-| `__attribute__` | — | Thirty-two pixels of the edge predicate, as thirty-two bits |
-| `edgeFold16` | — | Sixteen byte masks into sixteen bits, LSB first |
+| `EdgeCombine` *(enum)* | 3 | How the two axes' results are combined |
+| `EdgeRelation` *(enum)* | 3 | How a gradient is compared with the threshold |
+| `EdgeSpatial` *(enum)* | 3 | Which pixels are differenced |
 | `edgeThreshold` | 3 | Gradient-magnitude edge extraction straight into bits |
 
 ## `ops/essential.hpp`
@@ -274,13 +282,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `FastCorner` *(struct)* | — | One detected corner |
-| `kFastRingX` *(constant)* | — | The 16-pixel Bresenham ring of radius 3, clockwise from straight up |
-| `kFastLanes` *(constant)* | — | Pixels per vector iteration |
+| `FastCorner` *(struct)* | 2 | One detected corner |
 | `detectFast` | 2 | Detects FAST corners |
-| `hasFastBitAvx2` | — | Is AVX2 present? |
-| `fastArcStepNeon` | — | One doubling step of the arc test, the step a compile-time constant |
-| `fastRingLoadNeon` | — | The sixteen ring reads, unrolled so every displacement is an immediate |
 
 ## `ops/logic.hpp`
 
@@ -288,8 +291,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `applyBinary` | — | The two-input kernel body: dst = Op(a, b), word-wise, padding cleared |
-| `applyUnary` | — | The one-input kernel body: dst = Op(src), word-wise, padding cleared |
 | `bitwiseAnd` | 1 | dst = a & b, pixel for pixel |
 | `bitwiseOr` | 1 | dst = a | b, pixel for pixel |
 | `bitwiseXor` | 1 | dst = a ^ b, pixel for pixel |
@@ -301,9 +302,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `MedianOffset` *(struct)* | — | One sample position, relative to the pixel being written |
-| `MedianPattern` *(struct)* | — | A neighbourhood: `K` offsets, `K` odd so the median is a single element |
-| `med3Store` | — | `med3` for sixteen pixels |
+| `MedianOffset` *(struct)* | 3 | One sample position, relative to the pixel being written |
+| `MedianPattern` *(struct)* | 3 | A neighbourhood: `K` offsets, `K` odd so the median is a single element |
 | `medianWide` | 3 | Median filter over a caller-chosen neighbourhood |
 
 ## `ops/morphology.hpp`
@@ -312,7 +312,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `StructuringElement` *(struct)* | — | A morphological structuring element: a shape, an extent and an anchor |
+| `StructuringElement` *(struct)* | 1 | A morphological structuring element: a shape, an extent and an anchor |
 | `rect` | — | `cv::getStructuringElement(MORPH_RECT, {c, r}, anchor)` |
 | `cross` | — | `cv::getStructuringElement(MORPH_CROSS, {c, r}, anchor)` |
 | `ellipse` | — | `cv::getStructuringElement(MORPH_ELLIPSE, {c, r}, anchor)` |
@@ -323,21 +323,11 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `spanOfRow` | — | The half-open column range `[first, last)` of row `row` that MAY be set: exact for the parametric shapes, `[0, cols)` for a mask |
 | `spanIsDense` | — | True when every cell inside `spanOfRow` is set, so a kernel that iterates the span needs no per-cell test at all |
 | `valid` | — | Extents positive, anchor inside the element, at least one set cell |
-| `rect3x3` | — | The 3x3 rectangle -- `cv::Mat` passed to `cv::erode`, i.e |
-| `cross3x3` | — | The 3x3 plus -- what BOTH `MORPH_CROSS` and `MORPH_ELLIPSE` give at 3x3 |
-| `MorphPath` *(enum)* | — | Which implementation `morphApply` may take |
-| `MorphFold` *(struct)* | — | The combining operation and its identity, as a compile-time choice |
-| `morphShiftedWord` | — | Word `i` of `srcRow` shifted so that destination column `c` reads source column `c + dx`, with everything outside the row reading `fill` |
-| `morphMaxOffsetX` | — | The element's horizontal reach: max |cell - anchor| over set cells |
-| `morphFixupPixel` | — | One destination pixel, recomputed from the whole element with every source coordinate mapped through `borderIndex` |
-| `morphFixupRowBorder` | — | Rewrites the destination columns whose source column can leave the row, one pixel at a time, for the four NON-CONSTANT border types |
-| `morphRowGeneric` | — | One destination row, general element |
-| `morphRow3x3` | — | One destination row, 3x3 element anchored at its center |
-| `morphApply` | — | erode (IsErode) or dilate, whole image |
-| `morphArgumentsAreSane` | — | The preconditions `erode` and `dilate` share, in one place |
+| `rect3x3` | 1 | The 3x3 rectangle -- `cv::Mat()` passed to `cv::erode`, i.e |
+| `cross3x3` | 1 | The 3x3 plus -- what BOTH `MORPH_CROSS` and `MORPH_ELLIPSE` give at 3x3 |
 | `erode` | 1 | Morphological erosion: `dst(x,y) = AND over the element of src(x+dx, y+dy)` |
 | `dilate` | 1 | Morphological dilation: `dst(x,y) = OR over the element of src(x+dx, y+dy)` |
-| `morphologyExNeedsScratch` | — | True when `morphologyEx(op,...)` reads and writes its scratch view |
+| `morphologyExNeedsScratch` | 3 | True when `morphologyEx(op,...)` reads and writes its scratch view |
 | `morphologyEx` | 1 | The seven `MorphOp` compositions |
 
 ## `ops/occupancy.hpp`
@@ -359,28 +349,13 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `LKEntryLevel` *(enum)* | 2 | A subpixel point |
-| `LKLevel` *(struct)* | — | One pyramid level's six planes: both frames, and the previous frame's ternary derivative |
+| `LKEntryLevel` *(enum)* | 3 | Which pyramid level a keypoint ENTERS at |
+| `LKParams` *(struct)* | 2 | The tracker's parameters, defaulted to the reference pipeline's verbatim |
+| `LKLevel` *(struct)* | 2 | One pyramid level's six planes: both frames, and the previous frame's ternary derivative |
 | `lkLevel` | 2 | Names a level's containers into an LKLevel |
-| `LKLevelN` *(struct)* | — | One pyramid level at N bits per pixel: both frames' bit-planes, and the previous frame's N-bit signed derivative |
-| `StageTiming` *(struct)* | — | Where `track`'s time actually goes, by stage |
-| `kCentralDifferenceScale` *(constant)* | — | The factor the raw `[-1, 0, 1]` tap needs to become a central difference |
-| `kReferenceMinEigScale` *(constant)* | — | binCV's integer minimum eigenvalue, in the units the reference's `minEigThreshold` is quoted in: `(16*255)^2 / 2^20` |
-| `referenceMinEigScale` | — | `kReferenceMinEigScale` at an arbitrary bit depth |
-| `floorDiv` | — | `floor(a / b)` for integers with `b > 0`, rounding toward MINUS infinity |
-| `sourceWord` | — | The source word `k`, with the trailing partial word masked and any index outside the row reading as zero (the replicate fill covers it) |
-| `word` | — | Bits of the displaced row lying under word `i` of the window grid |
-| `displacedRow` | — | Builds a displaced reader for row `y` of `plane`, clamped vertically |
-| `TapSums` *(struct)* | — | The five integer sums one gradient component's residual needs |
-| `combine` | — | `w00*t00 + w01*t01 + w10*t10 + w11*t11 - self` |
-| `kStagedMaxRows` *(constant)* | — | Rows the staging path handles |
-| `floorToLL` | — | `floor(v)` as a `long long`, for a value already known to be finite and within the frame's range |
-| `IterationTrace` *(struct)* | — | The iteration counter |
-| `windowFitsAtLevel` | — | Is point `p`'s window entirely inside level `li`? |
-| `entryLevelFor` | — | The coarsest usable level whose window contains point `p`, or 0 |
-| `kLkVectorPath` *(constant)* | — | Does this level reach a VECTORIZED residual kernel? |
+| `LKLevelN` *(struct)* | 2 | One pyramid level at N bits per pixel: both frames' bit-planes, and the previous frame's N-bit signed derivative |
 | `calcOpticalFlowPyrLK` | 2 | Pyramidal Lucas-Kanade tracking of sparse keypoints between two binary frames |
-| `narrowLevel` | 2 | Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME depth `N` |
+| `narrowLevel` | 3 | Reads a 64-bit pyramid level as a 32-bit one, so the vector kernels apply |
 | `lkPathName` | 3 | Which residual kernel this level type will actually run, as a string |
 | `LKLevels` *(struct)* | 2 | A tracking ladder whose levels have DIFFERENT bit depths, level 0 first |
 | `stagingStackBytes` | 3 | Stack bytes the tracker's staging buffers occupy at `(N, WordType)` |
@@ -407,10 +382,10 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `PackRule` *(enum)* | — | How a source pixel becomes a bit |
+| `PackRule` *(enum)* | 3 | How a source pixel becomes a bit |
 | `packRows` | 3 | Packs `rowCount` rows into `dst` starting at `dstRow` |
 | `packBits` | 3 | Packs a pixel array to one bit per pixel |
-| `QuantRule` *(enum)* | — | How a source pixel becomes an N-bit value |
+| `QuantRule` *(enum)* | 3 | How a source pixel becomes an N-bit value |
 | `packQuant` | 3 | Packs a pixel array to N bits per pixel, no OpenCV |
 | `packQuantWith` | 3 | `packQuant` with an arbitrary per-pixel map |
 | `packBitsIf` | 3 | `packBits` with an arbitrary per-pixel predicate |
@@ -428,42 +403,14 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `pyrDownHeight` | 3 | Destination height of one pyramid level: ceil(srcHeight / 2) |
 | `pyrLevelToBase` | 3 | Where a level-`level` pixel CENTER sits in level-0 coordinates, one axis |
 | `pyrBaseToLevel` | 3 | The inverse: a level-0 coordinate in level-`level` pixels |
-| `boxSumFullAdders` | — | Full-adder stages the 2x2 box sum costs at a given source depth |
-| `boxSum4ReplicatedInputs` | — | Single-bit inputs the REJECTED replication route would need |
-| `pyrDownAdderStages` | — | Total adder-class stages one destination word costs: box plus rescale |
-| `pyrDownAutomaticWords` | — | Words of automatic storage the shipped `pyrDown` DECLARES per destination word |
-| `addPlanes` | — | `out = a + b`, bit-sliced |
-| `multiplyByAllOnes` | — | `out = (v << shift) - v`, i.e |
-| `addConstant` | — | `v += c` in every lane, bit-sliced, `c` an ordinary integer constant |
-| `subtractConstantWhere` | — | `v -= c` in the lanes where `mask` is set, bit-sliced |
-| `divideByConstant` | — | `quotient = floor(value / divisor)`, bit-sliced, divisor a constant |
-| `boxSum4` | — | `sum = a + b + c + d`, four NIn-bit bit-sliced operands, NIn+2 planes |
-| `boxSum4Replicated` | — | The same sum through ops/bitslice.hpp's SINGLE-BIT adder network |
-| `requantizeBoxSum` | — | `dst = round(sum / 4 * (2^NOut - 1) / (2^NIn - 1))`, bit-sliced |
-| `checkPyrDownArgs` | — | The shape and aliasing contract pyrDown's kernel takes |
-| `gatherPhases` | — | The four 2x2 phases of one destination word, for one source plane |
-| `PyrDownFilter` *(enum)* | — | Which downsampling filter `pyrDown` applies |
-| `PyrDownBorder` *(enum)* | — | What a filter reads outside the frame |
-| `FilterTaps` *(struct)* | — | Tap offsets and weights for one separable filter |
-| `replicateIndex` | — | Planes needed to hold one axis of the weighted sum of `NIn`-bit values |
-| `srcPixelValue` | — | One source pixel's value across all NIn planes |
-| `setPixelValue` | — | Writes value `v` at `(y, x)` across NOut destination planes |
-| `addShifted` | — | `acc += (v << Shift)`, bit-sliced |
-| `weightedAxisStage` | — | One (tap, weight-bit) stage of `weightedAxis`, unrolled at compile time |
-| `weightedAxis` | — | One axis of a separable weighted sum, bit-sliced |
-| `divideStage` | — | `requantizeBoxSum` for an arbitrary kernel weight sum |
-| `divideByConstantT` | — | `divideByConstant` with the divisor and the quotient width known at compile time |
-| `pyrDownBoxViews` | 2 | One pyramid level: 2x2 box mean of `src`, subsampled, at NOut bits |
-| `pyrDownReplicated` | — | The same, taking containers, for the benchmark's convenience |
-| `pyrDownBoxContainers` | 2 | The QuantMat spelling of pyrDown |
+| `PyrDownFilter` *(enum)* | 3 | Which downsampling filter `pyrDownFiltered` applies |
+| `PyrDownBorder` *(enum)* | 3 | What a filter reads outside the frame |
 | `Pyramid` *(class)* | 2 | A pyramid: one QuantMat per level, each at its own bit depth |
 | `levelBits` | — | Bits per pixel at level I |
 | `level` | — | Level I, mutable |
-| `build` | — | Fills levels 1..N-1 by running pyrDown down the ladder |
+| `build` | — | Fills levels 1..N-1 by running the chosen filter down the ladder |
 | `sizeInWords` | — | Total words across every level -- the pyramid's whole footprint |
 | `sizeInBytes` | — | Total bytes across every level |
-| `phaseAtMinus1` | — | The value at output column x-1, and at x+1, of a phase word |
-| `leftRimColumns` | — | Output columns at each edge whose source support crosses the frame, and which therefore need the per-pixel border rule rather than the word-parallel path |
 | `pyrDownFiltered` | 3 | One pyramid level under a chosen downsampling filter |
 | `pyrDownBox` | 2 | One pyramid level by 2x2 box mean, `BORDER_REPLICATE` |
 | `pyrDown` | 1 | One pyramid level, EXACTLY as `cv::pyrDown` computes it: a 5x5 `[1,4,6,4,1]` Gaussian with `BORDER_REFLECT_101`, subsampled by 2 |
@@ -477,8 +424,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `RansacParams` *(struct)* | 2 | The four parameters a RANSAC call takes |
 | `RansacResult` *(struct)* | 2 | What a RANSAC call reports back |
 | `RansacScratch` *(struct)* | 3 | Caller-owned scratch: one flag per correspondence, twice |
-| `ransacScratchWords` | — | Words in one inlier set over `correspondences` points |
-| `ransacScratchBytes` | — | Bytes of scratch a call over `correspondences` points needs |
+| `ransacScratchWords` | 3 | Words in one inlier set over `correspondences` points |
+| `ransacScratchBytes` | 3 | Bytes of scratch a call over `correspondences` points needs |
 | `ransac` | 2 | Fit `Model` to the correspondences by random sample consensus |
 | `Affine2D` *(struct)* | 2 | A 2D affine transform, row-major: `[m[0] m[1] m[2]; m[3] m[4] m[5]]` |
 | `Affine2DModel` *(struct)* | 2 | The 3-point affine model policy |
@@ -493,16 +440,9 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `SplitCount` *(struct)* | — | The two halves of a split count: pixels where the selector `c` was clear, and pixels where it was set |
+| `SplitCount` *(struct)* | 3 | The two halves of a split count: pixels where the selector `c` was clear, and pixels where it was set |
 | `crossTerm` | — | The LK cross term: `whenClear - whenSet`, signed |
 | `CovarianceCount` *(struct)* | 3 | The four numbers of a 2x2 gradient covariance over one region: popcount(a), popcount(b), and the split of `a & b` by the selector |
-| `RegionWords` *(struct)* | — | A region clipped to a view, expressed in the words a row loop walks |
-| `regionFromExtent` | — | Region geometry from an already-clipped, non-empty pixel extent |
-| `wholeViewWords` | — | The whole of a view: every pixel, no region |
-| `clipColumns` | — | The COLUMN half of a clip: a band of columns over EVERY row of a view |
-| `clipRegion` | — | Intersects a Rect with a view's extent, in words |
-| `visitRowWords` | — | Visits every word index of one region-row, ascending, exactly once |
-| `countViewRegion` | — | popcount of one view over an already-clipped region |
 | `countNonZero` | 1 | Number of set pixels in `src` |
 | `countAnd` | 3 | Number of pixels set in BOTH `a` and `b` inside `region` |
 | `countAndSplit` | 3 | popcount(a & b & ~c) and popcount(a & b & c) over `region`, in ONE pass |
@@ -521,9 +461,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `decimatedWidth` | 3 | Destination width for a horizontal decimation by two |
 | `rowsDecimatedBy2` | 3 | The FREE half of a 2x2 subsample: every other row, as a view |
-| `checkDecimateArgs` | — | The shape and aliasing contract every decimation kernel here shares |
-| `decimateColumnsBy2Gather` | — | Variant A: horizontal decimation one destination pixel at a time |
-| `decimateColumnsBy2FrameMasked` | — | Variant C: horizontal decimation as a big-integer unshuffle |
 | `decimateColumnsBy2` | 3 | Horizontal decimation by two: `dst(y, j) = src(y, 2j)` |
 
 ## `ops/shift.hpp`
@@ -532,13 +469,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `maxShiftOffset` | — | Largest shift magnitude these kernels accept, in pixels |
-| `isKnownBorderType` | — | True for the five BorderType values core/types.hpp defines |
-| `borderIndex` | — | cv::borderInterpolate: the source index a coordinate outside [0, len) extrapolates to, or -1 when the border is a constant |
-| `extendedRowWord` | — | Word `j` of a row, with everything outside the row's PIXELS reading `fill` -- both whole words past the row and the padding bits of the last |
-| `fillRowWords` | — | Writes one destination row as a constant, padding bits left zero |
-| `shiftRowHorizontal` | — | One row of horizontal shift by `dx` columns, filling with `fill` |
-| `fixupHorizontalBorder` | — | Rewrites the destination columns whose source column lies outside the row, for the four NON-CONSTANT border types |
 | `shift` | 3 | dst[y][x] = src[y + dy][x + dx], extrapolating outside the image |
 | `shiftLeft` | 3 | dst[y][x] = src[y][x + k] -- moves the image LEFT by k columns |
 | `shiftRight` | 3 | dst[y][x] = src[y][x - k] -- moves the image RIGHT by k columns |
@@ -551,8 +481,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `StereoMatchParams` *(struct)* | — | Search and window parameters for the sparse rectified stereo matcher |
-| `StereoMatch` *(struct)* | — | One left keypoint's stereo result |
+| `StereoMatchParams` *(struct)* | 3 | Search and window parameters for the sparse rectified stereo matcher |
+| `StereoMatch` *(struct)* | 3 | One left keypoint's stereo result |
 | `stereoDescriptorMatch` | 3 | COARSE stage: each left descriptor against the right keypoints in its row band and disparity range |
 | `stereoRefineDisparity` | 3 | FINE stage: slide a window along the epipolar row around each valid match's disparity, score by Hamming distance on the packed frames, and refine to sub-pixel |
 | `stereoMatchRectified` | 3 | Both stages: descriptor search, then window refinement |
@@ -563,7 +493,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `SubPixParams` *(struct)* | — | `cv::cornerSubPix`'s `winSize`, `zeroZone` and `criteria`, in one struct |
+| `SubPixParams` *(struct)* | 2 | `cv::cornerSubPix`'s `winSize`, `zeroZone` and `criteria`, in one struct |
 | `SubPixResult` *(struct)* | 3 | What `cornerSubPix` did, per corner |
 | `cornerSubPix` | 2 | Refines corner positions to sub-pixel accuracy |
 
@@ -582,8 +512,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `PgmHeader` *(struct)* | — | What a `readPgm` call found, or why it did not |
-| `PbmHeader` *(struct)* | — | What a `readPbm` call found, or why it did not |
+| `PgmHeader` *(struct)* | 3 | What a `readPgm` call found, or why it did not |
+| `PbmHeader` *(struct)* | 3 | What a `readPbm` call found, or why it did not |
 | `readPgmHeader` | 3 | Parses a binary PGM (`P5`) header |
 | `readPgmHeaderFromPrefix` | 3 | The same parse, from a prefix of the file |
 | `readPbmHeader` | 3 | Parses a binary PBM (`P4`) header |
@@ -599,8 +529,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `kSequenceMode8Bit` *(constant)* | — | `mode` value for 8-bit (`P5`-shaped) frame bodies |
 | `kSequenceModePacked` *(constant)* | — | `mode` value for packed 1-bit (`P4`-shaped) frame bodies |
 | `kSequenceHeaderBytes` *(constant)* | — | The fixed header size; frame 0's body starts here |
-| `SequenceHeader` *(struct)* | — | What a `readSequenceHeader` call found, or why it did not |
-| `SequenceFrameRange` *(struct)* | — | One frame's body within a blob, or `valid == false` |
+| `SequenceHeader` *(struct)* | 3 | What a `readSequenceHeader` call found, or why it did not |
+| `SequenceFrameRange` *(struct)* | 3 | One frame's body within a blob, or `valid == false` |
 | `readSequenceHeader` | 3 | Parses a `BSQ1` header from the first 32 bytes |
 | `sequenceFrame` | 3 | Frame `i`'s body bytes, bounds-checked |
 | `readSequenceFrameBody` | 3 | Unpacks ONE mode-1 frame body into a bit matrix |
@@ -623,7 +553,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `SimdStatus` *(struct)* | — | What this translation unit compiled, and what the CPU under it supports |
+| `SimdStatus` *(struct)* | 3 | What this translation unit compiled, and what the CPU under it supports |
 | `simdStatus` | 3 | What vector paths are actually active |
 | `simdStatusString` | 3 | One line naming every fast path and whether it is on |
 
@@ -633,7 +563,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `Storage` *(class)* | — | Backing memory for a bit-packed matrix: {pointer, word count, ownership} |
+| `Storage` *(class)* | 3 | Backing memory for a bit-packed matrix: {pointer, word count, ownership} |
 | `Storage` | — | Allocates and zero-fills `words` words, owned by this object |
 | `data` | — | First word of the buffer, or nullptr when empty |
 | `size` | — | Buffer size in WORDS, not bytes |
@@ -651,12 +581,12 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `Size` *(struct)* | — | Size structure representing width and height |
+| `Size` *(struct)* | 1 | A width and a height, in pixels |
 | `area` | — | Calculate the area (width * height) |
 | `empty` | — | Check if the size is empty (zero width or height) |
-| `Rect` *(struct)* | — | An axis-aligned rectangle in PIXELS: origin (x, y), extent (width, height) |
+| `Rect` *(struct)* | 1 | An axis-aligned rectangle in PIXELS: origin (x, y), extent (width, height) |
 | `QuantMat` *(class)* | — | Forward declaration of the QuantMat template -- the N-bit container |
-| `Point2f` *(struct)* | — | A point with sub-pixel coordinates -- the tracker's and the refiner's |
+| `Point2f` *(struct)* | 1 | A point with sub-pixel coordinates -- the tracker's and the refiner's |
 
 ## `core/view.hpp`
 
@@ -664,10 +594,10 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `BinMatView` *(struct)* | — | Non-owning, mutable view of a bit-packed matrix: {ptr, size, stride} |
+| `BinMatView` *(struct)* | 3 | Non-owning, mutable view of a bit-packed matrix: {ptr, size, stride} |
 | `empty` | — | True if the view addresses no pixels |
 | `row` | — | First word of row y |
-| `BinMatConstView` *(struct)* | — | Non-owning, read-only view of a bit-packed matrix |
+| `BinMatConstView` *(struct)* | 3 | Non-owning, read-only view of a bit-packed matrix |
 | `narrowPlane` | 3 | Reads a 64-bit bit-plane as a 32-bit one |
 | `narrowPlaneMutable` | 3 | The same reinterpretation for a WRITABLE plane |
 
@@ -677,6 +607,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `ThreadPool` *(class)* | — | A minimal fixed-size pool that serves `bincv::parallelFor` |
+| `ThreadPool` *(class)* | 3 | A minimal fixed-size pool that serves `bincv::parallelFor` |
 | `install` | — | Makes this pool binCV's backend and sets the thread count to match |
 

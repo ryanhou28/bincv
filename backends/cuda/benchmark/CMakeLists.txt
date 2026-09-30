@@ -108,7 +108,7 @@ set_target_properties(cuda_median_benchmark PROPERTIES
 # cv::cuda::pyrDown role arms therefore live behind BINCV_CUDA_BENCH_OPENCV
 # inside this always-built binary, and the binary says so in its own output
 # when they are not compiled in -- an unmeasured role bar is reported as
-# OUTSTANDING rather than replaced with a substitute.
+# unmeasured rather than replaced with a substitute.
 # ---------------------------------------------------------------------------
 add_executable(cuda_pyramid_benchmark cuda_pyramid_benchmark.cpp cuda_bench_null.cu)
 target_link_libraries(cuda_pyramid_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
@@ -132,7 +132,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no cudawarping-capable OpenCV "
                         "found there; cuda_pyramid_benchmark keeps its binCV arms and "
-                        "reports the GPU role comparison as OUTSTANDING.")
+                        "reports the GPU role comparison as not possible.")
     endif()
 endif()
 
@@ -146,7 +146,7 @@ endif()
 # the CUDA gate derives from this file's text and then tries to build on every
 # machine that has not built a cuda-module OpenCV. When the role arms are not
 # compiled in the binary says so and reports threshold and edgeThreshold as
-# BLOCKED, which is what this project's both-axes ship rule requires -- a
+# having no role comparison, which is what shipping on both axes requires -- a
 # missing role comparison is not a memory argument that carries them anyway.
 #
 # Its own find_package with its own component list, deliberately NOT an
@@ -181,7 +181,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudaarithm + "
                         "cudafilters + cudaimgproc found there; cuda_sensor_benchmark "
                         "keeps its binCV arms and reports threshold and edgeThreshold "
-                        "as BLOCKED on their role comparison.")
+                        "as unmeasured on their role comparison.")
     endif()
 endif()
 
@@ -206,9 +206,9 @@ endif()
 # "No rule to make target 'cuda_role_benchmark'".
 #
 # Every row in this binary IS a comparison against OpenCV, so without one it
-# has no arms left to run; what it does instead is print each verdict as
-# BLOCKED (role bar unmeasured) or OUTSTANDING (no counterpart exists, ruling
-# R2), which is what the both-axes ship rule requires it to say.
+# has no arms left to run; what it does instead is print each result as
+# unmeasured (OpenCV built without the module) or not possible (no cv::cuda
+# counterpart exists), which is what shipping on both axes requires it to say.
 #
 # Its own find_package with its own component list, appended after the others
 # and linking IMPORTED TARGETS rather than ${OpenCV_LIBS}: adding components to
@@ -289,11 +289,11 @@ set_target_properties(cuda_packfast_benchmark PROPERTIES
 # file's TEXT and hand-excludes exactly one name, so a target that exists only
 # when an OpenCV is pointed at is one the gate tries to build everywhere.
 # Without that OpenCV the binary keeps every binCV arm and prints CASE A as
-# BLOCKED (role bar unmeasured) rather than substituting a bar.
+# unmeasured rather than substituting a bar.
 #
 # The covariance has NO cv::cuda counterpart at any API level, so it has no
-# OpenCV arm here and none is invented: its speed verdict is printed
-# OUTSTANDING under ruling R2.
+# OpenCV arm here and none is invented: no GPU speed comparison is possible for
+# it, and the binary says so.
 #
 # Its own find_package with its own component list, appended after the others:
 # adding components to an earlier call would make OpenCV_FOUND false for every
@@ -321,7 +321,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no cudafilters-capable OpenCV "
                         "found there; cuda_derivcov_benchmark keeps its binCV arms and "
-                        "reports CASE A as BLOCKED on its role comparison.")
+                        "reports CASE A as unmeasured on its role comparison.")
     endif()
 endif()
 
@@ -341,7 +341,7 @@ endif()
 # exactly one name, so a target that exists only when an OpenCV is pointed at is
 # one the gate tries to build on every machine that has not built one. Without
 # that OpenCV the binary keeps all of its binCV arms and reports the role bar
-# as BLOCKED rather than substituting a CPU number for it.
+# as unmeasured rather than substituting a CPU number for it.
 #
 # ITS OWN find_package WITH ITS OWN COMPONENT LIST, deliberately not an
 # extension of any call above: adding cudafeatures2d to one of those would make
@@ -374,7 +374,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no cudafeatures2d-capable OpenCV "
                         "found there; cuda_orientation_descriptor_benchmark keeps its "
-                        "binCV arms and reports the cv::cuda::ORB role bar as BLOCKED.")
+                        "binCV arms and reports the cv::cuda::ORB role bar as unmeasured.")
     endif()
 endif()
 
@@ -399,8 +399,8 @@ endif()
 # and the round-trip rule would be priced against a kernel nobody runs.
 #
 # Without that OpenCV the binary still runs and still says something true: it
-# reports both role bars as UNMEASURED and the verdicts that depend on them as
-# BLOCKED, which is what the both-axes ship rule requires. It does not
+# reports both role bars as UNMEASURED and the results that depend on them as
+# unmeasured too, which is what shipping on both axes requires. It does not
 # substitute a bar and it does not fall silent.
 # ---------------------------------------------------------------------------
 add_executable(cuda_feature_tracking_benchmark cuda_feature_tracking_benchmark.cpp cuda_bench_null.cu)
@@ -428,7 +428,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudafeatures2d + "
                         "cudaimgproc found there; cuda_feature_tracking_benchmark keeps its binCV "
-                        "arms and reports both role bars as BLOCKED.")
+                        "arms and reports both role bars as unmeasured.")
     endif()
 endif()
 
@@ -452,8 +452,8 @@ endif()
 # file and hand-excludes exactly one name, so a target that exists only when an
 # OpenCV is pointed at is one the gate tries to build on every machine that has
 # not built one. Without that OpenCV the binary keeps every binCV arm and reports
-# the role bar as BLOCKED -- which, by the both-axes ship rule, makes the
-# operation a stage rather than a product. It does not substitute the CPU rows
+# the role bar as unmeasured -- which, since an operation ships only on both
+# axes, makes the operation a stage rather than a product. It does not substitute the CPU rows
 # for a GPU bar.
 #
 # ITS OWN find_package WITH ITS OWN COMPONENT LIST, appended after the others and
@@ -492,7 +492,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no cudaoptflow-capable OpenCV "
                         "found there; cuda_opticalflow_benchmark keeps its binCV arms "
                         "and reports the cv::cuda::SparsePyrLKOpticalFlow role bar as "
-                        "BLOCKED.")
+                        "unmeasured.")
     endif()
 endif()
 
@@ -557,7 +557,7 @@ set_target_properties(cuda_ransac_benchmark PROPERTIES
 # and hand-excludes exactly one name, so a target that exists only when an
 # OpenCV is pointed at is one the gate tries to build on every machine that has
 # not built one. Without that OpenCV every binCV arm still runs and the role
-# verdicts print BLOCKED; no substitute bar is invented and no CPU number is
+# results print as unmeasured; no substitute bar is invented and no CPU number is
 # quoted as a GPU one.
 #
 # Its own find_package with its own component list, appended after the others:
@@ -589,7 +589,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudafeatures2d + "
                         "cudaoptflow found there; cuda_sparse_benchmark keeps its binCV "
-                        "arms and reports CASE A and CASE D as BLOCKED.")
+                        "arms and reports CASE A and CASE D as unmeasured.")
     endif()
 endif()
 

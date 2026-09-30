@@ -93,7 +93,8 @@ bool packWideLaneApplies(size_t stride, const void* base, size_t srcElemSize);
 } // namespace impl
 
 /// @brief Packs a device wide image to one bit per pixel under `rule`.
-/// Device twin of the host packBits; bit-identical to it by test.
+/// **API TIER 3.** Bit-exact against the host `bincv::packBits` under the same
+/// rule, every arm, proven by test_cuda_backend and test_cuda_packfast.
 cudaError_t packBits(DeviceImageConstView<uint8_t> src, DeviceBinMatView dst,
                      PackRule rule, uint8_t threshold = 0,
                      cudaStream_t stream = nullptr);
@@ -101,8 +102,9 @@ cudaError_t packBits(DeviceImageConstView<uint16_t> src, DeviceBinMatView dst,
                      PackRule rule, uint16_t threshold = 0,
                      cudaStream_t stream = nullptr);
 
-/// @brief Packs `src`'s rows into `dst` starting at row `dstRow`. Device twin
-/// of the host packRows.
+/// @brief Packs `src`'s rows into `dst` starting at row `dstRow`. **API TIER
+/// 3.** Bit-exact against the host `bincv::packRows`, proven by
+/// test_cuda_backend and test_cuda_packfast.
 /// @note The host's entry point is about STREAMING -- a microcontroller packing
 /// sensor rows as they arrive, never holding a frame. That motivation does
 /// not transfer (a device frame is resident by construction), but the
@@ -124,7 +126,9 @@ cudaError_t packRows(DeviceImageConstView<uint16_t> src, DeviceBinMatView dst,
 /// `[p * height, (p + 1) * height)`, LSB first -- the layout censusTransform
 /// already uses, so a caller holds one allocation and one stride rather than
 /// N of each.
-/// @param n Planes, 1 to 8 (QuantMat's supported range).
+/// @param n Planes, 1 to 8 (QuantMat's supported range). Outside it, or with a
+/// block that is not `width x (n * height)`, returns `cudaErrorInvalidValue`
+/// without launching, in every build.
 /// @note The rule is `QuantRule::Scale`, the host's only rule, and the device
 /// computes the SAME integer expression -- `(v * maxValue + srcMax/2) /
 /// srcMax` -- rather than a threshold ladder. The ladder exists on the host
@@ -140,7 +144,12 @@ cudaError_t packQuant(DeviceImageConstView<uint16_t> src, DeviceBinMatView plane
                       size_t n, cudaStream_t stream = nullptr);
 
 /// @brief The reverse: one bit per pixel out to one byte per pixel.
-/// **API TIER 3.** Device twin of the host unpackTo8Bit.
+/// **API TIER 3.** Bit-exact against the host `bincv::unpackTo8Bit`, proven by
+/// test_cuda_backend.
+/// @note **`height <= 65535`**: the launch carries one row per `blockIdx.y`,
+/// which the hardware caps there. A taller view returns
+/// `cudaErrorInvalidValue` without launching, in every build; the packers
+/// above have a grid-stride arm for that case and this kernel does not.
 cudaError_t unpackTo8Bit(DeviceBinMatConstView src, DeviceImageView<uint8_t> dst,
                          uint8_t onValue = 255, uint8_t zeroValue = 0,
                          cudaStream_t stream = nullptr);

@@ -1,5 +1,5 @@
 // ===========================================================================
-// -- HOW MANY ITERATIONS DOES A POINT ACTUALLY RUN, AND WHAT DOES THE
+// HOW MANY ITERATIONS DOES A POINT ACTUALLY RUN, AND WHAT DOES THE
 // MAXIMUM OVER EIGHT COST?
 //
 // The AVX2 keypoint batch puts eight keypoints in lanes and iterates them IN
@@ -161,6 +161,8 @@ int main(int argc, char** argv) {
     const int w = first.cols, h = first.rows;
 
     bincv::LKParams lk;                     // the reference pipeline's parameters verbatim
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     bincv::GoodFeaturesParams gftt;
     const int kMinTracks = 60;
     constexpr size_t kLevels = 4;

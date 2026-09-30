@@ -87,7 +87,9 @@ inline const uint32_t* deviceCornerCount(const DeviceCornerResult* result) {
 }
 
 /// @brief Rewrites a device corner array as the interleaved `(x, y)` float
-/// pairs the keypoint families read. **API TIER 3.**
+/// pairs the keypoint families read. **API TIER 3.** Byte-identical to the
+/// host's own `(x, y)` array over the same corners, proven by
+/// test_cuda_keypoints.
 ///
 /// @param corners `capacity` corner records in device memory -- what
 /// `goodFeaturesToTrackAsync` wrote.
@@ -132,10 +134,9 @@ cudaError_t keypointsFromCorners(const DeviceFastCorner* corners, const uint32_t
 // designed against one container. binCV's device detectors emit the HOST
 // library's record types so a device result can be compared against a host run
 // byte for byte, which is the bit-exactness claim the whole backend rests on,
-// and this op is the price of keeping it. Under ruling R2 its speed verdict
-// against a GPU alternative is therefore recorded OUTSTANDING; what it is
-// measured against is the round trip it replaces, which is the only existing
-// way to get the same bytes.
+// and this op is the price of keeping it. No GPU alternative exists to compare
+// its speed against; what it is measured against is the round trip it
+// replaces, which is the only existing way to get the same bytes.
 // ---------------------------------------------------------------------------
 
 } // namespace cuda

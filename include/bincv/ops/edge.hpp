@@ -7,7 +7,9 @@
 /// ---------------------------------------------------------------------------
 /// READ OUT OF THE REFERENCE, NOT INFERRED
 ///
-/// the reference pipeline's edge filter, `rl_fast_edge_filter_wide`:
+/// The edge filter of the reference pipeline (the visual-inertial odometry system,
+/// not in this repository, that binCV was built to serve stage by stage; see
+/// docs/ARCHITECTURE.md), in its own spelling:
 ///
 /// kernel_x = [-1 0 1] diff_x = |filter2D(img, kernel_x)|
 /// kernel_y = [-1 0 1]^T diff_y = |filter2D(img, kernel_y)|
@@ -28,8 +30,8 @@
 /// combine {Or, And} x relation {Ge, Gt} x spatial {Wide, Forward, Backward}. They
 /// are compile-time parameters, so a caller pays only for the one instantiated and
 /// the comparison folds to a single predicate -- the same requirement ops/pack.hpp
-/// puts on its rules, for the same measured reason
-/// (a runtime flag cost 17% elsewhere).
+/// puts on its rules, for the same measured reason (a runtime branch in the
+/// packer's inner loop measured 1.17× the cost of the compile-time rule).
 ///
 /// The point of the operation is that these choices are cheap. A caller wanting AND
 /// instead of OR, or an adjacent difference instead of a central one, should not have
@@ -50,8 +52,8 @@
 /// TIER 3, AND THE NAME IS NOT OPENCV'S
 ///
 /// `cv::Sobel` + `cv::threshold` is a DIFFERENT computation: a 3x3 separable kernel
-/// with smoothing, against this operation's single-axis difference. CLAUDE.md forbids
-/// borrowing an OpenCV name for an operation that does not match it.
+/// with smoothing, against this operation's single-axis difference. A Tier 3
+/// operation does not borrow an OpenCV name it cannot honour.
 ///
 /// The border rule IS OpenCV's, though: `cv::filter2D` defaults to
 /// `BORDER_REFLECT_101`, so index -1 reads index 1 and index `w` reads index `w-2`.
@@ -66,6 +68,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>   // the two border columns and rows, as braced lists
 
 #include "../binMat.hpp"
 #include "../impl/kernel_util.hpp"
@@ -84,12 +87,14 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief How the two axes' results are combined. `Or` is the reference's.
+/// **API TIER 3.**
 enum class EdgeCombine { Or, And };
 
 /// @brief How a gradient is compared with the threshold. `Ge` is the reference's.
+/// **API TIER 3.**
 enum class EdgeRelation { Ge, Gt };
 
-/// @brief Which pixels are differenced. `Wide` is the reference's.
+/// @brief Which pixels are differenced. `Wide` is the reference's. **API TIER 3.**
 enum class EdgeSpatial {
     Wide,      ///< `|v[x+1] - v[x-1]|` -- the central difference, spanning two pixels
     Forward,   ///< `|v[x+1] - v[x]|`
@@ -273,7 +278,7 @@ inline uint32_t edgeMask32(const uint8_t* rowUp, const uint8_t* row, const uint8
 /// @param t Threshold, in source units.
 ///
 /// **THE DEFAULTS ARE THE REFERENCE.** `edgeThreshold(src, w, h, stride, dst, 17)`
-/// with no template arguments is `rl_fast_edge_filter_wide(img, 17)`.
+/// with no template arguments is the reference pipeline's edge filter at threshold 17.
 ///
 /// @note 8-bit-in, 1-bit-out, and **the byte never exists**: the comparison yields a
 /// boolean per pixel which goes straight into a word. Computing an 8-bit edge
@@ -338,7 +343,7 @@ inline void edgeThreshold(const SrcT* src, size_t width, size_t height, size_t s
                     }
                 }
                 // The two columns whose neighbour is outside the image. Two pixels a
-                // row, against the sixty-four that skipping whole words used to cost.
+                // row, against the sixty-four that skipping whole words would cost.
                 for (const size_t bx : {size_t{0}, width - 1}) {
                     const bool on =
                         impl::isEdge<C, R, S, SrcT>(src, width, height, srcStride, y, bx, tt);

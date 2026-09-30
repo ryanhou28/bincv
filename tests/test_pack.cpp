@@ -24,7 +24,7 @@
 // missing bias fails here rather than in a pipeline.
 //
 // * PADDING BITS. Every row's trailing partial word is checked to be zero past
-// `width` -- CLAUDE.md's hard rule, and word-wise reductions over-count without
+// `width` -- the padding invariant, and word-wise reductions over-count without
 // it. The widths are odd for the same reason.
 #include <cstdint>
 #include <cstdio>
@@ -338,7 +338,7 @@ size_t pbmRoundTrip(size_t w, size_t h, size_t& padBitsSet) {
     for (size_t y = 0; y < h; ++y) {
         for (size_t i = 0; i < words; ++i)
             if (a.constView().row(y)[i] != b.constView().row(y)[i]) ++diff;
-        // CLAUDE.md's hard rule, on the side that reads a file it did not write.
+        // The padding invariant, on the side that reads a file it did not write.
         for (size_t x = w; x < words * bincv::BinMat<W>::WordBits; ++x) {
             const W word = b.constView().row(y)[x / bincv::BinMat<W>::WordBits];
             if ((word >> (x % bincv::BinMat<W>::WordBits)) & W{1}) ++padBitsSet;

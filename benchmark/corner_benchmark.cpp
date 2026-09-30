@@ -1,17 +1,17 @@
-// -- the corner response map: THE SLIDING FORM AGAINST A COVARIANCE CALL PER
+// The corner response map: THE SLIDING FORM AGAINST A COVARIANCE CALL PER
 // POSITION.
 //
 // WHY THIS FILE EXISTS WHEN ALREADY MEASURED "incremental against recompute"
 //
-// the axis 1 measured that question on ops/reduce.hpp's own entry points: a
+// The reduction benchmarks measured that question on ops/reduce.hpp's own entry points: a
 // `SlidingWindowCount` sweep against a `countNonZero` per position, one plane, one
 // number. It reported 15.9x on a dense scan at 31x31 and that number is quoted in
-// three docstrings. this is the first CALLER of that shape in the MVP, and what it
+// three docstrings. This is the first CALLER of that shape in the frontend, and what it
 // sweeps is NOT one plane's popcount -- it is a 2x2 covariance of which only TWO
 // of the three numbers have an incremental form. `sumXX` and `sumYY` slide;
 // `sumXY` needs `magX & magY` split by `signX ^ signY`, nothing in ops/reduce.hpp
 // slides a split, and making it slide would cost two frame-sized planes per
-// pyramid level (the axis 3 already declined one). So the cross term is
+// pyramid level (the footprint work already declined one). So the cross term is
 // recomputed per position on BOTH sides of this comparison, and the saving is
 // bounded by the share of the work the other two numbers represent.
 //
@@ -35,18 +35,17 @@
 // expects it here would be wrong, and the only way to say so honestly is to
 // measure the ratio at THIS level, on the entry point actually ships.
 //
-// THE RULE, WRITTEN BEFORE MEASURING (CLAUDE.md: "write the decision rule before
-// measuring"):
+// THE RULE, WRITTEN BEFORE MEASURING:
 //
-// * SLIDING FASTER THAN RECOMPUTE AT EVERY BLOCK SIZE -> the axis 1's advantage
+// * SLIDING FASTER THAN RECOMPUTE AT EVERY BLOCK SIZE -> the sliding accumulator's advantage
 // survives being embedded in a caller that can only slide two thirds of its
 // state. ops/corner.hpp's "this is the sliding form" note stands, and the
 // magnitude recorded here -- not 15.9x -- is what a caller should plan with.
 // * SLIDING WITHIN THE MEASURED SPREAD OF RECOMPUTE, OR SLOWER -> that
 // CONTRADICTS a documented claim (ops/reduce.hpp's "WHICH SHAPE TO REACH
 // FOR" table and ops/covariance.hpp's docstring, both of
-// which point a dense sweep at the incremental form). CLAUDE.md's rule for
-// that case is explicit: report it, do not adjust the code to fit the doc. The
+// which point a dense sweep at the incremental form). The rule for that case:
+// report it, do not adjust the code to fit the doc. The
 // conclusion would be that the sliding form is not worth its complexity in
 // THIS caller, and ops/corner.hpp would need re-deciding rather than
 // re-measuring.
@@ -86,7 +85,7 @@
 // which is itself the finding. Both variants read the same four one-bit planes and
 // write the same float map; the sliding form's entire state is two accumulator
 // objects on the stack. So this is speed against speed at EQUAL footprint, with
-// nothing traded, which is the cleanest form CLAUDE.md's "report both" can take.
+// nothing traded, which is the cleanest form "report memory and speed together" can take.
 // The `operator new` count is measured on the same binary rather than asserted.
 //
 // Validity: measure_util.hpp's protocol -- volatile sink, calibrated batches,

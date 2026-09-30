@@ -141,8 +141,8 @@ private:
 /// @brief Non-owning view of an append target: the caller's buffer, its
 /// capacity, and the device counter the kernel advances.
 /// @tparam T The element the family emits -- a POD from features.hpp.
-/// @note A view, so it owns nothing (CLAUDE.md): the buffer is the caller's and
-/// nothing here allocates. The three fields travel together because
+/// @note A view, so it owns nothing: the buffer is the caller's and nothing
+/// here allocates. The three fields travel together because
 /// separating them is how a kernel ends up with a pointer and no bound.
 template <typename T>
 struct DeviceAppendBufferView {
@@ -225,6 +225,7 @@ inline DeviceAppendBufferView<T> appendBuffer(DeviceArray<T>& buffer,
 }
 
 /// @brief Reads the counter back and pairs it with the capacity it ran against.
+/// **API TIER 3** (transfer, no kernel).
 /// @return The copy's error code; `result` is written only on success.
 /// @note Synchronizes `stream`: the count is a host-side decision (how many
 /// elements to download, whether to re-run larger), so it cannot be read
@@ -244,9 +245,10 @@ inline cudaError_t readAppendResult(const DeviceAppendBufferView<T>& buffer,
     return cudaSuccess;
 }
 
-/// @brief Copies the appended elements to host memory.
-/// @param result The verdict from `readAppendResult` for THIS buffer. Taking it
-/// is the enforcement: there is no path from an append buffer to a host
+/// @brief Copies the appended elements to host memory. **API TIER 3**
+/// (transfer, no kernel).
+/// @param result The result object from `readAppendResult` for THIS buffer.
+/// Taking it is the enforcement: there is no path from an append buffer to a host
 /// array that does not pass through the object that knows whether the
 /// answer is complete.
 /// @param host At least `result.acceptTruncated()` elements.

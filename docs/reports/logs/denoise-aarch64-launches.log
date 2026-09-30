@@ -6,6 +6,7 @@
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # commit:   80ff0a8
+# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/denoise_benchmark.cpp=ca743927ddb3 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/denoise.hpp=991097fb81a3 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6
 # governor: performance
 # throttled before: throttled=0x80000
 # temp before: temp=63.3'C
@@ -1252,3 +1253,60 @@ row below that is not the operation:
 # temp after: temp=63.7'C
 # date:     2026-09-21T16:47:25-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio t1:OpenCV CV_8U/t1:binCV fused u32) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                     n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / OpenCV reference (8 cv:: calls):  10     4.1160     4.0600     4.2310  1.042     4.2%      --  [  4.0805,   4.1530]   0.88%   1.009x
+# i1 / binCV denoiseMedian3:             10    0.01400    0.01400    0.01400  1.000     0.0%      --  [ 0.01400,  0.01400]   0.00%   1.000x
+# t1 / OpenCV CV_8U                      10     3.4379     3.3349     3.4857  1.045     4.4%      --  [  3.4171,   3.4559]   0.56%   1.006x
+# t1 / OpenCV as-written                 10     5.0985     4.9701     5.1453  1.035     3.4%      --  [  5.0418,   5.1162]   0.73%   1.011x
+# t1 / binCV composed u32                10     0.2110     0.2098     0.2127  1.013     1.3%      --  [  0.2104,   0.2117]   0.31%   1.004x
+# t1 / binCV fused u32                   10    0.05941    0.05938    0.06072  1.023     2.3%      --  [ 0.05940,  0.06071]   1.11%   1.022x
+# t1 / binCV fused u64                   10    0.04731    0.04730    0.04732  1.000     0.0%      --  [ 0.04730,  0.04732]   0.02%   1.000x
+# t2 / OpenCV CV_8U                      10     1.5030     1.4679     1.5857  1.080     7.8%      --  [  1.4857,   1.5534]   2.25%   1.034x
+# t2 / OpenCV as-written                 10     2.0961     2.0466     2.3070  1.127    12.4%      --  [  2.0771,   2.1348]   1.38%   1.018x
+# t2 / binCV composed u32                10     0.2097     0.2083     0.2107  1.012     1.2%      --  [  0.2093,   0.2106]   0.32%   1.005x
+# t2 / binCV fused u32                   10    0.06481    0.06297    0.06602  1.048     4.7%      --  [ 0.06446,  0.06517]   0.55%   1.006x
+# t2 / binCV fused u64                   10    0.05129    0.05077    0.05277  1.039     3.9%      --  [ 0.05098,  0.05249]   1.47%   1.023x
+# t3 / OpenCV CV_8U                      10     2.2992     2.1440     2.3554  1.099     9.2%      --  [  2.2115,   2.3308]   2.59%   1.040x
+# t3 / OpenCV as-written                 10     3.6047     3.4547     3.6297  1.051     4.9%      --  [  3.5544,   3.6150]   0.84%   1.014x
+# t3 / binCV composed u32                10     0.2266     0.2261     0.2312  1.022     2.2%      --  [  0.2263,   0.2291]   0.63%   1.011x
+# t3 / binCV fused u32                   10    0.06787    0.06704    0.07380  1.101    10.0%      --  [ 0.06705,  0.07082]   2.78%   1.044x
+# t3 / binCV fused u64                   10    0.07172    0.07069    0.07338  1.038     3.8%      --  [ 0.07100,  0.07322]   1.55%   1.021x
+# t4 / OpenCV CV_8U                      10     3.4930     3.2841     3.9134  1.192    18.0%      --  [  3.3746,   3.6895]   4.51%   1.056x
+# t4 / OpenCV as-written                 10     7.0009     6.8178     7.6507  1.122    11.9%      --  [  6.9279,   7.3565]   3.06%   1.051x
+# t4 / binCV composed u32                10     0.3896     0.3892     0.3901  1.002     0.2%      --  [  0.3894,   0.3896]   0.03%   1.000x
+# t4 / binCV fused u32                   10     0.1263     0.1263     0.1263  1.000     0.0%      --  [  0.1263,   0.1263]   0.00%   1.000x
+# t4 / binCV fused u64                   10    0.08548    0.08548    0.08550  1.000     0.0%      --  [ 0.08548,  0.08548]   0.00%   1.000x
+# 
+# RATIO  t1:OpenCV CV_8U  /  t1:binCV fused u32   over 10 launches
+#   paired per launch (the published estimator)
+#     median 57.7133   min 54.9315   max 58.6713   scatter 6.5%
+#     bootstrap 95% CI of the median: [56.9065, 58.0322]   +/- 0.98%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.014x
+#   ratio of the two medians, same launches
+#     point 57.8665   bootstrap 95% CI: [56.4702, 58.1708]
+#     the two intervals differ by 0.76% and 0.24% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       row below that is not the operation:
+#     t1       OpenCV minimal 1228800 B (4 CV_8U frames, temporaries reus | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  passes  checksum
+#     t2       OpenCV minimal 307200 B (4 CV_8U frames, temporaries reuse | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  passes  checksum
+#     t3       OpenCV minimal 76800 B (4 CV_8U frames, temporaries reused | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  passes  checksum
+#     t4       OpenCV minimal 22560 B (4 CV_8U frames, temporaries reused | IMPLEMENTATION  ns/pixel  vs OpenCV  working set  passes  checksum

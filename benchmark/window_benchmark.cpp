@@ -1,38 +1,34 @@
-// -- incremental versus recomputed window reductions, and the two
-// other interface questions that were registered alongside it.
-//
-// cannot start until this closes, because all three axes decide the SHAPE of
-// ops/reduce.hpp rather than its speed.
+// Window reductions: incremental versus recomputed, and two other interface
+// questions measured alongside it. All three decide the SHAPE of ops/reduce.hpp
+// rather than its speed.
 //
 // ===========================================================================
-// WHAT CHANGED WHEN LANDED, AND WHY THIS FILE HAD TO BE RE-RUN
+// WHAT THIS FILE TIMES
 // ===========================================================================
 //
-// The axes below closed against measurement copies: the winning variants lived in
-// this file, because writing them into ops/reduce.hpp in the same commit as the
-// measurement that gated them is the inversion the measurement protocol exists to
-// prevent. A later round landed them for real, so this file now times the SHIPPED
-// entry points --
-// bincv::SlidingWindowCount, bincv::countCovariance and the four-argument
-// bincv::countAndSplit -- and a copy survives here only where nothing shipped
-// (INC-COL, which axis 1 explicitly declines to expose).
+// The SHIPPED entry points -- bincv::SlidingWindowCount, bincv::countCovariance and
+// the four-argument bincv::countAndSplit -- against a recompute-per-window
+// baseline. The winning variants were first measured as copies living in this file,
+// because writing them into ops/reduce.hpp in the same commit as the measurement
+// that gated them is the inversion the measurement protocol exists to prevent; a
+// copy survives here only where nothing shipped (INC-COL, which axis 1 deliberately
+// declines to expose).
 //
-// also landed a FOURTH change that no axis asked for: impl::countViewRegion
+// The recompute baseline every ratio below is divided by is up to 1.32x faster than
+// the one those copies were first measured against: impl::countViewRegion once
 // carried one accumulator across a whole region, one dependency chain through the
-// popcount latency, and its row bodies now each return their own partial sum. That
-// landed FIRST of the four, so the recompute baseline every ratio below is divided
-// by is up to 1.32x faster than the one measured then. The axis-1 ratios here are
-// therefore SMALLER than the originals, by design and not by regression: predicted
-// roughly 5.6x and 15x where the earlier run measured 7.3x and 20x. This file
-// records both sets side by side; neither replaces the other, because they answer
-// "what did the accumulator buy" and "what does it buy in the shipped library".
+// popcount latency, and its row bodies now each return their own partial sum. The
+// axis-1 ratios here are therefore SMALLER than the figures quoted from that first
+// measurement, by design and not by regression: predicted roughly 5.6x and 15x
+// where it measured 7.3x and 20x. Both sets are recorded, because they answer
+// different questions -- "what did the accumulator buy" and "what does it buy in
+// the shipped library".
 //
 // ===========================================================================
 // AXIS 1 -- recompute per window versus a sliding accumulator
 // ===========================================================================
 //
-// DECISION RULE, verbatim from and recorded in 
-// before this file was written:
+// DECISION RULE, written before this file was:
 //
 // * Recompute within 15% of incremental at 31x31 -> keep the simpler recompute
 // API, close, and record that incremental state was rejected on data
@@ -40,11 +36,13 @@
 // BEFORE this is written against the simpler form
 //
 // The rule names a window size but not an access pattern, and the two things it
-// asks for -- "~200 keypoints, per the reference gftt_max_corners" and "include
+// asks for -- "~200 keypoints, the reference pipeline's maximum" and "include
 // the heavy-overlap case, since that is what favors incremental" -- are not the
-// same workload. So all three patterns the MVP actually contains are measured and
+// same workload. So all three patterns the pipeline actually contains are measured and
 // reported separately, and the rule is applied to each rather than to an average
 // that would hide the disagreement:
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // SPARSE 200 isolated windows at scattered keypoints: the
 // LK covariance per tracked keypoint. Windows barely overlap.
@@ -65,7 +63,7 @@
 // most likely to win where popcount is expensive (see). Costs an
 // array of (sweepWidth + W - 1) uint32 counters, which is the extra
 // memory the interface would have to let a caller provide (no heap
-// allocation inside kernels, CLAUDE.md).
+// allocation inside kernels).
 // INC-ROW slides vertically only, keeping ONE scalar accumulator: the window
 // sum gains the incoming row's windowed popcount and loses the
 // outgoing row's. Word-parallel like the shipped kernel, and needs
@@ -122,7 +120,7 @@
 // that both memory and speed be reported, since this is precisely a case where the
 // two goals may disagree. No threshold is invented here. Both numbers are printed,
 // including the plane's formation cost amortized over the keypoints that use it,
-// and the weighing is against CLAUDE.md's stated tiebreak: memory wins when the
+// and the weighing is against the stated tiebreak: memory wins when the
 // goals conflict and no explicit choice has been made.
 //
 // ===========================================================================
@@ -172,7 +170,7 @@ constexpr int kRepeats = 7;
 constexpr double kTargetMs = 40.0;
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
-constexpr int kKeypoints = 200;  // the reference gftt_max_corners
+constexpr int kKeypoints = 200;  // the reference pipeline's maximum corner count
 const int kWindows[] = {7, 15, 31};
 
 // ---------------------------------------------------------------------------
@@ -258,7 +256,7 @@ size_t sweepRecompute(const BinMatConstView<Word>& v, const Sweep& s, int W) {
 
 /// @brief INC-COL: the separable box accumulator. Per-column sums over the
 /// window's rows, slid in x and then in y. Issues no popcount.
-/// @param colSum Caller-provided scratch -- kernels do not allocate (CLAUDE.md).
+/// @param colSum Caller-provided scratch -- kernels do not allocate.
 /// Its size, (sx + W - 1) counters, IS the extra memory this design costs.
 template <typename Word>
 size_t sweepIncrementalColumns(const BinMatConstView<Word>& v, const Sweep& s, int W,
@@ -615,7 +613,7 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
                     t[0].medianNs / n, t[1].medianNs / n, t[0].medianNs / t[1].medianNs,
                     t[0].spreadPct(), t[1].spreadPct());
     }
-    // CLAUDE.md requires memory and speed together, and "there is none" is an
+    // Memory and speed are reported together, and "there is none" is an
     // answer that still has to be stated: both forms read the same views and
     // return by value, so neither needs scratch. Axis 1 and axis 3 both carry a
     // byte column; this one would look like an omission without the line.
@@ -760,7 +758,7 @@ int main() {
     std::printf("AXIS 3 -- selector plane versus a four-argument countAndSplit\n");
     std::printf("===========================================================\n");
     std::printf(" No numeric threshold exists for this axis. Both memory and speed "
-                "are reported; the\n weighing is against CLAUDE.md's tiebreak -- "
+                "are reported; the\n weighing is against the tiebreak -- "
                 "memory wins when the goals conflict.\n");
     ok = runAxis3<uint32_t>("uint32_t", d32) && ok;
 

@@ -35,8 +35,7 @@
 /// The 1024 values below are `bit_pattern_31_` from OpenCV's
 /// modules/features2d/src/orb.cpp, which carries the BSD 3-clause license
 /// (Copyright (c) 2009, Willow Garage, Inc.) -- NOT OpenCV's newer Apache-2.0;
-/// the file-level notice governs, and an earlier comment in ops/descriptor.hpp
-/// mis-stated it. Retaining that notice is the license's condition on source
+/// the file-level notice governs. Retaining that notice is the license's condition on source
 /// redistribution, so it is reproduced here, where the copied material lives,
 /// and in THIRD_PARTY_NOTICES.md:
 ///

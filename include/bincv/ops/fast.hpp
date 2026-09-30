@@ -55,7 +55,9 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief One detected corner.
+/// @brief One detected corner. **API TIER 2** -- the corner `cv::FAST` reports as a
+/// `cv::KeyPoint`, without its size, angle and octave fields, and with a
+/// different score (see the tier note).
 struct FastCorner {
     int x;
     int y;
@@ -131,8 +133,7 @@ __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, lon
     // FOUR COMPASS POSITIONS BEFORE THE OTHER TWELVE. About 1% of pixels on a real
     // frame are corners, so nearly every 32-pixel group can be dismissed from four
     // loads -- and dismissing it here skips twelve loads AND the whole run-length
-    // loop, which is most of this function. The scalar path has had this reject since
-    // it was written; the vector path was paying full price on every group.
+    // loop, which is most of this function.
     for (int c4 = 1; c4 < 4; c4 += 2) {   // 4 and 12; 0 and 8 came from stage 0
         const int k = c4 * 4;
         const __m256i v =
@@ -217,16 +218,9 @@ inline uint32_t fastMask32(const uint8_t* p, long long stride, const long long* 
     const uint8x16_t limit = vdupq_n_u8(static_cast<uint8_t>(arcLength - 1));
 
     uint8x16_t mHi[16], mLo[16];
-    // STAGE 0: TWO RING POSITIONS, NOT FOUR.
-    // Compass points 0 and 8 are opposite, and ANY window of nine consecutive ring
-    // positions contains at least one of them -- 1..9 holds 8, and 9..1 (wrapping)
-    // holds 0. So a group where neither passes cannot contain a 9-arc, and two loads
-    // settle it where four were being paid.
-    //
-    // This is where the time actually is. A threshold sweep showed binCV
-    // WINNING 1.67-1.86x at high corner density -- the contiguity test is good -- and
-    // LOSING 2.4x at zero density, where nothing runs but the reject. At a realistic
-    // 1.1% the two cancelled to 1.09x. The reject path was the whole gap.
+    // STAGE 0: TWO RING POSITIONS, NOT FOUR -- see the AVX2 path for why compass
+    // points 0 and 8 alone settle a 9-arc, and for the density sweep that put the
+    // whole gap against cv::FAST in the reject path.
     {
         const uint8x16_t v0 = vld1q_u8(p + ringOff[0]);
         const uint8x16_t v8 = vld1q_u8(p + ringOff[8]);
@@ -283,8 +277,8 @@ inline uint32_t fastMask32(const uint8_t* p, long long stride, const long long* 
     return static_cast<uint32_t>(vget_lane_u16(vreinterpret_u16_u8(f), 0));
 }
 
-/// @brief NEON is baseline on aarch64, so there is nothing to dispatch on.
-/// @brief Force the portable arm, for the benchmark and the tests. **INTERNAL.**
+/// @brief Force the portable arm, for the benchmark and the tests. NEON is baseline
+/// on aarch64, so this switch is the only thing to dispatch on. **INTERNAL.**
 inline bool& fastSimdEnabled() {
     static bool on = true;
     return on;
@@ -301,8 +295,7 @@ constexpr size_t kFastLanes = 16;
 ///
 /// @param arcLength Contiguous ring pixels required. 9 is `cv::FAST`'s default and
 /// the one ORB uses.
-/// @param out,capacity Caller-provided; **no allocation happens here**
-/// ([CLAUDE.md](../../../CLAUDE.md)).
+/// @param out,capacity Caller-provided; **no allocation happens here**.
 /// @param truncated Set when more corners were found than `capacity` held. **A
 /// silently truncated detection looks like a sparse image**, which is the kind
 /// of failure that gets diagnosed as a tuning problem for weeks.
@@ -393,9 +386,8 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
 
             // FOUR LOADS BEFORE SIXTEEN. Most pixels are not corners and this is what
             // makes that cheap: the compass points alone decide it, and only a
-            // survivor pays for the full ring. Reading all sixteen first -- which this
-            // function did -- cost 16x the loads on every rejected pixel and made
-            // binCV 16x SLOWER than cv::FAST (measured, before this).
+            // survivor pays for the full ring. Reading all sixteen first costs 16x the
+            // loads on every rejected pixel, measured at 16× SLOWER than cv::FAST.
             const long long c0 = static_cast<long long>(p[ringOff[0]]);
             const long long c4 = static_cast<long long>(p[ringOff[4]]);
             const long long c8 = static_cast<long long>(p[ringOff[8]]);
@@ -421,8 +413,8 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
             // the wrap explicit, and `x &= x >> 1` repeated `arcLength - 1` times
             // leaves a bit set exactly where a run of that length STARTS. Eight
             // shift-ands replace a 24-iteration loop with a data-dependent branch in
-            // it -- and the loop was most of what made this function 11x slower than
-            // cv::FAST on a corner-dense image.
+            // it -- and that loop is most of an 11× loss to cv::FAST on a
+            // corner-dense image.
             const auto hasRun = [arcLength](uint32_t m) {
                 uint32_t acc = m | (m << 16);
                 for (int i = 1; i < arcLength; ++i) acc &= acc >> 1;
@@ -594,12 +586,6 @@ BINCV_FASTBIT_FN __m256i fastRing256(const uint8_t* p, int dx) {
     return _mm256_or_si256(_mm256_srli_epi64(a, s), _mm256_slli_epi64(b, 8 - s));
 }
 
-/// @brief `OR over all 16 starts of (AND of `arcLength` consecutive)`, for 256 pixels.
-/// **INTERNAL**. `fastArcAny`'s schedule, in place, for the same reason.
-/// @note **In place is not a tidiness choice, it is the whole difference.** The first
-/// version of this held `r2`, `r4`, `r8` and an accumulator — sixty-four live
-/// `__m256i` against a register file of sixteen — and ran at 0.7 operations per
-/// cycle. Reusing one array of sixteen plus the wrap saves fits.
 /// @brief One doubling step, with the step a COMPILE-TIME constant. **INTERNAL.**
 /// @note **This is a template and not a parameter for a measured reason.** With a
 /// runtime step every index into `v` is variable, so the compiler cannot unroll
@@ -615,6 +601,12 @@ BINCV_FASTBIT_FN void fastArcStep256(__m256i* v) {
     }
 }
 
+/// @brief `OR over all 16 starts of (AND of `arcLength` consecutive)`, for 256 pixels.
+/// **INTERNAL**. `fastArcAny`'s schedule, in place, for the same reason.
+/// @note **In place is not a tidiness choice, it is the whole difference.** Holding
+/// `r2`, `r4`, `r8` and an accumulator — sixty-four live `__m256i` against a
+/// register file of sixteen — runs at 0.7 operations per cycle. Reusing one
+/// array of sixteen plus the wrap saves fits.
 BINCV_FASTBIT_FN __m256i fastArcAny256(__m256i* v, int arcLength) {
     // NINE IS `cv::FAST`'s DEFAULT AND ORB'S, so it gets the constant schedule
     // 1 -> 2 -> 4 -> 8, and then the LAST step is folded into the reduction: once
@@ -669,7 +661,7 @@ BINCV_FASTBIT_FN __m256i fastArcAny256(__m256i* v, int arcLength) {
 /// one pass of sixteen ANDs and an OR-reduce, and `L = 9` is the corner mask the
 /// detector wanted anyway.
 ///
-/// @param first,last Inclusive range of `L` to produce, written to `out[L - 9]`.
+/// @tparam L The arc length to produce, 9..16; the mask is written at `out + (L - 9) * 8`.
 template <int L>
 BINCV_FASTBIT_FN void fastArcMask256(const __m256i* v, uint32_t* out) {
     constexpr int kOff = L - 8;
@@ -687,9 +679,10 @@ BINCV_FASTBIT_FN void fastArcMask256(const __m256i* v, uint32_t* out) {
 /// @note **Unrolled with `L` a template parameter, and the reason is measured.** Written as a
 /// loop over a runtime `L`, the index `v[(k + L - 8) & 15]` is variable — so `v`
 /// cannot stay in registers and the whole array goes to memory. On x86 that is
-/// nearly free because sixteen `__m256i` were spilling anyway; **on aarch64,
-/// where they FIT in the thirty-two registers, it cost 2.36× → 1.98× on the
-/// reference device.** The same mistake `fastArcStep256` was already fixed for.
+/// nearly free because sixteen `__m256i` are spilling anyway; **on aarch64,
+/// where they FIT in the thirty-two registers, a runtime `L` drops the reference
+/// device (a Raspberry Pi 4) from 2.36× to 1.98× against cv::FAST.** The same
+/// trap `fastArcStep256` avoids.
 BINCV_FASTBIT_FN void fastArcMasksRest256(const __m256i* v, uint32_t* out) {
     fastArcMask256<10>(v, out);
     fastArcMask256<11>(v, out);
@@ -839,9 +832,10 @@ BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t c
 /// **NO ADAPTIVE SCORING HERE, AND MEASURED WHY.** The
 /// AVX2 path chooses per chunk between transposing each corner's ring and reading the
 /// score off eight nested arc-length masks, and that choice is worth **1.39× → 1.71×**
-/// there. Ported to NEON it made the reference device **SLOWER — 2.36× → 2.10×** — and
-/// the sweep showed the loss even at a threshold that never takes the mask path, so it
-/// is the RESTRUCTURING and not the masks.
+/// against cv::FAST there. A NEON port of the same choice makes the reference device
+/// (a Raspberry Pi 4) **SLOWER — 2.36× down to 2.10×** — and the sweep shows the loss
+/// even at a threshold that never takes the mask path, so it is the RESTRUCTURING
+/// and not the masks.
 ///
 /// The reason is that the mask form must keep all sixteen `v` vectors live across up to
 /// eight passes, where this fold **consumes them in place** and they are dead after.

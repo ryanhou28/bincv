@@ -59,21 +59,14 @@ struct Fold {
 /// and is wrong the moment the source wraps a buffer whose padding is
 /// dirty. ops/shift.hpp records the concrete failure at 5 pixels wide, and
 /// test_cuda_morphology uploads a deliberately dirty source for it.
-/// @note This was briefly a local copy spelling the blend
-/// `fill ^ ((w ^ fill) & tailMask)`, on the belief that it saved a LOP3 over
-/// the host's `(w & tailMask) | (fill & ~tailMask)`. In isolation the belief
-/// is backwards: probed on sm_86 with a runtime fill, the host spelling is a
-/// pure function of three registers and fuses to ONE LOP3.LUT (0xb8) where
-/// the XOR form costs THREE (0x3c, 0xc0, 0x3c) -- the literal-mask penalty
-/// that motivated the re-spelling applies only when the mask is a
-/// compile-time constant, and `tailMask` arrives in the constant bank.
-/// @note AND IT DOES NOT REACH THIS KERNEL, which is the point worth keeping.
-/// Compiled both ways, this translation unit is instruction-identical --
-/// 17,152 instructions, 1,134 LOP3, 859 SHF, 80 BREV either way -- because
-/// the two hot call sites (`bitsAt`) pass a literal zero fill, where both
-/// spellings collapse to a single AND. The probe measured a real difference
-/// at a call shape this kernel does not have. Switched to the host's
-/// function for the ONE-DEFINITION reason, not for instructions.
+/// @note The host's function, not a local spelling of the blend, for the
+/// one-definition reason and not for instructions: the two hot call sites
+/// (`bitsAt`) pass a literal zero fill, where any spelling of the blend
+/// collapses to a single AND, so this translation unit's instruction count
+/// (17,152 instructions, 1,134 LOP3 on sm_86) does not depend on how the
+/// blend is written. Where it would -- a runtime fill -- the host's
+/// `(w & tailMask) | (fill & ~tailMask)` is the cheaper form anyway, fusing to
+/// one LOP3.LUT against three for an XOR spelling.
 __device__ inline uint32_t extendedWord(const uint32_t* row, long long j, size_t words,
                                         uint32_t tailMask, uint32_t fill) {
     return bincv::impl::extendedRowWord<uint32_t>(row, static_cast<ptrdiff_t>(j), words,
@@ -352,8 +345,8 @@ __global__ void morphKernel(DeviceBinMatConstView src, DeviceBinMatView dst, Mor
             }
         }
 
-        // CLAUDE.md's hard rule: whatever the fold's identity was, the bits past
-        // `width` are zero on return.
+        // The padding invariant: whatever the fold's identity was, the bits
+        // past `width` are zero on return.
         if (i == words - 1) acc &= a.tailMask;
 
         // THE BAND FIXUP, WORD-OWNED AND IN-REGISTER. Only the thread that owns

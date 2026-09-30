@@ -11,7 +11,7 @@
 //
 // This measures the three arms on identical content:
 //
-// (a) `cv::FAST` on the binary frame stored as CV_8U -- CLAUDE.md's denominator
+// (a) `cv::FAST` on the binary frame stored as CV_8U -- the denominator
 // (b) binCV's WIDE detectFast on the same CV_8U buffer -- what has been measured so far
 // (c) binCV's BIT-PLANE detectFast on the same content -- the question
 //

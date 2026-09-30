@@ -4,11 +4,10 @@
 /// @brief The vocabulary every kernel under ops/ is written in: the row tail
 /// mask, the stride sanity check, and the overlap predicates.
 ///
-/// Extracted from ops/logic.hpp unchanged, because the second kernel
-/// header needed the same helpers and a copy would have been a second place for
-/// the aliasing rule to drift from the first. binds every kernel added under
-/// ops/, so the predicate that enforces it belongs where every kernel can reach
-/// it rather than inside the first kernel that happened to need it.
+/// Shared by every kernel header rather than defined in the first one that
+/// needed it: a copy would be a second place for the aliasing rule to drift from
+/// the first. The rule binds every kernel under ops/, so the predicate that
+/// enforces it belongs where every kernel can reach it.
 ///
 /// Everything here is `impl::` and internal. It is not part of the public API and
 /// carries no stability promise.
@@ -17,7 +16,7 @@
 /// kernel families need different halves of the aliasing rule:
 ///
 /// viewsShareNoWord -- no shared word at all.
-/// destinationAliasIsSafe-- the above, OR exactly the same words.
+/// destinationAliasIsSafe -- the above, OR exactly the same words.
 ///
 /// ops/logic.hpp uses the second: its operations are pointwise in the word
 /// index, so `m &= other` reads each word immediately before overwriting it.
@@ -57,12 +56,12 @@ BINCV_HOST_DEVICE constexpr unsigned long long srcMax() {
 /// @note BINCV_HOST_DEVICE, and still constexpr -- the annotation is added to the
 /// declaration, it does not replace anything. One value in, one level out, no
 /// memory and no loop, so it is shareable by the rule in core/error.hpp. The
-/// CUDA backend's N-bit packer calls THIS: it used to carry a
-/// `quantScaleDevice` that restated the same integer expression, and a
-/// divergence this library deliberately preserves is the worst possible thing
-/// to keep in two places -- a drifted copy would look like the bug being
-/// fixed. `quantThresholds` below stays host-only on purpose: it loops over
-/// the whole source range to build a table, which is a traversal.
+/// CUDA backend's N-bit packer calls THIS rather than restating the integer
+/// expression in device code: a divergence this library deliberately
+/// preserves is the worst possible thing to keep in two places, because a
+/// drifted copy would look like the bug being fixed. `quantThresholds` below
+/// stays host-only on purpose: it loops over the whole source range to build
+/// a table, which is a traversal.
 template <typename SrcT>
 BINCV_HOST_DEVICE constexpr unsigned quantScale(SrcT v, unsigned maxValue) {
     const unsigned long long m = srcMax<SrcT>();
@@ -96,25 +95,14 @@ inline void quantThresholds(unsigned maxValue, SrcT* out) {
 
 
 /// @brief 8x8 bit-matrix transpose: bit (8r + c) moves to bit (8c + r).
-/// @note **Moved here out of an `#ifdef BINCV_WITH_OPENCV`.** It is three
-/// delta-swaps of a `uint64_t` and has nothing to do with OpenCV, but it was
-/// declared beside the conversions that happened to use it -- so a core-only
-/// build could not reach the one primitive that makes N-bit packing cheap. The
-/// same shape of gap found with `packRowCmp`.
-/// @note The pivot of every value/plane layout change. One call moves 8 pixels
-/// x 8 planes between the two layouts -- byte r holding plane r's bits in, byte c
-/// holding pixel c's value out -- so packing runs at ~3 ops per pixel for ALL
-/// planes instead of one bit test per (pixel, plane). Hacker's Delight 7-3; an
-/// involution, so both directions call the same function.
-/// @note Planes p >= N hold zero bytes on the way in, so value bits >= N are zero on
-/// the way out -- the N < 8 case needs no masking.
-/// @brief 8x8 bit-matrix transpose: bit (8r + c) moves to bit (8c + r).
-/// @note The pivot of QuantMat's cv::Mat conversions. One call moves 8
-/// pixels x 8 planes between the two layouts -- byte r holding plane r's
-/// bits in, byte c holding pixel c's value out -- so the conversion runs at
-/// ~3 ops per pixel for ALL planes instead of one bit test per (pixel,
-/// plane). Three delta-swaps (Hacker's Delight 7-3); an involution, so both
-/// conversion directions call the same function.
+/// @note The pivot of every value/plane layout change -- QuantMat's cv::Mat
+/// conversions and ops/pack.hpp's N-bit packer. One call moves 8 pixels x 8
+/// planes between the two layouts -- byte r holding plane r's bits in, byte
+/// c holding pixel c's value out -- so the conversion runs at ~3 ops per
+/// pixel for ALL planes instead of one bit test per (pixel, plane). Three
+/// delta-swaps (Hacker's Delight 7-3); an involution, so both directions call
+/// the same function. Core, not OpenCV-gated: it has nothing to do with
+/// OpenCV, and a core-only build needs it.
 /// @note Planes p >= N hold zero bytes on the way in, so value bits >= N are zero
 /// on the way out -- the N < 8 case needs no masking.
 inline uint64_t transpose8x8(uint64_t x) {
@@ -221,16 +209,16 @@ inline bool everyRowPairIsDisjoint(const BinMatConstView<WordType>& src,
 
 /// @brief True when `src` and `dst` share no word at all -- half of the aliasing rule.
 /// @note Three steps, cheapest first, and every one of them can only ACCEPT: the
-/// verdict "they share a word" is reached exactly once, by the exhaustive
-/// per-row test. A bounding-box test alone rejected interleaved row bands
-/// and column tiles that share no byte -- legal views for a kernel that takes
-/// any {ptr, width, height, stride}, correct in
-/// release, and an abort in debug.
+/// answer "they share a word" is reached exactly once, by the exhaustive
+/// per-row test. A bounding-box test alone would reject interleaved row
+/// bands and column tiles that share no byte -- legal views for a kernel
+/// that takes any {ptr, width, height, stride}: correct in release, and an
+/// abort in debug.
 template <typename WordType>
 inline bool viewsShareNoWord(const BinMatConstView<WordType>& src,
                              const BinMatView<WordType>& dst) {
     // 1. Nothing is addressed, so nothing can be shared. (A null pointer on a
-    // non-empty view has its own assert; it is not this predicate's verdict.)
+    // non-empty view has its own assert; it is not this predicate's answer.)
     if (src.ptr == nullptr || dst.ptr == nullptr) return true;
     if (src.width == 0 || src.height == 0 || dst.width == 0 || dst.height == 0) return true;
 
@@ -278,9 +266,9 @@ inline bool destinationAliasIsSafe(const BinMatConstView<WordType>& src,
 /// @note The one internal inconsistency a view can carry that neither the pixel
 /// loop nor the aliasing check would notice: with `stride < ceil(width /
 /// WordBits)` consecutive rows overlap, so the kernel reads and writes each
-/// row through the previous one's tail. Measured, before this was asserted:
-/// bitwiseNot over a 64x3 view at stride 1 produced three rows of
-/// `ffff0000` from a source of `0000ffff`, in every build, silently.
+/// row through the previous one's tail. Without this check, bitwiseNot over
+/// a 64x3 view at stride 1 produces three rows of `ffff0000` from a source of
+/// `0000ffff`, in every build, silently.
 /// @note BinMat's wrap constructor rejects the same numbers by name, so this only
 /// ever fires for a hand-built view -- which is exactly what a kernel takes,
 /// and therefore where the check has to live.
@@ -298,20 +286,19 @@ inline bool strideCoversARow(size_t width, size_t height, size_t stride) {
 /// square window around a keypoint, and every such operation has to agree about
 /// which keypoints it may read at all: orientation's disc is inscribed in this
 /// square, and BRIEF's reach is the largest offset its pattern takes on either
-/// axis. Written out per call site it was the same inequality in seven
-/// spellings across two headers and two kernel files -- and two of those
+/// axis. Written out per call site it is the same inequality in seven
+/// spellings across two headers and two kernel files, and two of those
 /// drifting by one would mean orientation accepting a keypoint the descriptor
-/// then rejects, which is not a crash but a silently short descriptor set.
+/// then rejects -- not a crash but a silently short descriptor set.
 ///
 /// @note BINCV_HOST_DEVICE: scalar and traversal-free, so one definition serves
 /// the host loops and the backend's kernels rather than a device twin that
 /// has to be held bit-exact by hand.
-/// @note This is the seven call sites' inequality UNCHANGED, deliberately. A
-/// half-extent below zero is not reachable from any caller -- a radius is
+/// @note A half-extent below zero is not reachable from any caller -- a radius is
 /// unsigned at the API and `briefPatternReach` starts at zero and only grows
-/// -- so a guard against it would be a branch that cannot fire, and adding
-/// one here would also make this predicate answer differently from the code
-/// it replaces. Consolidating and changing behaviour are separate edits.
+/// -- so there is no guard against it: a branch that cannot fire would also
+/// make this predicate answer differently from the inequality its callers
+/// wrote.
 BINCV_HOST_DEVICE inline bool squareInsideImage(long long cx, long long cy, int half,
                                                 size_t width, size_t height) {
     const long long h = static_cast<long long>(half);

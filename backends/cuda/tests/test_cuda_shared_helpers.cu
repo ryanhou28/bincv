@@ -260,8 +260,8 @@ uint32_t bits(float f) {
 // ---------------------------------------------------------------------------
 // impl::thresholdCutoff -- ops/threshold.hpp
 //
-// This is the helper the hoist was for: it used to live inside the
-// BINCV_WITH_OPENCV block, and this gate configures -DBINCV_USE_OPENCV=OFF, so
+// This is the helper that has to live OUTSIDE the BINCV_WITH_OPENCV block:
+// this gate configures -DBINCV_USE_OPENCV=OFF, so
 // before the hoist a device threshold could only have been compared against a
 // copy of the reduction written in a test.
 // ---------------------------------------------------------------------------

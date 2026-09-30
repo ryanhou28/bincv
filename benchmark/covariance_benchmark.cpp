@@ -1,13 +1,14 @@
-// -- the LK gradient covariance, fused against composed, AT THIS LEVEL.
+// The LK gradient covariance, fused against composed, AT THIS LEVEL.
 //
 // WHY THIS FILE EXISTS WHEN window_benchmark.cpp ALREADY MEASURED "fused versus
 // composed"
 //
-// the axis 2 measured that question one level down, on the REDUCTION entry points
-// and with a precomputed `sign_x ^ sign_y` plane on both sides. ships neither
+// The reduction benchmarks measured that question one level down, on the REDUCTION
+// entry points and with a precomputed `sign_x ^ sign_y` plane on both sides. The
+// tracker ships neither
 // of those things: it ships `gradientCovariance`, which calls the FOUR-ARGUMENT
 // countCovariance -- the form that XORs the two sign planes inside the word loop
-// and needs no plane at all (the axis 3, memory wins CLAUDE.md's tiebreak). The
+// and needs no plane at all (memory wins the tiebreak). The
 // four-argument form loads a fourth stream per word, so it is a different mix of
 // loads to popcounts than the plane form a measurement timed, and the redundancy a
 // composition pays is a different fraction of a bigger number.
@@ -16,15 +17,14 @@
 // inherited from a measurement of something adjacent. That is the whole content of
 // this file.
 //
-// THE RULE, WRITTEN BEFORE MEASURING (CLAUDE.md: "write the decision rule before
-// measuring"):
+// THE RULE, WRITTEN BEFORE MEASURING:
 //
-// * Fused beats composed at W=31 -> the earlier axis holds at this level;
+// * Fused beats composed at W=31 -> the earlier measurement holds at this level;
 // ops/covariance.hpp's "reach for the fused entry point" note is confirmed and
 // nothing moves.
 // * Fused within noise of composed, or SLOWER -> that CONTRADICTS a documented
-// claim (that axis, and ops/reduce.hpp). CLAUDE.md's rule for
-// that case is explicit: report it, do not adjust the code to fit the doc.
+// claim (ops/reduce.hpp's). The rule for that case: report it, do not adjust
+// the code to fit the doc.
 // The implementation would then be resting on a ratio that does not exist
 // at its own level, and "built on the fused entry point" would need
 // re-deciding rather than re-measuring.
@@ -44,11 +44,11 @@
 // the same popcounts, THREE traversals, and 6 word loads per word
 // index against the fused pass's 4. Also no scratch -- so this
 // comparison is speed against speed with memory held equal, which is
-// what makes it a clean confirmation of axis 2 rather than a mixture
-// of axes 2 and 3.
+// what makes it a clean confirmation of the reduction result rather than a
+// mixture of that result and the footprint trade.
 // FUSED+PLANE / COMPOSED+PLANE
 // The same two, with a caller-held `sign_x ^ sign_y` plane. They are
-// here because CLAUDE.md requires memory and speed to be reported
+// here because memory and speed are reported
 // TOGETHER: the plane forms are faster and cost a frame-sized plane
 // per pyramid level, and a reader weighing the choice needs both
 // numbers on one page. The plane's formation cost is reported
@@ -57,12 +57,14 @@
 // the alternative.
 //
 // THE WORKLOAD IS THE LK ONE: 200 keypoints (the reference pipeline's
-// gftt_max_corners), one window each, at 640x480, scattered so that windows near
+// maximum corner count), one window each, at 640x480, scattered so that windows near
 // the border clip. Windows are NOT swept in a column here -- a caller that sweeps a
 // column should be calling SlidingWindowCount for sumXX and sumYY instead (
 // axis 1: 5.96x-15.9x, which are single-plane countNonZero sweeps; the cross term
 // has no incremental form and is recomputed per position), and
 // ops/covariance.hpp says so in its docstring.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // Validity: measure_util.hpp's protocol -- volatile sink, four rotating inputs,
 // calibrated batches, interleaved variants, spread reported next to the median. And
@@ -89,8 +91,8 @@
 // that produced the speed column.
 //
 // The "0 B" beside `fused` is the whole reason ships the slower of the two
-// selector forms (the axis 3: the plane is 11-14% faster and costs a fifth
-// frame-sized plane per pyramid level; CLAUDE.md's tiebreak takes the memory).
+// selector forms (the plane is 1.11-1.14x faster and costs a fifth frame-sized
+// plane per pyramid level; the tiebreak takes the memory).
 // Printed as a literal it was an assertion about the code rather than an
 // observation of it: this table would have read "fused 0 B" unchanged if
 // gradientCovariance allocated on every call. The counter is the idiom from
@@ -383,14 +385,14 @@ size_t observedAllocations(const std::vector<Rect>& windows, Fn&& fn) {
 }
 
 /// @brief What each form needs beyond the four derivative planes it must read.
-/// @note CLAUDE.md: report memory and speed together. Two of the four forms need a
+/// @note Memory and speed, together. Two of the four forms need a
 /// frame-sized plane and two need nothing, and that is the entire reason the
 /// slower pair is what ships.
 /// @note **The "allocs/pass" column is measured on this binary, not asserted.**
 /// The plane bytes are arithmetic -- a plane's size is not in doubt -- but
 /// the 0 B is a claim about the KERNEL, and printed as a literal it would
 /// read 0 B for a gradientCovariance that allocated scratch on every call.
-/// That is the one number the axis 3 traded 11-14% of speed for, so it is
+/// That is the one number 1.11-1.14x of speed was traded for, so it is
 /// counted here rather than stated. The counter covers the over-aligned
 /// path too; see the note beside operator new at the top of this file.
 template <typename Word>

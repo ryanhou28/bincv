@@ -13,7 +13,10 @@
 namespace bincv {
 namespace util {
 
-// @brief Saves a test image to the specified path in the test/output directory.
+/// @brief Writes an 8-bit image to `tests/output/<imageName>` through `cv::imwrite`.
+/// **API TIER 3** -- a helper for the tests and examples, not a library operation;
+/// it exists only in builds with OpenCV.
+/// @param h_input Row-major, `width` bytes per row, `height` rows.
 void save_test_image(const std::string& imageName, const uint8_t* h_input, int width, int height);
 
 } // namespace util

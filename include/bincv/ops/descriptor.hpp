@@ -7,11 +7,9 @@
 /// THE MOST binCV-NATIVE OPERATION IN COMPUTER VISION
 ///
 /// A BRIEF descriptor **is a bit string**, and matching two of them is
-/// `popcount(a ^ b)`. A library whose entire thesis is bit-parallel work at true bit
-/// width, which already ships a Hamming block-matcher, had no descriptor extraction
-/// and no matcher -- an odd-shaped hole, and the one that separates a VIO frontend
-/// from SLAM. LK gives frame-to-frame association; **loop closure, relocalisation and
-/// map-point association need descriptors**.
+/// `popcount(a ^ b)` -- the operation binCV is built out of. LK gives frame-to-frame
+/// association; **loop closure, relocalisation and map-point association need
+/// descriptors**, which is what separates a VIO frontend from SLAM.
 ///
 /// ---------------------------------------------------------------------------
 /// WIDE IN, BITS OUT -- WHICH IS binCV'S SHAPE, NOT AN EXCEPTION TO IT
@@ -29,13 +27,8 @@
 /// and descriptors are only comparable across implementations when the table is
 /// IDENTICAL -- re-running the paper's learning procedure yields a different one.
 /// That table is vendored as `kOrbBriefPattern` in
-/// [ops/orbPattern.hpp](orbPattern.hpp), with the notice its license requires
-/// carried in the same file and in THIRD_PARTY_NOTICES.md. (An earlier version of
-/// this comment called the source Apache-2.0 and said vendoring had to wait for
-/// binCV's own license file; both were wrong -- orb.cpp's file-level license is
-/// BSD 3-clause, its condition is retaining the notice, and a third-party notice
-/// needs no first-party license to live beside. binCV's own license remains an
-/// open, deliberately deferred decision.)
+/// [ops/orbPattern.hpp](orbPattern.hpp), with the BSD 3-clause notice its license
+/// requires carried in the same file and in THIRD_PARTY_NOTICES.md.
 ///
 /// The default pattern here is a deterministic Gaussian sample -- the original
 /// BRIEF construction. **Descriptors from two different patterns are not
@@ -64,12 +57,12 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief One intensity comparison, as offsets from the keypoint.
+/// @brief One intensity comparison, as offsets from the keypoint. **API TIER 3.**
 struct BriefPair {
     int8_t ax, ay, bx, by;
 };
 
-/// @brief `Bits` comparisons. One descriptor bit per pair.
+/// @brief `Bits` comparisons. One descriptor bit per pair. **API TIER 3.**
 /// @note `Bits` must be a multiple of a word so a descriptor occupies whole words --
 /// a descriptor that ended mid-word would make `hammingDistance` read padding.
 template <size_t Bits>
@@ -78,7 +71,7 @@ struct BriefPattern {
     BriefPair pair[Bits];
 };
 
-/// @brief Words a `Bits`-bit descriptor occupies.
+/// @brief Words a `Bits`-bit descriptor occupies. **API TIER 3.**
 template <size_t Bits, typename WordType>
 constexpr size_t descriptorWords() {
     return Bits / impl::bitsPerWord<WordType>();
@@ -107,11 +100,11 @@ inline int briefPatternReach(const BriefPair* pairs) {
 }
 
 /// @brief The pattern as flat offsets, once per call; returns its reach. **INTERNAL.**
-/// @note `q.ay * stride + q.ax` was two MULTIPLIES per pair inside a
-/// 256-iteration loop -- half a million of them for a thousand keypoints, all
-/// recomputing the same 512 numbers. The same mistake, and the same fix, as
-/// ops/fast.hpp's ring offsets. `reach` comes with them: the bounds test
-/// belongs per KEYPOINT, not per pair.
+/// @note Computing `q.ay * stride + q.ax` per keypoint would be two MULTIPLIES per
+/// pair inside a 256-iteration loop -- half a million of them for a thousand
+/// keypoints, all recomputing the same 512 numbers; ops/fast.hpp hoists its
+/// ring offsets for the same reason. `reach` comes with them: the bounds
+/// test belongs per KEYPOINT, not per pair.
 template <size_t Bits>
 inline int briefFlattenPattern(const BriefPair* pairs, size_t stride, long long* offA,
                                long long* offB) {
@@ -192,6 +185,9 @@ inline void makeBriefPattern(BriefPattern<Bits>& out, int patchSize = 31,
 /// **A keypoint too close to the border has no descriptor**, and inventing one
 /// by clamping would produce a confident match against nothing.
 /// @note Bit `i` is `img[a_i] < img[b_i]`, the reference test. Never allocates.
+/// @note A keypoint's position is truncated toward zero onto the pixel grid
+/// (`cv::ORB` rounds), so the two sample different pixels for a fractional
+/// position.
 template <size_t Bits, typename SrcT, typename WordType>
 inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t stride,
                          const float* keypointsXY, size_t count,
@@ -226,7 +222,7 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
 // ---------------------------------------------------------------------------
 
 /// @brief Rotation bins a steered pattern is built at: 12-degree steps, the ORB
-/// paper's own discretization.
+/// paper's own discretization. **API TIER 3.**
 inline constexpr size_t kBriefAngleBins = 30;
 
 /// @brief Which rotation bin an angle selects: the nearest 12-degree step,
@@ -269,7 +265,7 @@ BINCV_HOST_DEVICE inline unsigned briefAngleBin(float angleRadians) {
 }
 
 /// @brief `Bits` comparisons at each of the 30 rotations: ~30 KB at 256 bits,
-/// built once and reused for every frame.
+/// built once and reused for every frame. **API TIER 3.**
 /// @note A CONTAINER in the descriptor path's sense -- built at setup, read by
 /// the kernel. It is plain aggregate data so a bare-metal caller can put it
 /// wherever its memory map wants it, flash included.
@@ -352,6 +348,7 @@ inline void makeSteeredBriefPattern(SteeredBriefPattern<Bits>& out,
 /// keypoint, and the stack does not grow with the bin count. Bin 0 is the
 /// identity rotation: all-zero angles reproduce `computeBrief` bit for bit
 /// (tests/test_descriptor.cpp holds it to that).
+/// @note Positions are truncated onto the pixel grid, as in `computeBrief`.
 template <size_t Bits, typename SrcT, typename WordType>
 inline void computeBriefSteered(const SrcT* img, size_t width, size_t height, size_t stride,
                                 const float* keypointsXY, size_t count, const float* angles,
@@ -397,7 +394,8 @@ inline unsigned hammingDistance(const WordType* a, const WordType* b, size_t wor
     return d;
 }
 
-/// @brief One query's best and second-best match.
+/// @brief One query's best and second-best match. **API TIER 3** -- `cv::DMatch`'s
+/// role, with the second-best distance carried for the ratio test.
 struct DescriptorMatch {
     size_t trainIndex = 0;
     unsigned distance = 0;
@@ -445,7 +443,7 @@ inline void matchDescriptors(const WordType* query, size_t queryCount, const Wor
 
 /// @brief `matchDescriptors` restricted to candidates a pipeline's priors admit:
 /// a position window, and optionally an octave band. **API TIER 3.**
-/// @param queryXY / trainXY (x, y) per keypoint, interleaved -- the descriptor
+/// @param queryXY,trainXY (x, y) per keypoint, interleaved -- the descriptor
 /// family's raw-array contract. Positions are whatever frame the caller
 /// matches in; frame-to-frame association passes both sets in the same
 /// image plane and `maxDx/maxDy` bound the motion.
@@ -454,7 +452,7 @@ inline void matchDescriptors(const WordType* query, size_t queryCount, const Wor
 /// `words` XORs and popcounts it saves -- which is the whole point: a
 /// pipeline measured brute force at the cost of a full detection level,
 /// while knowing priors the matcher ignored.
-/// @param queryOctave / trainOctave Optional (both or neither): admit only
+/// @param queryOctave,trainOctave Optional (both or neither): admit only
 /// candidates within `maxOctaveDelta` pyramid levels -- a keypoint rarely
 /// jumps more than one octave between consecutive frames.
 /// @note THE RATIO TEST RUNS INSIDE THE GATE: best and second-best are the best

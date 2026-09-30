@@ -7,23 +7,22 @@
 /// Seven entry points and one accumulator, and the shape of all of them is the
 /// point of the file:
 ///
-/// countNonZero(src) popcount over a whole image Tier 1
-/// countNonZero(src, region) popcount over a rectangle Tier 1
-/// countAnd(a, b, region) popcount(a & b) Tier 3
-/// countAndSplit(a, b, c, region) popcount(a & b & ~c) and
-/// popcount(a & b & c), one pass Tier 3
-/// countAndSplit(a, b, c0, c1, r) the same split, selector XOR-ed
-/// in the word loop, no plane Tier 3
-/// countCovariance(a, b, c, region) xx, yy and that split, ONE pass Tier 3
-/// countCovariance(a, b, c0, c1, r) the same, and no plane either Tier 3
-/// SlidingWindowCount one window sum slid DOWNWARD --
-/// one row out, one row in Tier 3
+///     countNonZero(src)                   popcount over a whole image        Tier 1
+///     countNonZero(src, region)           popcount over a rectangle          Tier 1
+///     countAnd(a, b, region)              popcount(a & b)                    Tier 3
+///     countAndSplit(a, b, c, region)      popcount(a & b & ~c) and
+///                                         popcount(a & b & c), one pass      Tier 3
+///     countAndSplit(a, b, c0, c1, r)      the same split, selector XOR-ed
+///                                         in the word loop, no plane         Tier 3
+///     countCovariance(a, b, c, region)    xx, yy and that split, ONE pass    Tier 3
+///     countCovariance(a, b, c0, c1, r)    the same, and no plane either      Tier 3
+///     SlidingWindowCount                  one window sum slid DOWNWARD --
+///                                         one row out, one row in            Tier 3
 ///
 /// The split forms are the Lucas-Kanade covariance cross-term written out, and
-/// countCovariance is the whole 2x2 matrix. They are here in
-/// the MVP, next to the plain count, because designing them later would mean
-/// designing a *second* reduction interface after callers had been written
-/// against the first.
+/// countCovariance is the whole 2x2 matrix. They sit next to the plain count
+/// because designing them separately would mean designing a *second* reduction
+/// interface after callers had been written against the first.
 ///
 /// ---------------------------------------------------------------------------
 /// WHICH SHAPE TO REACH FOR, AND WHY -- THE ACCESS PATTERN DECIDES
@@ -43,19 +42,17 @@
 /// response in ops/corner.hpp -- AT A LARGE ENOUGH WINDOW
 /// SlidingWindowCount. Consecutive windows differ by two rows out of W, and
 /// recomputing all W of them re-reads what the previous position already
-/// counted. Measured 7.3x on an 8x8 search sweep and 20x on a dense scan at
-/// 31x31 (the axis 1) -- but that was against the PRE-accumulator-split
-/// baseline. Against the countNonZero this file actually ships,
-/// re-measured **5.96x** (search) and **15.9x** at 31x31, which is where
-/// predicted the split would put them and still far past the 15% line
-/// that selected this branch.
+/// counted. Measured **5.96x** on an 8x8 search sweep and **15.9x** on a dense
+/// scan at 31x31, against the countNonZero this file ships.
 ///
 /// **THOSE ARE ONE-PLANE, ONE-NUMBER SWEEPS, AND THE QUALIFICATION "AT A
 /// LARGE ENOUGH WINDOW" IS MEASURED RATHER THAN CAUTIOUS.** ops/corner.hpp is
 /// the first real caller of this shape, and it sweeps a 2x2 covariance of which
 /// only two numbers slide. Measured on the reference device at 640x480: the
 /// incremental sweep is 1.22x FASTER at a 31x31 window and 1.20x SLOWER at
-/// 3x3 -- the size the reference pipeline runs -- over FOUR runs whose
+/// 3x3 -- the size the reference pipeline (the visual-inertial odometry
+/// system, not in this repository, that binCV was built to serve stage by
+/// stage; see docs/ARCHITECTURE.md) runs -- over FOUR runs whose
 /// ranking never changes (run-to-run scatter 0.18-0.34% on the ratio below
 /// blockSize 31, 3.3% at 31).
 /// The incremental state alone is 0.93x at 3, 1.04x at 7 and 1.24x at 31 --
@@ -71,20 +68,18 @@
 /// three-call composition issues exactly the same popcounts but makes
 /// THREE traversals of the region and 5 word loads per word index against
 /// the fused pass's 3 -- countNonZero(a), countNonZero(b), then a, b and c
-/// again in the split. That redundancy measured 1.27x (`uint32_t`) and
-/// 1.29x (`uint64_t`) at 31x31 pre-split, reproducing an earlier
-/// 1.30x; against the shipped code it measures **1.20x** and **1.27x**
-/// there, and 1.20x-1.65x across the three window sizes.
+/// again in the split. That redundancy measures **1.20x** (`uint32_t`) and
+/// **1.27x** (`uint64_t`) at 31x31, and 1.20x-1.65x across the three window
+/// sizes.
 ///
 /// THE SELECTOR: `c`, or `c0` and `c1`
 /// The four-argument forms XOR the two sign planes inside the word loop and
 /// need no selector plane at all; the three-argument forms read a plane the
 /// caller already holds. The plane is FASTER per frame even after paying to
-/// form it -- 16-18% when first measured, **11-14% against the shipped
-/// code** -- and costs a fifth frame-sized plane at
+/// form it -- **11-14%** -- and costs a fifth frame-sized plane at
 /// every pyramid level, +25% of the derivative working set, ~51 kB over four
-/// levels. CLAUDE.md's tiebreak takes the memory when the two goals
-/// disagree, so **the four-argument form is the default and the covariance calls it**;
+/// levels. Memory wins when the two goals disagree, so **the four-argument
+/// form is the default and the covariance calls it**;
 /// the three-argument one stays for a caller that formed a plane for other
 /// reasons and should not have to unform it.
 ///
@@ -105,37 +100,34 @@
 /// is dominated by those register-domain crossings rather than by `cnt` itself.
 ///
 /// **The sequences below are what THIS FILE's kernels emit**, read out of
-/// `g++ -O2 -DNDEBUG -S` on the reference device (aarch64, g++ 14.2), not the
-/// ISA-level illustration in -- which measured a minimal
-/// standalone `__builtin_popcountll` under clang and is right about the ISA. The
+/// `g++ -O2 -DNDEBUG -S` on the reference device (aarch64, g++ 14.2). The
 /// count that matters is CROSSINGS PER WORD, and it is not the same for every
 /// entry point -- it rises with the number of source streams a kernel ANDs
 /// together, which is why countCovariance and the four-argument splits sit at the
 /// expensive end and why nothing here hands a caller the per-word primitive:
 ///
-/// countNonZero 1 crossing/word ldr d31, [x2], 8; loaded straight
-/// cnt v31.8b, v31.8b; into NEON --
-/// addv b31, v31.8b; no inbound fmov
-/// fmov x1, d31; NEON -> GPR
-/// add x0, x0, x1; accumulate in a GPR
+///     countNonZero      1 crossing/word     ldr  d31, [x2], 8   ; loaded straight
+///                                           cnt  v31.8b, v31.8b ; into NEON --
+///                                           addv b31, v31.8b    ; no inbound fmov
+///                                           fmov x1, d31        ; NEON -> GPR
+///                                           add  x0, x0, x1     ; accumulate in a GPR
 ///
-/// countAnd 2 crossings/word the AND is done in GPRs, so the word has
-/// to be moved in (`fmov d31, x1`) as well as
-/// out (`fmov x1, d31`)
+///     countAnd          2 crossings/word    the AND is done in GPRs, so the word has
+///                                           to be moved in (`fmov d31, x1`) as well as
+///                                           out (`fmov x1, d31`)
 ///
-/// countAndSplit 4 crossings/word two values in (`fmov d30, x2`,
-/// `fmov d31, x0`) and two out (`fmov x2, d30`,
-/// `fmov x0, d31`) -- and this is the LK
-/// covariance path
+///     countAndSplit     4 crossings/word    two values in (`fmov d30, x2`,
+///                                           `fmov d31, x0`) and two out (`fmov x2, d30`,
+///                                           `fmov x0, d31`) -- and this is the LK
+///                                           covariance path
 ///
-/// countCovariance four popcounts per word rather than two,
-/// over the same three loads. It costs MORE
-/// per word than countAndSplit and is still
-/// 1.20-1.27x faster than the three calls it
-/// replaces (the axis 2), because those
-/// three traverse the region three times and
-/// make 5 loads per word index to this one's
-/// 3.
+///     countCovariance                       four popcounts per word rather than two,
+///                                           over the same three loads. It costs MORE
+///                                           per word than countAndSplit and is still
+///                                           1.20-1.27x faster than the three calls it
+///                                           replaces, because those three traverse
+///                                           the region three times and make 5 loads
+///                                           per word index to this one's 3.
 ///
 /// Note what the compiler did NOT do: it kept the accumulators in general-purpose
 /// registers and crossed back on every word. That is the caller's data flow made
@@ -149,14 +141,12 @@
 /// see impl::popcountWord) and to the SWAR sequence on Cortex-M, so one API shape
 /// stays right on all three.
 ///
-/// **Today's implementation is the scalar one that asks for** -- one
-/// `__builtin_popcountll` per word, in impl::popcountWord -- so the loops below do
-/// NOT yet keep anything in vector registers, and on the reference device they run
-/// at the speed of the per-word loop the bulk-only rule forbids exposing. That is
-/// measured, and it is recorded rather than papered over: on aarch64 the loops
-/// measured 0.99x against that loop, with 1.8x available from a vector
-/// accumulator. The interface decision and the implementation status are two
-/// different things, and only the first is settled here.
+/// **The implementation is scalar** -- one `__builtin_popcountll` per word, in
+/// impl::popcountWord -- so the loops below do NOT keep anything in vector
+/// registers, and on the reference device they run at the speed of the per-word
+/// loop the bulk-only rule forbids exposing: measured 0.99x against that loop on
+/// aarch64, with 1.8x available from a vector accumulator. The interface
+/// decision and the implementation status are two different things.
 ///
 /// The point of the interface is that it never made a caller write that loop, so
 /// replacing the loop body with NEON touches this file and nothing else.
@@ -217,7 +207,7 @@
 /// contribute nothing. A region with `width <= 0` or `height <= 0` counts zero.
 ///
 /// This is not leniency, it is the calling convention the covariance needs. The LK window is
-/// 31x31 centerd on a keypoint, so every keypoint within 15 pixels of an edge
+/// 31x31 centered on a keypoint, so every keypoint within 15 pixels of an edge
 /// produces an out-of-range rectangle. The alternative -- assert and make the
 /// caller clamp -- puts the same four `min`/`max` expressions in every call site,
 /// and a wrong one there is a silently wrong covariance rather than a diagnostic.
@@ -294,44 +284,23 @@
 /// countNonZero(mag_y), countAndSplit(...) -- and therefore three traversals of the
 /// same window, issuing the same popcounts a fused traversal would issue once, and
 /// making 5 word loads per word index where the fused pass makes 3. On the
-/// reference device that composition costs 1.30x a fused pass, reproducibly, with
-/// the popcount count identical on both sides (reproduced at
-/// 1.27-1.29x across two word widths and three window sizes, and at
-/// 1.20-1.65x against the SHIPPED entry points).
+/// reference device that composition costs 1.20x-1.65x a fused pass across two
+/// word widths and three window sizes, with the popcount count identical on both
+/// sides.
 ///
-/// **THE SHAPE IS SETTLED, AND IT WENT AGAINST THE ONE THIS FILE ORIGINALLY
-/// SHIPPED.** All three axes moved off the simpler form, and the sweep landed
-/// all three plus a fourth finding:
+/// **FOUR MEASURED DECISIONS SHAPE THIS FILE**, each against a rule written before
+/// its measurement, all on the reference device at 640x480:
 ///
-/// 1. a vertically-sliding accumulator beats recompute by 7.3x on a search sweep
-/// and 20x on a dense scan at 31x31 -> SlidingWindowCount;
-/// 2. the fused covariance entry point wins 1.27-1.29x -> countCovariance;
-/// 3. a four-argument countAndSplit costs 16-18% of one operation's time and
-/// saves a frame-sized plane at every pyramid level, and the project's
-/// tiebreak takes the memory -> the (a, b, c0, c1, region) overloads;
-/// 4. and the accumulator that carried one sum across a whole region was a
-/// single dependency chain through the popcount latency -> the row bodies in
-/// impl:: each return their own partial sum.
-///
-/// The interface was deliberately NOT changed in the same commit as the
-/// measurement that gated it.
-/// Item 4 landed FIRST of the four, so items 1-3's re-measured ratios report the
-/// gain the shipped code actually has rather than a gain against a baseline that
-/// no longer exists.
-///
-/// **THOSE FOUR NUMBERS COME FROM THE ORIGINAL SWEEP, AND WERE RE-MEASURED AGAINST
-/// THE CODE THAT SHIPPED.** Every ratio quoted below carries both where they differ, because
-/// a reader picking an entry point wants the shipped one and a reader auditing the
-/// decision wants the one the rule was applied to. Item 1 becomes 5.96x / 15.9x;
-/// item 2 becomes 1.20x / 1.27x at 31x31 (1.20-1.65x across the three window
-/// sizes); item 3's gap narrows to 11-14%. Item 4's own figure moved furthest and
-/// is the one to be careful with: the first run recorded 1.15-1.32x, but never measured it
-/// directly -- it inferred it from axis 1's isolated-keypoint column, which differs
-/// from a per-window countNonZero in TWO ways rather than one. Timed directly and
-/// interleaved, the split comes out at **1.03-1.09x** at the LK window sizes and a
-/// 5-6% LOSS at W=7 on the overlapping patterns. No decision moves -- the split
-/// costs no memory and no interface and still wins at W=15 and W=31 -- but
-/// 1.03-1.09x is the number to quote.
+/// 1. a vertically-sliding accumulator beats recompute by 5.96x on an 8x8 search
+///    sweep and 15.9x on a dense scan at 31x31 -> SlidingWindowCount;
+/// 2. the fused covariance entry point wins 1.20x-1.27x at 31x31 -> countCovariance;
+/// 3. a four-argument countAndSplit costs 11-14% of one operation's time and saves
+///    a frame-sized plane at every pyramid level, and memory wins the tiebreak
+///    -> the (a, b, c0, c1, region) overloads;
+/// 4. an accumulator carried across a whole region is a single dependency chain
+///    through the popcount latency; per-row partial sums measure 1.03-1.09x at the
+///    LK window sizes (1.08x at W=31) and a 5-6% loss at W=7 on overlapping
+///    patterns -> the row bodies in impl:: each return their own partial sum.
 
 #include <climits>  // INT_MIN / INT_MAX -- SlidingWindowCount::window asserts its range
 #include <cstddef>
@@ -349,7 +318,7 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief The two halves of a split count: pixels where the selector `c` was
-/// clear, and pixels where it was set.
+/// clear, and pixels where it was set. **API TIER 3.**
 /// @note Named for what they select rather than for what a caller does with them.
 /// In the LK covariance `c` is `sign_x ^ sign_y`, so
 /// `whenClear` counts agreeing signs (products of +1) and `whenSet` counts
@@ -393,10 +362,8 @@ struct SplitCount {
 /// from ONE traversal. The three-call composition --
 /// countNonZero(a) + countNonZero(b) + countAndSplit(a, b, c) -- produces
 /// the same four numbers with the same popcounts, three traversals and 5
-/// word loads per word index to the fused pass's 3, and measured 1.27x
-/// (`uint32_t`) / 1.29x (`uint64_t`) slower at 31x31 pre-split
-/// (reproducing an earlier 1.30x) and **1.20x /
-/// 1.27x** against the shipped code.
+/// word loads per word index to the fused pass's 3, and measures **1.20x**
+/// (`uint32_t`) / **1.27x** (`uint64_t`) slower at 31x31.
 /// @note With `a = mag_x`, `b = mag_y` and the selector `sign_x ^ sign_y`:
 /// `xx` is the Sigma-Ix-squared term, `yy` the
 /// Sigma-Iy-squared term, and `crossTerm` is Sigma-IxIy.
@@ -415,7 +382,6 @@ struct CovarianceCount {
     long long crossTerm() const { return xy.crossTerm(); }
 };
 
-
 namespace impl {
 
 // ---------------------------------------------------------------------------
@@ -430,8 +396,8 @@ namespace impl {
 /// @note Not decoration, and not dead source. binCV's claim is that it needs a
 /// C++17 compiler and nothing else; MSVC has no __builtin_popcountll, so
 /// without this the header would silently be GCC/clang-only.
-/// @note **This is NOT the sequence a Cortex-M build compiles to**, which this
-/// comment used to claim. Measured on a Cortex-M7 (STM32H753ZI, GCC 14.2):
+/// @note **This is NOT the sequence a Cortex-M build compiles to.** Measured on a
+/// Cortex-M7 (STM32H753ZI, GCC 14.2):
 /// GCC proves the upper half of a widened `uint32_t` is zero and calls
 /// libgcc's `__popcountsi2`, a 32-bit SWAR. This function widens to
 /// `uint64_t` and keeps the widening, so it costs **1.85x** what the target
@@ -440,8 +406,8 @@ namespace impl {
 /// @note **Compiled unconditionally, on every toolchain, and tested against the
 /// builtin** by Reduce.PortablePopcount_*. Guarding the definition itself
 /// behind the #if would make it source that no configuration this project
-/// verifies ever compiles -- the shape of dead gate CLAUDE.md warns about. It
-/// costs one unreferenced inline template.
+/// verifies ever compiles -- a dead gate. It costs one unreferenced inline
+/// template.
 template <typename WordType>
 inline size_t popcountWordPortable(WordType w) {
     uint64_t v = static_cast<uint64_t>(w);
@@ -456,9 +422,9 @@ inline size_t popcountWordPortable(WordType w) {
 /// crossings around a `cnt`, which is precisely why no caller outside this
 /// file may reach it: the crossings are amortized by the bulk loops here
 /// and cannot be amortized by anyone calling this per word.
-/// @note And on the x86-64 baseline binCV actually ships -- no `-march`, since
-/// the build detects AVX2/AVX-512 without enabling them until runtime
-/// dispatch lands -- `__builtin_popcountll` is not `popcntq` at all. GCC
+/// @note And on the x86-64 baseline binCV actually ships -- no `-march`, and no
+/// runtime dispatch in these loops -- `__builtin_popcountll` is not `popcntq`
+/// at all. GCC
 /// emits a CALL to libgcc's `__popcountdi2`, once per word, and clang
 /// inlines the SWAR sequence above. Measured cost: 4.2x slower than
 /// cv::countNonZero, against 2.0x faster once the instruction is available.
@@ -663,22 +629,12 @@ inline void visitRowWords(const RegionWords<WordType>& r, Visit visit) {
 // nothing: addition of counts is associative and none of these sums can overflow,
 // since each is bounded by the region's pixel count.
 //
-// HOW MUCH IT IS WORTH, AND THE FIGURE THAT WAS WITHDRAWN. The first run recorded
-// 1.15-1.32x at LK window sizes, read off its isolated-keypoint column on the
-// argument that the sliding path never executes there, so the accumulator was the
-// only thing left to explain the gap. That argument has a hole: the sliding form
-// differs from a per-window countNonZero in TWO ways, not one -- where the sum
-// lands, AND that it clips its column band once at construction instead of running
-// the full region clip per position. A second run timed the split directly and
-// interleaved, identical popcounts over identical words with only the accumulator
-// changed, and measured **1.03-1.09x at the LK window sizes (1.08x at W=31) and a
-// 5-6% LOSS at W=7 on the overlapping patterns**. That is the number to quote;
-// the 1.15-1.32x above is withdrawn.
-//
-// The decision is unchanged -- the split costs no memory, no interface and no
-// popcount, and it is a gain at both window sizes LK uses. What changed is only
-// the magnitude, and the dependency-chain reasoning is what survives: the gain
-// growing with the row count is what that explanation predicts, and it does.
+// HOW MUCH IT IS WORTH. Timed directly and interleaved -- identical popcounts over
+// identical words with only the accumulator changed -- the split measures
+// **1.03-1.09x at the LK window sizes (1.08x at W=31) and a 5-6% LOSS at W=7 on the
+// overlapping patterns** on the reference device. It costs no memory, no interface
+// and no popcount, and it is a gain at both window sizes LK uses; the gain growing
+// with the row count is what the dependency-chain explanation predicts.
 //
 // The split was measured on countViewRegion. It is applied to all four row bodies
 // because the argument is about where a sum lands and not about which kernel is
@@ -739,7 +695,7 @@ inline SplitCount splitRowRegion(const WordType* ra, const WordType* rb,
 
 /// @brief All four covariance numbers over ONE row, from one visit per word.
 /// **INTERNAL.**
-/// @note This is the fused body the axis 2 selected: `a[i]`, `b[i]` and the
+/// @note This is the fused body countCovariance runs: `a[i]`, `b[i]` and the
 /// selector are read once each and produce xx, yy, whenClear and whenSet.
 /// The composition out of countNonZero x2 + countAndSplit issues exactly
 /// these popcounts but traverses and loads the region three times.
@@ -865,8 +821,8 @@ inline size_t countNonZero(BinMatConstView<WordType> src, Rect region) {
 /// @note RECOMPUTES PER WINDOW, and that is the right thing for ONE window. LK
 /// windows are 31x31 and overlap heavily, so consecutive calls over a
 /// COLUMN of positions re-read almost the same words -- SlidingWindowCount
-/// is the entry point for that pattern (7.3x on a search sweep, 20x on a
-/// dense scan at 31x31; the axis 1). This signature is unchanged by it: a
+/// is the entry point for that pattern (5.96x on a search sweep, 15.9x on a
+/// dense scan at 31x31). This signature is unchanged by it: a
 /// caller with one window still wants exactly this.
 /// @note Reads only: `a` and `b` may be the same view or overlap arbitrarily.
 /// @note Never throws, never allocates. Mismatched dimensions and a stride shorter
@@ -901,8 +857,8 @@ inline size_t countAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 /// @param region Rectangle in pixels, half-open, intersected with the image.
 /// @return `{whenClear, whenSet}` -- the pixels of `a & b` split by `c`.
 ///
-/// @note **THIS IS THE LK COVARIANCE CROSS-TERM**, and the
-/// reason countAndSplit is in the MVP rather than added when the covariance needs it. With
+/// @note **THIS IS THE LK COVARIANCE CROSS-TERM**, and the reason countAndSplit
+/// exists alongside the plain count. With
 /// `a = mag_x`, `b = mag_y` and `c = sign_x ^ sign_y`:
 ///
 /// ΣIxIy = whenClear - whenSet
@@ -919,9 +875,8 @@ inline size_t countAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 /// @note RECOMPUTES PER WINDOW; see countAnd. The sliding form
 /// (SlidingWindowCount) stands alongside this one, not instead of it.
 /// @note **Wanting xx and yy as well? Call countCovariance instead.** Composing
-/// the 2x2 covariance out of countNonZero x2 plus this measured 1.27-1.29x
-/// slower at 31x31 for redundant traversal alone (the axis 2), and
-/// 1.20-1.27x slower there against the shipped code.
+/// the 2x2 covariance out of countNonZero x2 plus this measures 1.20-1.27x
+/// slower at 31x31, for redundant traversal alone.
 /// @note **`c` IS A FRAME-SIZED PLANE, NOT A WINDOW-SIZED ONE.** All three views
 /// are indexed by the SAME `region`, in the image's coordinate frame, so `c`
 /// must carry `a`'s dimensions -- asserted. A 31x31 scratch buffer holding
@@ -938,16 +893,14 @@ inline size_t countAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 /// That plane costs one bit per pixel (38400 B at 640x480) on top of the
 /// derivative planes, and it is a CALLER allocation -- no kernel here
 /// allocates.
-/// @note **NOTHING OBLIGES A CALLER TO FORM THAT PLANE ANY MORE.** The
-/// four-argument overload below takes `c0` and `c1` and XORs them in the
-/// word loop, needing no plane at any pyramid level, and it is the form
-/// calls: axis 3 measured the plane faster per frame INCLUDING its
-/// formation cost -- 16-18% when first measured, 11-14% against the shipped code
-/// -- against a fifth frame-sized plane at every level
-/// (+25% of the derivative working set), and CLAUDE.md's tiebreak takes the
-/// memory. This three-argument form stays for a caller that already has a
-/// plane for other reasons and should not be made to unform it -- and when
-/// it does have one, it is the faster call. See.
+/// @note **NOTHING OBLIGES A CALLER TO FORM THAT PLANE.** The four-argument
+/// overload below takes `c0` and `c1` and XORs them in the word loop, needing
+/// no plane at any pyramid level, and it is the form the covariance calls:
+/// the plane measures 11-14% faster per frame INCLUDING its formation cost,
+/// against a fifth frame-sized plane at every level (+25% of the derivative
+/// working set), and memory wins the tiebreak. This three-argument form stays
+/// for a caller that already has a plane for other reasons and should not be
+/// made to unform it -- and when it does have one, it is the faster call.
 /// @note Reads only: `a`, `b` and `c` may be the same view or overlap arbitrarily.
 /// @note Never throws, never allocates. Mismatched dimensions and a stride shorter
 /// than a row are BINCV_ASSERT programming errors.
@@ -979,7 +932,6 @@ inline SplitCount countAndSplit(BinMatConstView<WordType> a, BinMatConstView<Wor
     return out;
 }
 
-
 /// @brief popcount(a & b & ~(c0 ^ c1)) and popcount(a & b & (c0 ^ c1)) over
 /// `region`, in ONE pass and with NO selector plane. **API TIER 3.**
 /// @param a First source view.
@@ -993,18 +945,17 @@ inline SplitCount countAndSplit(BinMatConstView<WordType> a, BinMatConstView<Wor
 /// with `c0 = sign_x` and `c1 = sign_y`. It is identical in value to
 /// `countAndSplit(a, b, xorPlane, region)` where `xorPlane` was filled by
 /// bitwiseXor(c0, c1,...) -- and needs no such plane to exist.
-/// @note **IT IS ALSO THE SLOWER OF THE TWO, AND THAT IS THE DECISION.** Axis 3
-/// measured the precomputed plane faster per frame at 200 keypoints
-/// INCLUDING the cost of forming it -- 16-18% when first measured, and 11-14%
-/// against the code that shipped (125.7 us against 139.1 us per frame at
-/// W=31 with formation included). The four-argument form loads
+/// @note **IT IS ALSO THE SLOWER OF THE TWO, AND THAT IS THE DECISION.** The
+/// precomputed plane measures 11-14% faster per frame at 200 keypoints
+/// INCLUDING the cost of forming it (125.7 us against 139.1 us per frame at
+/// W=31, 640x480, `uint32_t`, reference device). The four-argument form loads
 /// a fourth stream and XORs it in the word loop, and that costs more than
 /// one streaming pass over the frame. What it buys is the plane itself --
 /// one bit per pixel of every pyramid level, 38400 B at 640x480 and ~51 kB
 /// over a four-level pyramid, a FIFTH plane on top of the four the
 /// covariance already reads (+25% of the derivative working set), held for
-/// the frame's lifetime. Speed and footprint disagree here, and CLAUDE.md's
-/// tiebreak is explicit: memory wins. So this is the default; the
+/// the frame's lifetime. Speed and footprint disagree here, and memory
+/// wins. So this is the default; the
 /// three-argument overload stays for a caller that has a plane already.
 /// @note Same single-pass, padding, aliasing and error contract as the
 /// three-argument overload. `~(c0 ^ c1)` is never formed, for the same
@@ -1055,12 +1006,10 @@ inline SplitCount countAndSplit(BinMatConstView<WordType> a, BinMatConstView<Wor
 /// countAndSplit(a, b, c, w)` returns the same four numbers and issues
 /// exactly the same popcounts, but makes THREE traversals of the region and
 /// 5 word loads per word index against this one's 3 (`a` and `b` are each
-/// read twice, `c` once). That measured 1.27x (`uint32_t`) and 1.29x
-/// (`uint64_t`) slower at 31x31 on the reference device pre-split
-/// (reproducing an earlier 1.30x), and **1.20x / 1.27x against the code that
-/// shipped**, holding from
-/// 1.20x to 1.65x across the three window sizes and two word widths
-/// (the axis 2). The delta is redundant traversal and nothing else, which
+/// read twice, `c` once). That measures **1.20x (`uint32_t`) / 1.27x
+/// (`uint64_t`)** slower at 31x31 on the reference device, and 1.20x to 1.65x
+/// across the three window sizes and two word widths. The delta is redundant
+/// traversal and nothing else, which
 /// is why it is an entry point rather than an optimization hint.
 /// @note **Single pass, four popcounts per word**: `popcount(a & mask)`,
 /// `popcount(b & mask)`, `popcount(a & b & mask)` and
@@ -1108,16 +1057,14 @@ inline CovarianceCount countCovariance(BinMatConstView<WordType> a, BinMatConstV
 /// @param region Rectangle in pixels, half-open, intersected with the image.
 ///
 /// @note **THIS IS THE SIGNATURE THE COVARIANCE CALLS.** It is the conjunction of the two
-/// measured decisions: fused rather than composed (axis 2, 1.27-1.29x
-/// pre-split, 1.20-1.27x at 31x31 against the shipped code by design) and
-/// four-argument rather than plane (axis 3, memory wins the tiebreak).
+/// measured decisions: fused rather than composed (1.20-1.27x at 31x31) and
+/// four-argument rather than plane (memory wins the tiebreak).
 /// Composing those two decisions leaves exactly one entry point that is both
 /// single-pass and scratch-free, and this is it -- the LK covariance over a
 /// window with **0 B** of caller memory beyond the derivative planes it must
 /// read anyway.
 /// @note It is the SLOWER selector form, deliberately; see the four-argument
-/// countAndSplit above for the 11-14% (16-18% when first measured) and the +25% it is
-/// traded against.
+/// countAndSplit above for the 11-14% and the +25% it is traded against.
 /// A caller that already holds a `sign_x ^ sign_y` plane should call the
 /// four-argument overload of this function instead and keep the speed.
 template <typename WordType>
@@ -1165,24 +1112,15 @@ inline CovarianceCount countCovariance(BinMatConstView<WordType> a, BinMatConstV
 /// @tparam WordType The view's word type.
 ///
 /// @note **WHEN TO REACH FOR THIS, AND WHEN NOT TO.** It is worth exactly what
-/// the caller's access pattern makes it worth, and all three patterns the
-/// MVP contains were measured at 640x480, `uint32_t`, on the reference
-/// device. The column is against the PRE-accumulator-split recompute
-/// baseline; **the column is against the countNonZero this file
-/// actually ships**, and is the one a caller should plan with:
+/// the caller's access pattern makes it worth. Three patterns, measured at
+/// 640x480, `uint32_t`, on the reference device, against the countNonZero
+/// this file ships:
 ///
-///
-/// DENSE every window position in a frame 20x 15.9x
-/// (the corner response in ops/corner.hpp)
-/// SEARCH 200 keypoints x an 8x8 sweep 7.3x 5.96x
-/// SPARSE 200 isolated keypoints 1.32x 1.10x
-/// (the LK covariance)
-///
-/// DENSE and SEARCH are far past the 15% line that selected this branch, at
-/// either baseline. They fell because the per-row
-/// accumulator split in impl's row bodies made the DENOMINATOR faster,
-/// which is exactly what was predicted when that split was required to land
-/// first ("roughly 15x and 5.6x"); the measurement met the prediction.
+///     DENSE     every window position in a frame            15.9x
+///               (the corner response in ops/corner.hpp)
+///     SEARCH    200 keypoints x an 8x8 sweep                 5.96x
+///     SPARSE    200 isolated keypoints                       1.10x
+///               (the LK covariance)
 ///
 /// SPARSE is the row to read carefully. **Treat it as nothing.** With one
 /// window per keypoint the sliding path never executes, so this issues
@@ -1196,7 +1134,7 @@ inline CovarianceCount countCovariance(BinMatConstView<WordType> a, BinMatConstV
 /// accumulator is faster still on a dense sweep (36x, since it issues no
 /// popcount at all) but is 12x SLOWER on isolated keypoints and needs a
 /// `sweepWidth + W - 1` counter array the caller would have to own -- a
-/// second shape, and a second decision explicitly declines to take.
+/// second shape, and one this file deliberately does not take.
 /// @note **The column masks are built once, in the constructor.** Every window in
 /// a vertical column shares one x extent, so sliding is pure row
 /// arithmetic: one impl::countRowRegion out, one in.

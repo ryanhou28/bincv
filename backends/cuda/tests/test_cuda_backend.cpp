@@ -500,6 +500,26 @@ BINCV_TEST(CudaPack, Quant_N8_uint8_t) { testPackQuant<8, uint8_t>(); }
 BINCV_TEST(CudaPack, Quant_N2_uint16_t) { testPackQuant<2, uint16_t>(); }
 BINCV_TEST(CudaPack, Quant_N5_uint16_t) { testPackQuant<5, uint16_t>(); }
 
+// The plane-count domain, refused in every build: the kernels unroll eight
+// planes, so an `n` of 9 would leave a plane unwritten rather than fail, and
+// `1u << n` is undefined at 32. The block must also be the shape the plane
+// count implies, or the launch would write past it.
+BINCV_TEST(CudaPack, QuantRefusesAPlaneCountOutsideOneToEight) {
+    const size_t w = 64, h = 8;
+    bincv::cuda::DeviceImage<uint8_t> dImg(static_cast<int>(w), static_cast<int>(h));
+    bincv::cuda::DeviceBinMat dBlock9(static_cast<int>(w), static_cast<int>(9 * h));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::packQuant(dImg.constView(), dBlock9.view(), 9),
+                                  cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::packQuant(dImg.constView(), dBlock9.view(), 0),
+                                  cudaErrorInvalidValue);
+    // The right count over the wrong block shape is refused the same way.
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::packQuant(dImg.constView(), dBlock9.view(), 8),
+                                  cudaErrorInvalidValue);
+    bincv::cuda::DeviceImage<uint16_t> dImg16(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::packQuant(dImg16.constView(), dBlock9.view(), 9), cudaErrorInvalidValue);
+}
+
 // packRows: a chunked fill must be identical to the whole-frame one, which is
 // the property that makes banded packing exact rather than approximate.
 BINCV_TEST(CudaPack, RowsChunkedEqualsWhole) {
@@ -530,6 +550,39 @@ BINCV_TEST(CudaPack, RowsChunkedEqualsWhole) {
     bincv::cuda::download(banded.constView(), bandedHost.view());
     BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
     BINCV_CHECK_EQ(mismatchWords<uint32_t>(wholeHost, bandedHost), 0u);
+}
+
+// The unpacker's height domain: one row per blockIdx.y, which the hardware
+// caps at 65535. The bound is exact -- 65535 rows unpack and match the host,
+// 65536 are refused before any launch -- and it is checked here rather than
+// left to surface as a launch failure, which is what the packers' grid-stride
+// arm exists to avoid on their side.
+BINCV_TEST(CudaPack, UnpackRefusesAHeightAboveTheLaunchDomain) {
+    const size_t w = 5;
+    {
+        const size_t h = 65535;
+        const auto bits = randomBits<uint32_t>(w, h, 0x0F1E);
+        std::vector<uint8_t> expect(w * h, 0xCC);
+        bincv::unpackTo8Bit<uint32_t>(bits.constView(), expect.data(), w, 255, 0);
+        bincv::cuda::DeviceBinMat dBits(static_cast<int>(w), static_cast<int>(h));
+        BINCV_CHECK_EQ(bincv::cuda::upload(bits.constView(), dBits.view()), cudaSuccess);
+        bincv::cuda::DeviceImage<uint8_t> dOut(static_cast<int>(w), static_cast<int>(h));
+        BINCV_CHECK_EQ(bincv::cuda::unpackTo8Bit(dBits.constView(), dOut.view(), 255, 0),
+                       cudaSuccess);
+        std::vector<uint8_t> got(w * h, 0x33);
+        BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dOut.constView(), got.data(), w),
+                       cudaSuccess);
+        BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        BINCV_CHECK(got == expect);
+    }
+    {
+        const size_t h = 65536;
+        bincv::cuda::DeviceBinMat dBits(static_cast<int>(w), static_cast<int>(h));
+        bincv::cuda::DeviceImage<uint8_t> dOut(static_cast<int>(w), static_cast<int>(h));
+        BINCV_CHECK_EQ_UNLESS_CHECKED(
+            bincv::cuda::unpackTo8Bit(dBits.constView(), dOut.view(), 255, 0),
+            cudaErrorInvalidValue);
+    }
 }
 
 // unpackTo8Bit: the reverse, against the host's.
@@ -677,6 +730,40 @@ void testCensusPackedBits(const bincv::CensusPattern<K>& pattern) {
     BINCV_CHECK_EQ(bad, 0u);
 }
 } // namespace
+
+// The packed transform's reach bound: a pattern whose largest |offset| would
+// stage a tile past the 48 KiB a launch gets without opting in is refused
+// before any launch, on both source types. An offset of 127 is the widest an
+// int8 pod can carry and needs (32+254)(8+254) = 74,932 bytes even at one byte
+// per pixel; 69 is one past the uint16 bound. At the uint8 bound itself, 101,
+// the transform runs and still matches the host, which pins the constant to
+// the kernel rather than to a comment.
+BINCV_TEST(CudaCensus, PackedRefusesAPatternBeyondTheStagedTile) {
+    const size_t w = 133, h = 41;
+    const auto frame = randomFrame<uint8_t>(w, h, 0xCE9AFF);
+    bincv::cuda::DeviceImage<uint8_t> dImg(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(bincv::cuda::uploadImage<uint8_t>(frame.data(), w, h, w, dImg.view()),
+                   cudaSuccess);
+    bincv::cuda::DeviceImage<uint32_t> dDesc(static_cast<int>(w), static_cast<int>(h));
+    constexpr bincv::CensusPattern<2> kTooFar = {{{127, 0}, {0, -127}}};
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::censusTransformPacked<2>(dImg.constView(), kTooFar, dDesc.view()),
+        cudaErrorInvalidValue);
+
+    const auto frame16 = randomFrame<uint16_t>(w, h, 0xCE9AFE);
+    bincv::cuda::DeviceImage<uint16_t> dImg16(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(
+        bincv::cuda::uploadImage<uint16_t>(frame16.data(), w, h, w, dImg16.view()),
+        cudaSuccess);
+    constexpr bincv::CensusPattern<1> kJustPast16 = {{{69, 0}}};
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::censusTransformPacked<1>(dImg16.constView(), kJustPast16, dDesc.view()),
+        cudaErrorInvalidValue);
+
+    constexpr bincv::CensusPattern<2> kAtBound8 = {{{101, 0}, {0, -101}}};
+    testCensusPackedBits<2>(kAtBound8);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+}
 
 BINCV_TEST(CudaCensus, FullPodPattern_uint8_t) {
     testCensus<32, uint8_t>(kCensusFullPod);
@@ -866,6 +953,50 @@ BINCV_TEST(CudaDense, Binary_TailWordThreePixels) {
 // Dense disparity, census entry: device censusTransform feeding the device
 // matcher against the host wide-input path, byte for byte.
 // ---------------------------------------------------------------------------
+// The window-area bound, refused in every build. The word-parallel arm holds
+// a window sum in eight bit-planes, so 17x17 (289 pixels) would wrap mod 256
+// and give a plausible, wrong map; the host asserts the same bound. A call
+// outside it returns cudaErrorInvalidValue before any launch, and so do an
+// even window and a disparity range that reaches the invalid marker -- none
+// of these is an assertion-only domain. The largest accepted window, 15x17,
+// launches.
+BINCV_TEST(CudaDense, Binary_RefusesAWindowAreaAbove255) {
+    const size_t w = 96, h = 40;
+    bincv::cuda::DeviceBinMat dl(static_cast<int>(w), static_cast<int>(h));
+    bincv::cuda::DeviceBinMat dr(static_cast<int>(w), static_cast<int>(h));
+    bincv::cuda::DeviceImage<uint8_t> dDisp(static_cast<int>(w), static_cast<int>(h));
+    bincv::DenseDisparityParams p;
+    p.minDisparity = 0;
+    p.maxDisparity = 16;
+    p.winWidth = 17;
+    p.winHeight = 17;  // 289
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p, dDisp.view()),
+        cudaErrorInvalidValue);
+    p.winWidth = 31;
+    p.winHeight = 9;  // 279, and inside the bit-sliced arm's width gate
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p, dDisp.view()),
+        cudaErrorInvalidValue);
+    p.winWidth = 15;
+    p.winHeight = 17;  // 255: the bound itself is accepted
+    BINCV_CHECK_EQ(
+        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p, dDisp.view()),
+        cudaSuccess);
+    p.winWidth = 8;
+    p.winHeight = 9;  // even
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p, dDisp.view()),
+        cudaErrorInvalidValue);
+    p.winWidth = 9;
+    p.winHeight = 9;
+    p.maxDisparity = 255;  // the invalid marker is not a disparity
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p, dDisp.view()),
+        cudaErrorInvalidValue);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+}
+
 BINCV_TEST(CudaDense, CensusEntryMatchesHostWidePath) {
     const size_t w = 160, h = 96;
     constexpr size_t K = 24;

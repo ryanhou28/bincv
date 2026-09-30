@@ -44,8 +44,8 @@ message(STATUS "child output:\n${combined}")
 # "Subprocess aborted".
 #
 # Rejecting every numeric result, not just 0, is the point. A regression that
-# turned a fatal check into a clean `return 1` used to pass here, which made the
-# script's own promise ("must terminate abnormally") untrue.
+# turns a fatal check into a clean `return 1` would otherwise pass here, which
+# would make the script's own promise ("must terminate abnormally") untrue.
 if(result MATCHES "[Tt]imeout")
     message(FATAL_ERROR
         "'${CHILD} ${CHILD_ARGS}' did not terminate within the timeout (${result})")

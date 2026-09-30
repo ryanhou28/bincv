@@ -34,10 +34,10 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
 
+namespace {
+
 /// @brief The spread launch's block, in threads. One warp.
 constexpr unsigned kSpreadThreads = 32u;
-
-namespace {
 
 struct SubPixViews {
     DeviceBinMatConstView magX;

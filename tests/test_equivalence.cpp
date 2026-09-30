@@ -351,12 +351,11 @@ void testGeneratorGoldenValues() {
 
 /// @brief Feeds the comparator one deliberate fault and requires it to report it.
 /// @tparam WordType The word width the case is built at -- ACTUALLY built at.
-/// This used to be a `size_t wordBits` parameter while the body
-/// hardcoded BinMat32, so the three "at each supported word width"
-/// DropTrailingColumns cases were the same case three times: no
-/// BinMat8/16/64 was ever constructed, and at width 70 the tail begins
-/// at column 64 for all four word widths (64 being a multiple of every
-/// one of them), so perturb zeroed identical columns in each.
+/// A `size_t wordBits` parameter over a body hardcoded to BinMat32 would make
+/// the three "at each supported word width" DropTrailingColumns cases the same
+/// case three times: no BinMat8/16/64 constructed, and at width 70 the tail
+/// begins at column 64 for all four word widths (64 being a multiple of every
+/// one of them), so perturb would zero identical columns in each.
 template <typename WordType>
 void expectComparatorCatches(MatFault fault, const char* wordTypeName, int width, int height,
                              float fill, bool countPreserving) {
@@ -552,7 +551,7 @@ void testExpectBitExactReportsFailures() {
 
     // (e) THE ONE THE PIXEL COMPARISON CANNOT SEE. Same pixels, dirty padding:
     // 70 columns at 32 bits per word leaves bits 6..31 of word 2 as padding.
-    // This is the defect CLAUDE.md names as a hard rule and the shape a
+    // This is the defect the padding invariant exists to forbid, and the shape a
     // word-wise kernel takes when it forgets clearTrailingBits.
     {
         bincv::BinMat32 dirty = randomBinary<uint32_t>(70, 37, 0.5f, UINT64_C(0xBE11A5));
@@ -717,10 +716,10 @@ void testPackingAnchor(const char* wordTypeName) {
                 // Measured on the default-alignment sweep: stride was the
                 // minimum in 48 of 48 cases, so nothing here exercised a
                 // stride a kernel could get wrong -- and "strides may differ
-                // between arguments" is precisely what warn
+                // between arguments" is precisely what the view contract warns
                 // about. A stand-in kernel that walked src and dst as one
                 // dense run and ignored view.stride was reported identical
-                // on every matrix this sweep used to build.
+                // on every matrix a tight-stride-only sweep builds.
                 bincv::BinMat<WordType> padded =
                     randomBinary<WordType>(width, height, fill, seed, PADDED_ROW_ALIGNMENT);
                 BINCV_EXPECT_BIT_EXACT(padded.constView(), reference, label + " [padded stride]");

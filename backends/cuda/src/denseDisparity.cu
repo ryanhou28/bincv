@@ -491,9 +491,10 @@ __global__ void denseKernelBitSliced(DeviceBinMatConstView left,
         for (int p = 0; p < kBsDispPlanes; ++p) bestD[s][p] = 0xFFFFFFFFu;
     }
 
-    // BLOCKED, never strided: the fold below keeps a candidate only when it is
-    // strictly less, which reproduces the host's tie rule -- smallest disparity
-    // wins -- only if a lower chunk really does hold the lower disparities.
+    // Contiguous chunks, never strided: the fold below keeps a candidate only
+    // when it is strictly less, which reproduces the host's tie rule -- smallest
+    // disparity wins -- only if a lower chunk really does hold the lower
+    // disparities.
     const int chunk = static_cast<int>(threadIdx.x);
     const int span = (dEnd - minD + kBsChunks) / kBsChunks;
     const int dLo = minD + chunk * span;
@@ -783,9 +784,24 @@ cudaError_t launchDense(DeviceBinMatConstView left, DeviceBinMatConstView right,
                      params.maxDisparity >= params.minDisparity &&
                      params.maxDisparity <= 254,
                  "cuda denseDisparity: need 0 <= min <= max <= 254 (255 marks invalid)");
+    // The same domain, refused in every build. The assertions above compile
+    // out under NDEBUG, and an even window or a disparity range past the
+    // invalid marker would not fail here -- it would produce a plausible map.
+    if (left.width != right.width || left.height != right.height ||
+        left.height != planes * imgHeight || disparity.width != width ||
+        disparity.height != imgHeight)
+        return cudaErrorInvalidValue;
+    if (params.winWidth < 3 || params.winHeight < 3 || (params.winWidth & 1) == 0 ||
+        (params.winHeight & 1) == 0)
+        return cudaErrorInvalidValue;
+    if (params.minDisparity < 0 || params.maxDisparity < params.minDisparity ||
+        params.maxDisparity > 254)
+        return cudaErrorInvalidValue;
     if (width == 0 || imgHeight == 0) return cudaSuccess;
     BINCV_ASSERT(left.ptr != nullptr && right.ptr != nullptr && disparity.ptr != nullptr,
                  "cuda denseDisparity: non-empty views need non-null pointers");
+    if (left.ptr == nullptr || right.ptr == nullptr || disparity.ptr == nullptr)
+        return cudaErrorInvalidValue;
 
     const long long dMaxSupported = static_cast<long long>(width) -
                                     static_cast<long long>(params.winWidth);
@@ -860,10 +876,16 @@ cudaError_t denseDisparityBinary(DeviceBinMatConstView left,
                                  DeviceImageView<uint8_t> disparity,
                                  cudaStream_t stream) {
     // The host binary path keeps its extraction in bytes and asserts this; the
-    // cost fits wider registers here, but the accepted domain stays the
-    // host's so "equal by test" is a statement about the same inputs.
+    // accepted domain stays the host's so "equal by test" is a statement about
+    // the same inputs. It is also a REAL bound on this side: the bit-sliced arm
+    // carries its window sums in kBsAccPlanes = 8 planes and drops the carry
+    // out of the last one, so a window of 289 pixels (17x17) wraps mod 256 and
+    // the winner-take-all picks a wrong disparity on textured content. Asserted,
+    // and refused in every build -- an assertion compiles out under NDEBUG and
+    // the failure it guards looks like a correct answer.
     BINCV_ASSERT(params.winWidth * params.winHeight <= 255,
                  "cuda denseDisparityBinary: winWidth * winHeight must fit a byte");
+    if (params.winWidth * params.winHeight > 255) return cudaErrorInvalidValue;
     return launchDense(left, right, 1, left.height, params, disparity, stream);
 }
 
@@ -884,6 +906,16 @@ cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
                      params.maxDisparity >= params.minDisparity &&
                      params.maxDisparity <= 254,
                  "cuda denseDisparityCensusPacked: need 0 <= min <= max <= 254");
+    // Refused in every build, as the plane-block launcher refuses its domain.
+    if (leftDesc.width != rightDesc.width || leftDesc.height != rightDesc.height ||
+        disparity.width != width || disparity.height != height)
+        return cudaErrorInvalidValue;
+    if (params.winWidth < 3 || params.winHeight < 3 || (params.winWidth & 1) == 0 ||
+        (params.winHeight & 1) == 0)
+        return cudaErrorInvalidValue;
+    if (params.minDisparity < 0 || params.maxDisparity < params.minDisparity ||
+        params.maxDisparity > 254)
+        return cudaErrorInvalidValue;
     if (width == 0 || height == 0) return cudaSuccess;
     BINCV_ASSERT(leftDesc.ptr != nullptr && rightDesc.ptr != nullptr &&
                      disparity.ptr != nullptr,

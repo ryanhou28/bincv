@@ -120,8 +120,8 @@
 //
 // differenceClearsNoise() answers one question: is the difference bigger than
 // the noise it was measured against. It is not the only question a set of
-// paired rounds answers, and reading it as though it were produced a verdict
-// the owner ruled wrong (2026-09-19).
+// paired rounds answers, and reading it as though it were produced a wrong
+// result: a unanimous direction called a null.
 //
 // THE CASE THAT FORCED IT. Device Lucas-Kanade at the pipeline's own keypoint
 // spacing. binCV was faster in 105 of 105 paired rounds and never by less than
@@ -164,7 +164,7 @@
 // rounds and a hundred unanimous rounds both satisfy "no round crossed", and
 // they are not equally strong evidence. The tempting fix is a minimum round
 // count -- which would be a project-wide "X is enough" bar invented right
-// here, the one thing CLAUDE.md says not to do. What is printed instead is the
+// here, which this project does not do. What is printed instead is the
 // exact two-sided sign-test p: 1.0 at one round, 0.5 at two and 6.1e-05 at
 // fifteen. The
 // reader then judges strength from a number that is on the page, and the
@@ -303,7 +303,7 @@ inline double& runToRunScatterFactor() {
 /// does with them.
 /// @note REPORTED, NEVER GATED ON. Turning "p below some number" into a merge
 /// criterion would be inventing a project-wide threshold, which is the one
-/// thing CLAUDE.md says not to do. What this value is for is telling a
+/// thing this project does not do. What this value is for is telling a
 /// reader whether fifteen rounds on one side is the kind of thing noise
 /// does.
 inline double signTestTwoSidedP(int winsA, int winsB) {
@@ -446,7 +446,7 @@ struct PairedTiming {
     /// over one round, and how little that is worth is read off signTestP(),
     /// which returns 1.0 for it. A round-count floor here would be a
     /// project-wide "X is enough" bar invented in a header, which is what
-    /// CLAUDE.md forbids; a printed p is the same information without one.
+    /// this project forbids; a printed p is the same information without one.
     bool unanimous() const {
         const int n = roundsFavouringA + roundsFavouringB;
         return n > 0 && (roundsFavouringA == 0 || roundsFavouringB == 0);
@@ -459,7 +459,7 @@ struct PairedTiming {
     }
 
     /// @brief NO ROUND CROSSED 1.00x: every round was a measurement and every
-    /// one of them fell on the same side. The owner's 2026-09-19 ruling:
+    /// one of them fell on the same side. The rule:
     /// the direction is then established by the observations, and the spread
     /// bounds only how much the MAGNITUDE varies.
     /// @note Stricter than unanimous() by exactly the ties, and the file header
@@ -519,7 +519,7 @@ struct PairedTiming {
     /// is a win that was the same size in every round.
     /// @note It equals ratioSwingFactor() whenever a direction is established,
     /// and is printed as the magnitude's own span rather than as the noise
-    /// because under the ruling that is what it is evidence about.
+    /// because under that rule that is what it is evidence about.
     double magnitudeSpanFactor() const {
         const double lo = magnitudeLoFactor();
         const double hi = magnitudeHiFactor();

@@ -1,4 +1,4 @@
-// bincv::threshold against cv::threshold -- the Tier 1 claim, priced (issue #55).
+// bincv::threshold against cv::threshold -- the Tier 1 claim, priced.
 //
 // threshold.hpp's cv::Mat overload is API TIER 1: bit-exact against
 // cv::threshold's THRESH_BINARY by test. It had no benchmark, so the claim

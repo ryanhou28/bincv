@@ -1,5 +1,5 @@
 // ===========================================================================
-// -- N-BIT INGESTION WITHOUT OpenCV, AND WHETHER IT COSTS ANYTHING.
+// N-BIT INGESTION WITHOUT OpenCV, AND WHETHER IT COSTS ANYTHING.
 //
 // Before this, the only way into a `QuantMat<N>` was `fromCVMat`, which takes a
 // `cv::Mat` -- so N-bit ingestion required linking OpenCV, which is the one thing the
@@ -12,10 +12,10 @@
 // per plane;
 // (c) `packQuantWith`, the arbitrary-map escape hatch, which cannot vectorize.
 //
-// (a) vs (b) IS ALSO A LIVENESS CHECK, and it is here deliberately. shipped a
-// vector block that was compiled out by a mis-attached `#define`, measured three
-// "improvements" against it, and only caught it by timing the kernel in isolation and
-// noticing it did not respond to `-mavx2`. **A vector arm that cannot be switched off
+// (a) vs (b) IS ALSO A LIVENESS CHECK, and it is here deliberately. An earlier kernel
+// shipped a vector block that was compiled out by a mis-attached `#define`, three
+// "improvements" were measured against it, and it was only caught by timing the
+// kernel in isolation and noticing it did not respond to `-mavx2`. **A vector arm that cannot be switched off
 // cannot be shown to be on.**
 //
 // This benchmark needs no OpenCV -- which is the claim it is measuring.

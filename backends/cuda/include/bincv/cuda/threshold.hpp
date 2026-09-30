@@ -88,8 +88,8 @@ namespace cuda {
 /// bit per pixel. **API TIER 1** -- bit-exact against
 /// `cv::threshold(src, tmp, thresh, 255, cv::THRESH_BINARY)` on the same
 /// content for every `thresh` with `|thresh| < 2^31`, through the host arm
-/// (device == host by this backend's suite, host == cv::threshold by
-/// tests/test_threshold.cpp). Beyond that range cv::threshold is itself
+/// (device == host `bincv::threshold` by test_cuda_sensor, host ==
+/// cv::threshold by tests/test_threshold.cpp). Beyond that range cv::threshold is itself
 /// undefined and binCV answers the arithmetic; see the host header.
 /// @param src Wide source in DEVICE memory, one `uint8_t` per pixel.
 /// @param dst Bit destination in DEVICE memory; must have `src`'s dimensions.
@@ -99,10 +99,10 @@ namespace cuda {
 /// the next synchronization, not here.
 ///
 /// @note NO KERNEL OF ITS OWN. One cutoff and a dispatch -- see the file note.
-/// @note THREE OUTCOMES, and only the middle one launches a packer:
-/// `cutoff > 255` is "nothing passes", a `cudaMemset2DAsync` of the
-/// destination and no kernel at all; `cutoff <= 0` is "everything passes";
-/// otherwise `packBits` with `PackRule::GreaterEqual`.
+/// @note TWO BRANCHES: `cutoff > 255` is "nothing passes", a
+/// `cudaMemset2DAsync` of the destination and no kernel at all; everything
+/// else is `packBits` with `PackRule::GreaterEqual`, including `cutoff <= 0`,
+/// which is "everything passes".
 /// @note THE `cutoff <= 0` CASE IS FREE IN CODE AND NOT IN TRAFFIC, and this
 /// family's whole thesis is that traffic is the metric, so it is said
 /// rather than sold. It goes through `packBits`, which reads all
@@ -112,7 +112,7 @@ namespace cuda {
 /// padding invariant forbids. A threshold below zero is not on any
 /// pipeline's path, and one more hand-written kernel to keep bit-exact
 /// forever is the wrong price for it.
-/// @note Padding bits are zero on return in all three outcomes: `packBits`'
+/// @note Padding bits are zero on return in both branches: `packBits`'
 /// lanes past `width` contribute 0 to the ballot, and the memset clears
 /// the whole trailing word.
 /// @note Never allocates. Device scratch: none. Shared memory: none.
@@ -145,7 +145,8 @@ inline cudaError_t threshold(DeviceImageConstView<uint8_t> src, DeviceBinMatView
 /// @brief dst = (src > thresh), pixel for pixel, over an N-plane bit-sliced
 /// device source. **API TIER 3** -- OpenCV has no N-bit image type on host
 /// or device, so there is nothing to be bit-exact against and the name is
-/// binCV's own. Bit-exact against the host `bincv::binarize` by test.
+/// binCV's own. Bit-exact against the host `bincv::binarize` at every plane
+/// count in the domain, proven by test_cuda_sensor.
 /// @param planes The source plane block: N planes in ONE allocation, plane 0 the
 /// LEAST significant bit, plane `p` occupying rows `[p*height, (p+1)*height)`
 /// -- `packQuant`'s and `censusTransform`'s layout, so a caller who ingested

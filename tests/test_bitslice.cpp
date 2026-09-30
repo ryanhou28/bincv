@@ -15,6 +15,8 @@
 // and OpenCV has no pointwise median of three images.
 // It is here because the denoise kernel must match that formula, and the cheapest way to
 // be sure the majority IS that median is to run the formula.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // EXHAUSTIVE, NOT SAMPLED -- WHICH IS AFFORDABLE HERE AND NOWHERE ELSE
 //
@@ -30,9 +32,9 @@
 // threshold 0..2^n+1, which is that
 // function's ENTIRE input space
 //
-// at all four word widths. k = 3, 4 and 9 are the MVP's shapes (median of 3, box
-// 2x2, 3x3 median); k = 1 and 2 are the degenerate ones; 16 is the larger case
-// asks for, and 2^16 patterns is still under a second.
+// at all four word widths. k = 3, 4 and 9 are the reference pipeline's shapes
+// (median of 3, box 2x2, 3x3 median); k = 1 and 2 are the degenerate ones; 16 is
+// a larger case, and 2^16 patterns is still under a second.
 //
 // The patterns are packed into the LANES of the words under test -- pattern
 // base+L in lane L -- so one call covers WordBits patterns and the enumeration
@@ -241,7 +243,7 @@ void testMaj3(const char* wordTypeName) {
         const size_t lanes = packLanes(inputs, 3, base, total);
         const WordType got = maj3<WordType>(inputs[0], inputs[1], inputs[2]);
 
-        // The same three inputs through the OTHER route the MVP has for a
+        // The same three inputs through the OTHER route the pipeline has for a
         // majority: count them, then threshold at 2. maj3 and the adder network
         // are independent code paths, and this is the only case that binds them.
         WordType planes[MAX_PLANES];
@@ -366,12 +368,12 @@ void testThresholdGEValues(const char* wordTypeName) {
 }
 
 // ===========================================================================
-// 4. The composition the MVP actually calls: sum, then threshold
+// 4. The composition the pipeline actually calls: sum, then threshold
 // ===========================================================================
 //
 // Every threshold from 0 (everything passes) to k+1 (nothing passes), over every
-// pattern, for the counts the MVP uses. names both ends explicitly, and they
-// are exactly where a comparison built from `>` rather than `>=` survives a
+// pattern, for the counts the pipeline uses. Both ends are named explicitly, because
+// they are exactly where a comparison built from `>` rather than `>=` survives a
 // mid-range test.
 
 template <typename WordType>

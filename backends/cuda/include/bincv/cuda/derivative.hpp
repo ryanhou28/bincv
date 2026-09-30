@@ -138,7 +138,9 @@ bool& derivativeFusedArmEnabled();
 constexpr size_t derivativeMaxPlanes() { return 4; }
 
 /// @brief Horizontal binarized derivative, N-bit source to sign-magnitude.
-/// **API TIER 3**, TIER 1 border semantics.
+/// **API TIER 3**, TIER 1 border semantics. Bit-exact against the host
+/// `bincv::derivativeX` at every N in the domain and every border type, both
+/// arms, proven by test_cuda_derivcov; so are `derivativeY` and `derivativeXY`.
 /// @param src N magnitude planes (`planes == N`, 1 <= N <= derivativeMaxPlanes).
 /// @param dst N+1 planes: magnitude 0..N-1 then the SIGN plane at index N,
 /// which is `SignedQuantMat<N>`'s own layout. **A set sign bit means
@@ -190,6 +192,7 @@ cudaError_t derivativeXY(DevicePlaneBlockConstView src, DevicePlaneBlockView dxD
                          bool borderValue = false, cudaStream_t stream = nullptr);
 
 /// @brief The BINARY-level spellings: a 1-bit source gives a ternary result.
+/// **API TIER 3**, with the plane-block forms above.
 /// @note `BinMat` is `QuantMat<1>` on the host and a device bit matrix is the
 /// same bytes, so pyramid level 0 reaches these with no adapter. `dst` is a
 /// 2-plane block: magnitude, then sign.

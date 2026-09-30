@@ -1,9 +1,12 @@
 #pragma once
 
 /// @file median.hpp
-/// @brief The median family on the device: the reference pipeline's three-pixel
-/// median over PACKED BITS (`denoiseMedian3`) and over a WIDE 8- or 16-bit
-/// image with a caller-chosen neighbourhood (`medianWide`).
+/// @brief The median family on the device: the three-pixel median the
+/// reference pipeline (the visual-inertial odometry system, not in this
+/// repository, that binCV was built to serve stage by stage; see
+/// docs/ARCHITECTURE.md) runs, over PACKED BITS (`denoiseMedian3`), and a
+/// median over a WIDE 8- or 16-bit image with a caller-chosen neighbourhood
+/// (`medianWide`).
 ///
 /// ---------------------------------------------------------------------------
 /// ONE HEADER, TWO HOST HEADERS
@@ -119,8 +122,8 @@ cudaError_t medianWideImpl(DeviceImageConstView<uint16_t> src,
 /// @brief `dst[y][x] = median(src[y-1][x], src[y][x], src[y][x+1])` over packed
 /// bits, with the out-of-image neighbours reading 0. **API TIER 3.**
 ///
-/// Device twin of `bincv::denoiseMedian3<uint32_t>`, bit-identical to it by
-/// test. For binary pixels the median of three IS their majority, so each
+/// Bit-exact against `bincv::denoiseMedian3<uint32_t>`, proven by
+/// test_cuda_median. For binary pixels the median of three IS their majority, so each
 /// destination word costs one `maj3` -- `ops/bitslice.hpp`'s own expression,
 /// shared rather than re-derived here -- over 32 pixels.
 ///
@@ -164,8 +167,8 @@ cudaError_t denoiseMedian3(DeviceBinMatConstView src, DeviceBinMatView dst,
 // ---------------------------------------------------------------------------
 
 /// @brief Median filter over a caller-chosen neighbourhood on a wide image.
-/// **API TIER 3.** Device twin of `bincv::medianWide<K, uint8_t>`, byte-
-/// identical to it by test.
+/// **API TIER 3.** Bit-exact against `bincv::medianWide<K, uint8_t>`, both
+/// arms, proven by test_cuda_median.
 ///
 /// @param src,dst Wide device views of equal extent. **They must not alias.**
 /// @param pattern `K` sample offsets relative to the pixel being written;
@@ -199,10 +202,11 @@ inline cudaError_t medianWide(DeviceImageConstView<uint8_t> src,
 /// for, so this overload is not an afterthought -- it is the reason the
 /// contract says "integer-typed", not "8-bit".
 /// @note **NO `cv::cuda` COUNTERPART EXISTS FOR THIS INPUT TYPE AT ANY API
-/// LEVEL**: `cv::cuda::createMedianFilter` accepts `CV_8UC1` only. Its
-/// speed verdict against a GPU alternative is therefore OUTSTANDING, not
-/// won; the benchmark says so on the line rather than quoting a CPU number
-/// in a GPU comparison.
+/// LEVEL**: `cv::cuda::createMedianFilter` accepts `CV_8UC1` only. No
+/// GPU-vs-GPU speed comparison is possible for it, so none is claimed; the
+/// benchmark says so on the line rather than quoting a CPU number in a GPU
+/// comparison. Byte-identical to `bincv::medianWide<K, uint16_t>` by
+/// test_cuda_median.
 template <size_t K>
 inline cudaError_t medianWide(DeviceImageConstView<uint16_t> src,
                               DeviceImageView<uint16_t> dst,

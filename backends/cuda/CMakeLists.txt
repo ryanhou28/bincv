@@ -4,12 +4,40 @@
 # every type in them is device-typed, so no call can hide where its memory
 # lives.
 
-# sm_86 is the backend's reference GPU (RTX 3070 Ti, the machine the committed
-# numbers come from). Override for other parts -- 87 covers Jetson Orin with no
-# source change. Must be chosen before enable_language(CUDA).
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
-    set(CMAKE_CUDA_ARCHITECTURES 86)
+# The backend needs CMake 3.18: CMAKE_CUDA_ARCHITECTURES and CUDA_STANDARD 17
+# arrived in 3.18, find_package(CUDAToolkit) in 3.17. The top-level project asks
+# for 3.15 because the host library needs nothing newer, so the requirement is
+# checked here, where it arises, and fails with its reason rather than with the
+# unrelated-looking error an older CMake would give a few lines down.
+if(CMAKE_VERSION VERSION_LESS 3.18)
+    message(FATAL_ERROR
+        "The CUDA backend needs CMake 3.18 or newer (CMAKE_CUDA_ARCHITECTURES, "
+        "find_package(CUDAToolkit), CUDA_STANDARD 17); this is CMake ${CMAKE_VERSION}. "
+        "Upgrade CMake, or configure without -DBINCV_CUDA=ON.")
 endif()
+
+# ONE ARCHITECTURE, AND IT MUST BE THE GPU'S. The kernels are built as SASS for
+# exactly the architectures named here, with no PTX for any other, so on a GPU
+# of a different generation every launch returns cudaErrorNoKernelImageForDevice
+# and the device-vs-host suites fail. The default is 86 -- the reference GPU, an
+# RTX 3070 Ti, which every committed figure was taken on. Name another part with
+# -DCMAKE_CUDA_ARCHITECTURES=<compute capability>: 75 (T4, RTX 20xx), 70 (V100),
+# 87 (Jetson Orin), or `native` on CMake 3.24+ to build for the installed GPU.
+# The CUDAARCHS environment variable is honoured when the cache variable is not
+# set, as CMake 3.20+ does on its own. Must be chosen before
+# enable_language(CUDA).
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+    if(DEFINED ENV{CUDAARCHS} AND NOT "$ENV{CUDAARCHS}" STREQUAL "")
+        set(CMAKE_CUDA_ARCHITECTURES "$ENV{CUDAARCHS}")
+    else()
+        set(CMAKE_CUDA_ARCHITECTURES 86)
+    endif()
+endif()
+message(STATUS
+    "bincv_cuda: building for CUDA architecture(s) '${CMAKE_CUDA_ARCHITECTURES}' "
+    "(default 86, the reference RTX 3070 Ti). A GPU of another generation needs "
+    "-DCMAKE_CUDA_ARCHITECTURES=<its compute capability>, e.g. 75 for a T4, or "
+    "'native' on CMake 3.24+; without that the kernels will not load on it.")
 
 enable_language(CUDA)
 find_package(CUDAToolkit REQUIRED)

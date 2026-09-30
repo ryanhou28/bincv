@@ -1,4 +1,5 @@
-// The census transform, priced at birth (CLAUDE.md's rule).
+// The census transform, priced at birth: an operation gets its benchmark arm when
+// it is written.
 //
 // Core-only, binCV against binCV: mainline OpenCV has no census to be a
 // denominator (one lives in opencv_contrib, which no configuration here builds).

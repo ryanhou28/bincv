@@ -16,6 +16,8 @@
 // The spelling is the reference pipeline's own two stages, read from the
 // reference rather than inferred: the L-shaped three-pixel median (min/max
 // network), then |d/dx| >= t OR |d/dy| >= t over [-1, 0, 1].
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 
 #include <opencv2/opencv.hpp>
 

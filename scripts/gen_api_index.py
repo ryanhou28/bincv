@@ -3,14 +3,20 @@
 
 WHY THIS IS GENERATED AND NOT WRITTEN. Every public entry point in binCV already
 carries a `@brief` and states its API tier -- that was a rule before there was any
-reference to put them in (CLAUDE.md: "State the API tier in every public docstring").
+reference to put them in.
 So the reference is a VIEW of the headers, and a hand-written one would drift from them
 the first time a signature moved.
 
-Run: python3 scripts/gen_api_index.py
+Run: python3 scripts/gen_api_index.py [--out PATH]
+
+Entries inside an `impl` or `detail` namespace are internal by convention and are
+skipped, like anything marked INTERNAL. The number of public entries whose brief
+states no API tier is printed to stderr, because the tier is part of the contract.
 """
+import argparse
 import re
 import pathlib
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INC = ROOT / "include" / "bincv"
@@ -27,6 +33,13 @@ DECL = re.compile(
     r"|[\w:<>,&*\s]+?\b(?P<fn>\w+)\s*\()"
 )
 TIER = re.compile(r"\*\*API TIER (\d)|\*\*INTERNAL", re.I)
+# The internal namespaces inside a public header. They close with the `} // namespace
+# impl` comment throughout, which is what makes tracking them a line match rather
+# than a brace count.
+NS_OPEN = re.compile(r"^\s*namespace\s+(impl|detail)\s*\{")
+NS_CLOSE = re.compile(r"^\s*\}\s*//\s*namespace\s+(impl|detail)\b")
+# GCC's function attributes sit where a signature starts and are not a name.
+ATTRIBUTE = re.compile(r"__attribute__\s*\(\(.*?\)\)\s*")
 
 
 def first_sentence(text):
@@ -43,7 +56,12 @@ def briefs(path):
     """Yield (name, kind, brief, tier) for each documented public declaration."""
     lines = path.read_text(encoding="utf-8", errors="replace").split("\n")
     out, block, seen = [], [], set()
+    hidden = 0                            # depth inside an impl/detail namespace
     for i, raw in enumerate(lines):
+        if NS_OPEN.match(raw):
+            hidden += 1
+        elif NS_CLOSE.match(raw) and hidden > 0:
+            hidden -= 1
         s = raw.strip()
         if s.startswith("///"):
             block.append(s[3:].strip())
@@ -62,17 +80,21 @@ def briefs(path):
         if tm and not tm.group(1):
             continue                      # said INTERNAL; not public API
         tier = tm.group(1) if tm else ""
+        if hidden:
+            continue                      # inside namespace impl/detail; not public API
         # A template declaration puts `template <...>` on its own line and the signature
         # on the next, so join forward -- otherwise every templated entry point is lost.
-        decl, d, k = s, DECL.match(s), 0
+        decl = ATTRIBUTE.sub("", s)
+        d, k = DECL.match(decl), 0
         while d is None and k < 3 and i + k + 1 < len(lines):
             k += 1
-            decl = decl + " " + lines[i + k].strip()
+            decl = decl + " " + ATTRIBUTE.sub("", lines[i + k].strip())
             d = DECL.match(decl)
         if d is None:
             continue
         name = d.group("type") or d.group("var") or d.group("fn")
-        if not name or name.startswith("operator") or name in ("if", "for", "return"):
+        if (not name or name.startswith("operator") or name.startswith("__")
+                or name in ("if", "for", "return")):
             continue
         kind = (d.group("kind") or ("constant" if d.group("var") else "function"))
         kind = kind.replace("enum class", "enum")
@@ -85,6 +107,11 @@ def briefs(path):
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--out", default=str(OUT),
+                    help="where to write the reference (default: docs/API.md)")
+    args = ap.parse_args()
+    out_path = pathlib.Path(args.out)
     groups = []
     for sub in ("", "ops", "io", "core", "threads"):
         d = INC / sub if sub else INC
@@ -131,9 +158,14 @@ def main():
             label = f"`{n}`" if kind == "function" else f"`{n}` *({kind})*"
             lines.append(f"| {label} | {tier or '—'} | {brief} |")
         lines.append("")
-    OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     total = sum(len(e) for _, _, e in groups)
-    print(f"docs/API.md: {len(groups)} headers, {total} entries")
+    print(f"{args.out}: {len(groups)} headers, {total} entries")
+    untiered = [(name, n) for name, _, entries in groups for n, _, _, tier in entries if not tier]
+    if untiered:
+        print(f"{len(untiered)} public entries state no API tier:", file=sys.stderr)
+        for header, n in untiered:
+            print(f"  {header}: {n}", file=sys.stderr)
 
 
 if __name__ == "__main__":

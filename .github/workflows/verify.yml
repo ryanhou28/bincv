@@ -98,9 +98,10 @@ jobs:
 
   opencv-interop:
     name: OpenCV interop (${{ matrix.arch }})
-    # THE ONLY PLACE THE TIER 1 CLAIMS ARE CHECKED. `test_equivalence` and
-    # `test_opencv_interop` compile only where OpenCV does, and they are what
-    # proves a Tier 1 operation gives cv::'s answer bit for bit. Before this job
+    # THE ONLY PLACE THE TIER 1 CLAIMS ARE CHECKED IN CI. The cases that compare
+    # against cv:: -- `test_equivalence`, `test_opencv_interop`, and the OpenCV
+    # cases inside the per-operation suites -- compile only where OpenCV does,
+    # and they are what proves a Tier 1 operation gives cv::'s answer bit for bit. Before this job
     # they ran on one desktop when someone remembered, and on aarch64 they could
     # not run at all.
     #

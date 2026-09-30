@@ -6,6 +6,7 @@
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # commit:   80ff0a8
+# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/reduce_benchmark.cpp=85547efe07ce include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/reduce.hpp=728d865db387
 # governor: performance
 # throttled before: throttled=0x80000
 # temp before: temp=57.9'C
@@ -742,3 +743,89 @@ sink: 44970124983 (printed so no reduction above can be optimized away)
 # temp after: temp=63.7'C
 # date:     2026-09-21T16:36:11-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio b4:countNonZero OpenCV CV_8U/b4:countNonZero binCV uint32) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                   n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# b1 / countNonZero OpenCV CV_8U       10     0.1763     0.1650     0.1848  1.120    11.3%      --  [  0.1699,   0.1809]   3.12%   1.037x
+# b1 / countNonZero binCV per-pixel    10     2.9257     2.9256     2.9259  1.000     0.0%      --  [  2.9256,   2.9257]   0.00%   1.000x
+# b1 / countNonZero binCV uint16       10     0.1450     0.1450     0.1451  1.000     0.0%      --  [  0.1450,   0.1450]   0.01%   1.000x
+# b1 / countNonZero binCV uint32       10    0.08034    0.08030    0.08035  1.001     0.1%      --  [ 0.08033,  0.08035]   0.01%   1.000x
+# b1 / countNonZero binCV uint64       10    0.05704    0.05704    0.05842  1.024     2.4%      --  [ 0.05704,  0.05705]   0.01%   1.000x
+# b1 / countNonZero binCV uint8        10     0.2672     0.2672     0.2673  1.000     0.0%      --  [  0.2672,   0.2672]   0.00%   1.000x
+# b10 / countNonZero OpenCV CV_8U      10     0.2402     0.2401     0.2407  1.002     0.2%      --  [  0.2402,   0.2405]   0.07%   1.001x
+# b10 / countNonZero binCV per-pixel   10     2.7856     2.7855     2.7858  1.000     0.0%      --  [  2.7855,   2.7857]   0.00%   1.000x
+# b10 / countNonZero binCV uint16      10     0.1253     0.1253     0.1253  1.000     0.0%      --  [  0.1253,   0.1253]   0.01%   1.000x
+# b10 / countNonZero binCV uint32      10    0.06499    0.06498    0.06502  1.001     0.1%      --  [ 0.06499,  0.06501]   0.01%   1.000x
+# b10 / countNonZero binCV uint64      10    0.03360    0.03359    0.03362  1.001     0.1%      --  [ 0.03359,  0.03360]   0.01%   1.000x
+# b10 / countNonZero binCV uint8       10     0.2480     0.2480     0.2481  1.001     0.1%      --  [  0.2480,   0.2481]   0.01%   1.000x
+# b11 / countAnd OpenCV composite      10     0.8548     0.8490     0.8711  1.026     2.6%      --  [  0.8515,   0.8616]   0.60%   1.008x
+# b11 / countAnd binCV uint32          10    0.08796    0.08791    0.08800  1.001     0.1%      --  [ 0.08794,  0.08797]   0.01%   1.000x
+# b12 / countAndSplit binCV uint32     10   134.6000   133.5000   196.8000  1.474    47.0%      --  [133.9000, 165.6000]  11.78%   1.230x
+# b12 / countAndSplit binCV uint32 #2  10   791.4000   774.5000   803.0000  1.037     3.6%      --  [784.2000, 800.1000]   1.00%   1.011x
+# b12 / countAndSplit binCV uint32 #3  10     1841.6     1819.3     1858.8  1.022     2.1%      --  [  1830.2,   1847.1]   0.46%   1.006x
+# b2 / countAnd OpenCV composite       10     0.4123     0.3965     0.4383  1.105    10.1%      --  [  0.4058,   0.4232]   2.11%   1.026x
+# b2 / countAnd binCV uint32           10     0.1010     0.1009     0.1010  1.001     0.1%      --  [  0.1009,   0.1010]   0.00%   1.000x
+# b3 / countAndSplit binCV uint32      10    81.6000    80.9000    81.7000  1.010     1.0%      --  [ 81.3500,  81.7000]   0.21%   1.003x
+# b3 / countAndSplit binCV uint32 #2   10   160.5000   160.2000   160.6000  1.002     0.2%      --  [160.4000, 160.5500]   0.05%   1.001x
+# b3 / countAndSplit binCV uint32 #3   10   352.6000   352.2000   352.7000  1.001     0.1%      --  [352.5500, 352.6000]   0.01%   1.000x
+# b4 / countNonZero OpenCV CV_8U       10     0.1692     0.1646     0.1711  1.040     3.9%      --  [  0.1666,   0.1701]   1.03%   1.015x
+# b4 / countNonZero binCV per-pixel    10     2.8038     2.8037     2.8042  1.000     0.0%      --  [  2.8038,   2.8041]   0.01%   1.000x
+# b4 / countNonZero binCV uint16       10     0.1413     0.1413     0.1414  1.001     0.1%      --  [  0.1413,   0.1413]   0.00%   1.000x
+# b4 / countNonZero binCV uint32       10    0.06365    0.06364    0.06366  1.000     0.0%      --  [ 0.06364,  0.06366]   0.02%   1.000x
+# b4 / countNonZero binCV uint64       10    0.03259    0.03259    0.03261  1.001     0.1%      --  [ 0.03259,  0.03260]   0.02%   1.000x
+# b4 / countNonZero binCV uint8        10     0.2633     0.2632     0.2633  1.000     0.0%      --  [  0.2633,   0.2633]   0.00%   1.000x
+# b5 / countAnd OpenCV composite       10     0.5479     0.5340     0.5739  1.075     7.3%      --  [  0.5410,   0.5541]   1.20%   1.013x
+# b5 / countAnd binCV uint32           10    0.08775    0.08770    0.08794  1.003     0.3%      --  [ 0.08774,  0.08783]   0.05%   1.001x
+# b6 / countAndSplit binCV uint32      10   120.9000   120.7000   122.7000  1.017     1.7%      --  [120.7000, 121.4500]   0.31%   1.005x
+# b6 / countAndSplit binCV uint32 #2   10   240.7500   240.2000   242.9000  1.011     1.1%      --  [240.3500, 241.8000]   0.30%   1.004x
+# b6 / countAndSplit binCV uint32 #3   10   473.7500   469.4000   478.1000  1.019     1.8%      --  [470.7000, 476.1000]   0.57%   1.006x
+# b7 / countNonZero OpenCV CV_8U       10     0.2072     0.2069     0.2123  1.026     2.6%      --  [  0.2071,   0.2092]   0.52%   1.010x
+# b7 / countNonZero binCV per-pixel    10     2.7961     2.7959     2.7967  1.000     0.0%      --  [  2.7960,   2.7963]   0.01%   1.000x
+# b7 / countNonZero binCV uint16       10     0.1345     0.1344     0.1348  1.003     0.3%      --  [  0.1344,   0.1347]   0.09%   1.001x
+# b7 / countNonZero binCV uint32       10    0.06320    0.06309    0.06341  1.005     0.5%      --  [ 0.06310,  0.06326]   0.13%   1.002x
+# b7 / countNonZero binCV uint64       10    0.03221    0.03176    0.03328  1.048     4.7%      --  [ 0.03188,  0.03248]   0.93%   1.011x
+# b7 / countNonZero binCV uint8        10     0.2559     0.2558     0.2560  1.000     0.0%      --  [  0.2559,   0.2559]   0.01%   1.000x
+# b8 / countAnd OpenCV composite       10     0.8757     0.8318     0.9024  1.085     8.1%      --  [  0.8449,   0.8859]   2.34%   1.036x
+# b8 / countAnd binCV uint32           10    0.08647    0.08641    0.08669  1.003     0.3%      --  [ 0.08643,  0.08654]   0.06%   1.001x
+# b9 / countAndSplit binCV uint32      10    88.7500    88.4000    89.5000  1.012     1.2%      --  [ 88.5000,  89.0000]   0.28%   1.003x
+# b9 / countAndSplit binCV uint32 #2   10   182.3500   181.8000   183.3000  1.008     0.8%      --  [181.8000, 182.9000]   0.30%   1.003x
+# b9 / countAndSplit binCV uint32 #3   10   441.6500   439.9000   445.3000  1.012     1.2%      --  [440.2000, 443.2000]   0.34%   1.004x
+# 
+# RATIO  b4:countNonZero OpenCV CV_8U  /  b4:countNonZero binCV uint32   over 10 launches
+#   paired per launch (the published estimator)
+#     median 2.6582   min 2.5855   max 2.6889   scatter 3.9%
+#     bootstrap 95% CI of the median: [2.6178, 2.6729]   +/- 1.04%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.015x
+#   ratio of the two medians, same launches
+#     point 2.6584   bootstrap 95% CI: [2.6182, 2.6731]
+#     the two intervals differ by 0.02% and 0.01% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     b1       all implementations agree (2786 set pixels in image 0)
+#     b10      all implementations agree (16779624 set pixels in image 0)
+#     b11      ratio vs OpenCV: uint32 3.70x, uint64 7.15x | vs the per-p
+#     b12      ratio vs the OpenCV composite: 9.86x (and binCV allocates 
+#     b2       ratio vs OpenCV: uint32 2.21x, uint64 3.12x | vs the per-p
+#     b3       ratio vs the OpenCV composite: 3.98x (and binCV allocates 
+#     b4       all implementations agree (153288 set pixels in image 0)
+#     b5       ratio vs OpenCV: uint32 2.59x, uint64 5.05x | vs the per-p
+#     b6       ratio vs the OpenCV composite: 6.09x (and binCV allocates 
+#     b7       all implementations agree (523817 set pixels in image 0)
+#     b8       ratio vs OpenCV: uint32 3.28x, uint64 6.52x | vs the per-p
+#     b9       ratio vs the OpenCV composite: 10.08x (and binCV allocates

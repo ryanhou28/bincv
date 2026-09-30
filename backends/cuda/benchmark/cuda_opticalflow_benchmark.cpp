@@ -10,7 +10,7 @@
 // 1.03x, and this backend has already had to withdraw published headlines
 // taken the other way.
 //
-// ONE RUN OF THIS BINARY IS NOT A NUMBER. Small kernels on this host sit near a
+// ONE RUN OF THIS BINARY IS NOT A NUMBER. Small kernels on the reference host sit near a
 // ~9 us launch floor with large spread. What is quotable is the median across at
 // least seven independent PROCESS runs of the per-round interleaved medians
 // below, and for every ratio, whether the two arms' sample RANGES overlap --
@@ -104,8 +104,8 @@ void rule() {
         "\n=====================================================================\n"
         " THE DECISION RULE -- WRITTEN BEFORE ANY MEASUREMENT\n"
         "=====================================================================\n"
-        " Four gates. One magnitude is deliberately ABSENT and is named as a\n"
-        " STOP AND ASK rather than filled in.\n"
+        " Four gates. One magnitude is deliberately ABSENT and is named as\n"
+        " unset rather than filled in.\n"
         "\n"
         " GATE 1 -- EQUALITY. Binary, no magnitude to invent.\n"
         "   Device nextPts (raw 32-bit words), status (bytes) and err (words)\n"
@@ -129,14 +129,14 @@ void rule() {
         "   maxLevel+1 levels (cudaoptflow/src/pyrlk.cpp). So the deciding row is\n"
         "   a true like-for-like, not an adjusted one.\n"
         "   REQUIRED MAGNITUDE: strictly faster, AND the two arms' sample RANGES\n"
-        "   disjoint. \"Strictly faster\" is CLAUDE.md's own ship rule, not an\n"
+        "   disjoint. \"Strictly faster\" is the project's own ship rule, not an\n"
         "   invented bar; the disjointness condition is not a threshold either --\n"
         "   it is the condition under which a median difference means anything.\n"
         "   MISS -> it does not ship as-is. It is optimized first (the named\n"
         "   steps, in order: the lane-0 broadcast A/B, then restructuring the\n"
-        "   FP64 solve, then the fused-derivative variant), or the owner\n"
-        "   explicitly accepts the gap with the memory-side argument stated.\n"
-        "   That escape is the owner's call, not the implementer's.\n"
+        "   FP64 solve, then the fused-derivative variant), or the gap is\n"
+        "   explicitly accepted with the memory-side argument stated.\n"
+        "   That escape is a judgement, not a number this binary can fill in.\n"
         "\n"
         " GATE 3 -- DEVICE MEMORY against the same role bar. Meter:\n"
         "   cudaMemGetInfo delta, TAKEN IDENTICALLY ON BOTH SIDES, with the\n"
@@ -172,10 +172,10 @@ void rule() {
         " docs/reports/feature-tracking.md's 62.3%% LK share; that clause is STRUCK -- it\n"
         " is a HOST pipeline's share and cannot multiply a device kernel result.\n"
         "\n"
-        " STOP AND ASK, AND IT IS NOT FILLED IN HERE: how much faster than the\n"
+        " UNSET, AND NOT FILLED IN HERE: how much faster than the\n"
         " HOST arm must the device arm be to justify a CUDA dependency for a\n"
         " caller whose pipeline is otherwise on the CPU? Nobody has set that\n"
-        " magnitude, and CLAUDE.md forbids inventing one.\n"
+        " magnitude, and this project does not invent one.\n"
         " Gate 2 therefore routes through the cv::cuda role bar, which is the bar\n"
         " the \"best existing option\" rule points at. The host row below is\n"
         " printed as CONTEXT and decides nothing.\n",
@@ -542,7 +542,7 @@ int main(int argc, char** argv) {
     std::printf("\n=====================================================================\n"
                 " CASE E -- THE HOST binCV TRACKER, SAME MACHINE, SAME PLANES\n"
                 "=====================================================================\n"
-                " CONTEXT, and it decides nothing (see the STOP AND ASK in the rule).\n"
+                " CONTEXT, and it decides nothing (see the unset magnitude in the rule).\n"
                 " The planes are DOWNLOADED from the device rather than rebuilt, so the\n"
                 " two arms cannot be measured on different inputs.\n");
     {
@@ -739,7 +739,7 @@ int main(int argc, char** argv) {
             "   measurement, and the measurement is that it MATERIALISED.\n"
             "\n"
             "   The stall histogram names the limiter and REFUTES this design's\n"
-            "   own pre-registered prediction. The design predicted the kernel\n"
+            "   own prediction, written before measuring. The design predicted the kernel\n"
             "   ~85%% FP64-bound. Measured: math_pipe_throttle = 0 of 2,753 stall\n"
             "   samples. What dominates is short_scoreboard at 50.9%% -- the warp\n"
             "   shuffle / MIO queue, i.e. THE CROSS-LANE REDUCTION -- then wait at\n"
@@ -756,7 +756,7 @@ int main(int argc, char** argv) {
             "   LOSE and is not built -- one profile in place of six experiments,\n"
             "   which is what the profiler changed about this method. The remedy\n"
             "   the profile DOES point at is more warps per keypoint, which is a\n"
-            "   traversal redesign and is filed, not folded in.\n");
+            "   traversal redesign, not folded in here.\n");
 
         // -------------------------------------------------------------------
         std::printf("\n=====================================================================\n"
@@ -884,11 +884,11 @@ int main(int argc, char** argv) {
     }
 #else
     std::printf("\n=====================================================================\n"
-                " CASE C, CASE D AND GATE 3 -- BLOCKED\n"
+                " CASE C, CASE D AND GATE 3 -- UNMEASURED IN THIS BUILD\n"
                 "=====================================================================\n"
                 " This binary was built without an OpenCV carrying cudaoptflow, so the\n"
                 " cv::cuda::SparsePyrLKOpticalFlow role bar is UNMEASURED. By\n"
-                " CLAUDE.md's both-axes ship rule the operation is then a STAGE, not a\n"
+                " the rule that an operation ships on both axes it is then a STAGE, not a\n"
                 " product. No substitute bar is invented and the CPU rows above are NOT\n"
                 " promoted to one.\n"
                 " Configure with -DBINCV_CUDA_OPENCV_DIR=<prefix of an OpenCV built with\n"
@@ -905,7 +905,7 @@ int main(int argc, char** argv) {
                 " covariance \"THE ENTRY POINT A TRACKER USES\". THIS TRACKER DOES NOT\n"
                 " CALL IT: the warp already holds the staged window in lane registers,\n"
                 " so the 2x2 costs four popcounts and four warp reductions in place.\n"
-                " CLAUDE.md says a measurement contradicting a documented claim gets\n"
+                " A measurement contradicting a documented claim gets\n"
                 " reported rather than worked around, so here is the measurement.\n"
                 " What is timed is ONE launch of gradientCovarianceBatchAsync over the\n"
                 " SAME windows at level 0 -- which is the LOWER BOUND on what routing\n"
@@ -944,7 +944,7 @@ int main(int argc, char** argv) {
                     "   and before its second traversal is counted. That is the price of\n"
                     "   the entry point the documentation names, and it is why this\n"
                     "   tracker computes its 2x2 from the registers it already holds.\n"
-                    "   WHICH DOCUMENT CHANGES IS THE OWNER'S CALL, not this file's.\n",
+                    "   The reduce.hpp and covariance.hpp docstrings say so.\n",
                     f.a.medianMs > 0.0 ? 100.0 * f.b.medianMs / f.a.medianMs : 0.0);
     }
 

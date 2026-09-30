@@ -51,6 +51,33 @@ BINCV_TEST(Parallel, PoolRunsEveryIndexExactlyOnce) {
     BINCV_CHECK(wrong == 0);
 }
 
+namespace bincv_test_other_tu {
+void installPool(int threads);
+void uninstallPool();
+int threadsSeenHere();
+} // namespace bincv_test_other_tu
+
+BINCV_TEST(Parallel, BackendInstalledFromAnotherUnitIsVisibleHere) {
+    // An integrator installs the pool in a thread-setup file that includes only
+    // threads/pool.hpp and runs kernels from files that include the ops headers.
+    // Both must read the SAME backend static. parallel.hpp once opened its
+    // namespace before the ABI-namespace macro was defined, so a unit that included
+    // it first owned its own backend and a pool installed there was invisible to
+    // every kernel: silently serial. test_parallel_other_tu.cpp is that unit.
+    BINCV_CHECK(getNumThreads() == 1);
+    bincv_test_other_tu::installPool(4);
+    BINCV_CHECK(bincv_test_other_tu::threadsSeenHere() > 1);
+    BINCV_CHECK(getNumThreads() > 1);   // the line that fails when the statics split
+    constexpr size_t kN = 4096;
+    std::vector<int> hits(kN, 0);
+    parallelFor(kN, [&](size_t i) { hits[i] += 1; });
+    size_t wrong = 0;
+    for (int h : hits) if (h != 1) ++wrong;
+    BINCV_CHECK(wrong == 0);
+    bincv_test_other_tu::uninstallPool();
+    BINCV_CHECK(getNumThreads() == 1);
+}
+
 BINCV_TEST(Parallel, TrackerIsBitExactWithAPoolInstalled) {
     // The claim that matters. Same frames, same points, same parameters; the only
     // difference is whether a backend is installed.

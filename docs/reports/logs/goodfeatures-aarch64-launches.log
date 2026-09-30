@@ -6,6 +6,7 @@
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # commit:   6d74d57
+# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/corner_opencv_benchmark.cpp=6651323d605d benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=53b5f5b990b6 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6
 # governor: performance
 # throttled before: throttled=0x80000
 # temp before: temp=55.5'C
@@ -592,3 +593,39 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
 # temp after: temp=59.9'C
 # date:     2026-09-22T16:36:24-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio t1:OpenCV Sobel/t1:binCV streaming) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# t1 / OpenCV Sobel                 10 17921477.0 17805439.0 18065209.0  1.015     1.4%   1.09%  [17852638.0, 17944160.5]   0.26%   1.004x
+# t1 / OpenCV binarized             10 23203526.0 23051404.0 23467201.0  1.018     1.8%   1.01%  [23097624.0, 23266602.0]   0.36%   1.005x
+# t1 / binCV                        10  7791240.0  7774358.0  7815250.0  1.005     0.5%   0.25%  [7783473.5, 7794689.0]   0.07%   1.001x
+# t1 / binCV streaming              10  7403349.5  7389420.0  7476867.0  1.012     1.2%   0.20%  [7397169.5, 7421895.0]   0.17%   1.003x
+# t1 / binCV streaming, scalar NMS  10  7396989.5  7389068.0  7477745.0  1.012     1.2%   0.16%  [7393856.5, 7413365.0]   0.13%   1.002x
+# 
+# RATIO  t1:OpenCV Sobel  /  t1:binCV streaming   over 10 launches
+#   paired per launch (the published estimator)
+#     median 2.4157   min 2.3972   max 2.4399   scatter 1.8%
+#     bootstrap 95% CI of the median: [2.4110, 2.4222]   +/- 0.23%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.003x
+#   ratio of the two medians, same launches
+#     point 2.4207   bootstrap 95% CI: [2.4116, 2.4235]
+#     the two intervals differ by 0.02% and 0.06% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     t1       -> binCV footprint vs the denominator: 5.71x smaller | variant  ns/frame  ns/pixel  spread  vs OpenCV  B/pixel

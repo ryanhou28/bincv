@@ -81,11 +81,11 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64|ARM|AARCH64")
     #
     # `arm-none-eabi-g++ -mcpu=cortex-m7 -mfpu=neon` compiles cleanly and defines
     # `__ARM_NEON`. Measured on Arm GNU Toolchain 14.2: exit 0, no diagnostic. So
-    # the flag check below returns Success on a Cortex-M7 and this branch used to
-    # report "SIMD: NEON" for a part with no vector unit -- every kernel gate also
-    # requires `__aarch64__` so no wrong code was generated, but `simdStatus()`
-    # reported NEON=yes, which is the one line GETTING_STARTED tells a reader to
-    # trust about which paths are live.
+    # the flag check below returns Success on a Cortex-M7, and without the profile
+    # check this branch would report "SIMD: NEON" for a part with no vector unit --
+    # every kernel gate also requires `__aarch64__` so no wrong code is generated,
+    # but `simdStatus()` would report NEON=yes, which is the one line
+    # GETTING_STARTED tells a reader to trust about which paths are live.
     #
     # `__ARM_ARCH_PROFILE` is the compiler's own answer ('M' vs 'A'), so ask it
     # rather than inferring from a flag the compiler declines to reject.

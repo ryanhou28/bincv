@@ -8,9 +8,9 @@
 ///
 /// The **bit-plane** overload only -- `detectFast(BinMatConstView, ...)`. The
 /// wide-image overload consumes exactly the bytes `cv::cuda::FastFeatureDetector`
-/// consumes and has no representational advantage of any kind, which CLAUDE.md's
-/// scope rule puts out on its second prong: binCV would add nothing but a second
-/// implementation to keep correct. A caller holding a wide frame reaches this
+/// consumes and has no representational advantage of any kind, which puts it
+/// out of scope: binCV would add nothing but a second implementation to keep
+/// correct. A caller holding a wide frame reaches this
 /// detector through `cuda::packBits` or `cuda::edgeThreshold`, and binarizing
 /// first CHANGES THE ANSWER -- said plainly here, exactly as the census entry's
 /// on-ramp is labelled in docs/reports/cuda.md.
@@ -45,8 +45,9 @@
 ///
 /// What survives, and it is real: binCV's word form is **branchless** where
 /// OpenCV's early exit diverges, and inside a warp a divergent early exit pays
-/// both paths. The ratio that ships is the measured one, in
-/// benchmark/cuda_fast_benchmark.cpp, not the derived one.
+/// both paths. The ratio that ships is the measured one, not the derived one:
+/// 6.015x against `cv::cuda::FastFeatureDetector` at 752x480 on the reference
+/// GPU (RTX 3070 Ti), from benchmark/cuda_role_benchmark.cpp.
 ///
 /// ---------------------------------------------------------------------------
 /// RASTER ORDER, AND WHY THERE IS NO LONGER A SORT
@@ -57,11 +58,12 @@
 /// genuinely needs the host's truncation ORDER cannot get it from an atomic and
 /// must compact by prefix sum instead."
 ///
-/// That is what the shipped arm does, and it is where this operation's cost
-/// used to be. A single-block bitonic network over the stored corners was
-/// **98.5% of a 752x480 detection at the reference corner density** -- 2.236 ms
-/// against 0.0328 ms of detection -- and its cost tracked `nextPow2(found)`
-/// rather than the frame. There is nothing to sort: a word's corners are the set
+/// That is what the shipped arm does, and the alternative is where this
+/// operation's cost would be. A single-block bitonic network over the stored
+/// corners is **98.5% of a 752x480 detection at the reference corner density**
+/// -- 2.236 ms against 0.0328 ms of detection -- and its cost tracks
+/// `nextPow2(found)` rather than the frame. There is nothing to sort: a word's
+/// corners are the set
 /// bits of one mask and peeling them low bit first is already ascending `x`,
 /// while the `(row, word)` UNITS are already in raster order. So the arm counts
 /// each unit's corners, prefix-sums the counts over words (11,376 numbers for a
@@ -128,8 +130,8 @@ enum class FastArm {
 /// does not depend on a global switch, on `arcLength`, or on the shared-memory
 /// budget: a sizing function whose answer changes when an implementation detail
 /// moves turns a correct caller into a device-side out-of-bounds write with no
-/// signal. What used to keep that property was handing every caller the larger
-/// arm's number. What keeps it now is stronger: the arm is an ARGUMENT, and
+/// signal. Handing every caller the larger arm's number would keep that
+/// property; what keeps it here is stronger: the arm is an ARGUMENT, and
 /// `detectFastAsync` REFUSES rather than writes when the arm it is about to run
 /// needs more than the caller passed. Size for `Ordered`, flip
 /// `impl::fastOrderedEnabled()` to `false`, and the next call returns
@@ -146,7 +148,10 @@ enum class FastArm {
 size_t fastScratchBytes(size_t width, size_t height, size_t capacity,
                         FastArm arm = FastArm::Ordered);
 
-/// @brief Detects FAST corners on a device bit-plane. **API TIER 2.**
+/// @brief Detects FAST corners on a device bit-plane. **API TIER 2** --
+/// `cv::FAST`'s detection rule, binCV's score (the file header). Bit-exact
+/// against the host `bincv::detectFast` on the same plane, corners and scores,
+/// both arms, proven by test_cuda_feature_tracking_corner.
 /// Bit-exact against `bincv::detectFast(BinMatConstView<uint32_t>, ...)` --
 /// positions, order AND the `long long` score, as `DeviceFastCorner::toHost`
 /// hands them back -- for every COMPLETE run.
@@ -231,11 +236,12 @@ bool& fastOrderedEnabled();
 /// size of a corner record, so narrowing the record from 16 bytes to 12 changed
 /// it by a quarter. At 752x480 nothing moved -- the crossing is capacity 17 at
 /// either record size -- but over a sweep of widths 32..2016 and heights 7..1199
-/// about 4.5% of (frame, capacity) points now select the reference arm where they
-/// used to select the ordered one, always in that direction and never above a
-/// capacity of 128. Neither arm is wrong there, because both are bit-exact and
-/// both are cheap at those counts; what is wrong is reading a byte count as a
-/// work unit. A crossover measured rather than inferred is filed work.
+/// about 4.5% of (frame, capacity) points select the reference arm at the
+/// 12-byte record where the 16-byte one selected the ordered arm, always in
+/// that direction and never above a capacity of 128. Neither arm is wrong
+/// there, because both are bit-exact and both are cheap at those counts; what
+/// is wrong is reading a byte count as a work unit, and no measured crossover
+/// has replaced it.
 bool fastOrderedApplies(size_t width, size_t height, size_t capacity);
 
 } // namespace impl

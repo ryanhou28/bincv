@@ -1,5 +1,5 @@
 // ===========================================================================
-// THE AUDIT CLAUDE.md's NEW RULE CAME FROM.
+// THE AUDIT THE BENCHMARK-AT-BIRTH RULE CAME FROM.
 //
 // A measurement found `medianWide` and `edgeThreshold` at 78% of the pipeline the day something
 // first called them: written bit-exact against the reference, benchmarked by nobody, and

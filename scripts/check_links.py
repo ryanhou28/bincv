@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """check_links.py -- every relative link in the repository resolves to a real file.
 
-WHY THIS EXISTS. The top-level design documents moved into docs/ on 2026-08-31, which
+WHY THIS EXISTS. The top-level design documents moved into docs/, which
 was going to break every cross-link between them. Running this before and after turned
 that from a hope into a check.
 
@@ -10,7 +10,7 @@ IT ALSO FOUND A BUG THAT PREDATED THE MOVE. Doc links inside the ops headers rea
 existed. They had been broken since they were written and nobody had checked, which is
 the whole argument for having this script rather than being careful.
 
-IT EARNED ITSELF AGAIN when the library moved to the repository root (#35). Every
+IT EARNED ITSELF AGAIN when the library moved to the repository root. Every
 header's depth changed by one level at once, and eight links across six files broke
 silently -- the kind of breakage a move makes invisible precisely because it is
 uniform. This script named all eight, which is why a layout change runs it.

@@ -447,7 +447,7 @@ BINCV_TEST(CudaPyramid, BoxMatchesTheHostAtFrameSize) {
 // That is why it is pinned here as an arithmetic invariant instead of as an
 // image comparison: watched failing, the image cases do not notice (measured --
 // the whole suite still passes with the guard removed), and the tool that would
-// notice does not work on this host. cuda-memcheck 11.1 here reports "0 errors"
+// notice does not work on the reference host. cuda-memcheck 11.1 there reports "0 errors"
 // for a deliberate 1020-element overread of a 4-element allocation, so adding
 // it to this suite's invocation would buy a gate that cannot fail.
 // ---------------------------------------------------------------------------

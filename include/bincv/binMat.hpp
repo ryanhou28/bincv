@@ -8,7 +8,7 @@
 // __cxa_atexit entry) in EVERY translation unit that includes this container,
 // whether or not it ever prints. That is the cost core/error.hpp avoids by
 // reporting through <cstdio>, and a header-only container has no business
-// reimposing it on a Tier 2 target where code size is often the binding
+// reimposing it on an embedded target where code size is often the binding
 // constraint. The printing helpers use std::fprintf; only
 // operator<<, which cannot be written without a stream type, pulls <ostream> --
 // and <ostream> alone carries no static initializer.
@@ -29,6 +29,8 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief A binary matrix storing one bit per pixel, packed into words.
+/// **API TIER 3 as a type** -- OpenCV has no packed 1-bit image; `fromCVMat` and
+/// `toCVMat` are the bridge to `cv::Mat`.
 /// @tparam WordType The unsigned integral type used to pack pixels.
 /// Supported: uint8_t, uint16_t, uint32_t (default), uint64_t.
 /// @note Spelled QuantMat<1, WordType> here and BinMat<WordType> everywhere else:
@@ -92,19 +94,17 @@ public:
     /// @note Word granularity already gives kernels the only property they rely
     /// on -- that the trailing partial word can be read and written whole --
     /// whereas fixed 16/32/64-byte row alignment costs up to 172% memory on
-    /// upper pyramid levels, which LK touches every frame. Memory wins ties
-    /// (ARCHITECTURE principle 2), so larger alignment is opt-in per object
-    /// via the constructor's rowAlignment argument, not the default.
-    /// @note The default is confirmed rather than provisional: it was measured on
-    /// the reference device. The benefit side was measured across four
-    /// alignments x two kernels x two sizes and the best of the twelve
-    /// combinations was 1.015x -- inside its own batch spread. countNonZero,
-    /// which walks rows unconditionally and so isolates alignment alone, was
-    /// flat to within 0.5%. Over-aligning is also 3.3-4.8x SLOWER on
+    /// upper pyramid levels, which LK touches every frame. Memory and speed are
+    /// co-equal goals and memory wins a tie, so larger alignment is opt-in per
+    /// object via the constructor's rowAlignment argument, not the default.
+    /// @note Measured on the reference device (a Raspberry Pi 4, aarch64): across
+    /// four alignments, two kernels and two frame sizes the best over-aligned
+    /// case was 1.02× faster, inside its own batch spread, and countNonZero
+    /// -- which walks rows unconditionally and so isolates alignment alone --
+    /// was flat to within 0.5%. Over-aligning is also 3.3-4.8× SLOWER on
     /// bitwiseAnd at 640x480, because a stride wider than the row's own words
-    /// disables ops/logic.hpp's contiguous fast path. The rowAlignment
-    /// argument therefore stays as an opt-in escape hatch, not as a hook for
-    /// a measurement that has since been taken.
+    /// disables ops/logic.hpp's contiguous fast path. So rowAlignment is for
+    /// a caller who has measured a reason, not a default.
     static constexpr size_t DefaultRowAlignment = sizeof(WordType);
 
     // Constructors
@@ -131,8 +131,8 @@ public:
     /// @throws std::invalid_argument if dimensions are negative, if `strideWords`
     /// cannot hold a row, or if `data` is null for a non-empty matrix.
     /// @note Allocates nothing and frees nothing: the buffer belongs to the caller
-    /// for this object's whole lifetime. This is the Tier 2 (no-heap) path,
-    /// and the way sensor / DMA memory is ingested without a copy.
+    /// for this object's whole lifetime. This is the no-heap path, and the
+    /// way sensor / DMA memory is ingested without a copy.
     /// @note The buffer is used as-is; it is neither zeroed nor trailing-bit
     /// cleared, because the caller may be wrapping data it has already
     /// filled in, or a sub-region of a larger image whose surrounding
@@ -188,7 +188,7 @@ public:
     /// object unchanged (`other` is still emptied). Storage cannot honor
     /// such a transfer -- it would have to free the block and then adopt a
     /// pointer into it -- and this is the only answer that keeps the move
-    /// allocation-free and noexcept, which the Tier 2 path depends on.
+    /// allocation-free and noexcept, which the no-heap path depends on.
     QuantMat& operator=(QuantMat&& other) noexcept;
 
     ~QuantMat() = default;
@@ -214,7 +214,8 @@ public:
     /// caller-provided buffer (or is empty).
     bool ownsMemory() const { return storage.ownsMemory(); }
 
-    // OpenCV-compatible aliases
+    /// @brief The dimensions under the names cv::Mat gives its `rows` and `cols`
+    /// data members, as accessors.
     int rows() const { return static_cast<int>(height); }
     int cols() const { return static_cast<int>(width); }
 
@@ -254,9 +255,9 @@ public:
     /// This is a view factory, not element access, and
     /// it is checked here for the same reason it is checked on QuantMat<N>:
     /// so that one wrong plane index has one defined behavior across the
-    /// family. Discarding the index in release, as this did, meant generic
-    /// code could not be tested for index handling at N = 1 and have the
-    /// result carry to N > 1 -- which is precisely the portability the
+    /// family. Discarding the index in release would mean generic code could
+    /// not be tested for index handling at N = 1 and have the result carry
+    /// to N > 1 -- which is precisely the portability the
     /// QuantMat<1> spelling exists to provide. The compare is against a
     /// constant and folds away at the constant call sites.
     BinMatView<WordType> plane(size_t i) {
@@ -283,41 +284,42 @@ public:
 #ifdef BINCV_WITH_OPENCV
     // OpenCV interoperability (only available when BINCV_WITH_OPENCV is defined)
 
-    // @brief Converts a cv::Mat to a BinMat.
-    // @param mat The input cv::Mat, must be of type CV_8UC1 (for now)
-    // @note Any nonzero pixel in the input cv::Mat will be set to 1 in the BinMat.
-    // @note Allocates owning storage at this matrix's row alignment, so calling
-    // this on a matrix that wraps a caller buffer detaches it from that buffer.
-    // @todo: Support other types like CV_32FC1, etc.
+    /// @brief Replaces this matrix with a binarized copy of a `CV_8UC1` cv::Mat:
+    /// any nonzero byte becomes 1. **API TIER 3** -- OpenCV has no packed 1-bit
+    /// image, so this is the bridge rather than an equivalent.
+    /// @param mat The input, which must be `CV_8UC1`; other depths are the
+    /// caller's to convert first, or to pack directly through ops/pack.hpp.
+    /// @throws std::invalid_argument if `mat` is empty or not `CV_8UC1`.
+    /// @note Allocates owning storage at this matrix's row alignment, so calling
+    /// this on a matrix that wraps a caller buffer detaches it from that buffer.
     void fromCVMat(const cv::Mat& mat);
 
-    // @brief Converts the BinMat to a cv::Mat where each pixel is either 0 or 1.
-    // @param mat The output cv::Mat, will be of type CV_8UC1
-    // @note Each pixel will maintain its original value
-    // @todo Support other types like CV_32FC1, etc.
+    /// @brief Writes this matrix as a `CV_8UC1` cv::Mat holding 0 or 1 per pixel.
+    /// **API TIER 3** -- see fromCVMat.
+    /// @param mat The output; always `CV_8UC1`.
     void toCVMat(cv::Mat& mat) const;
 
-    // @brief Converts the BinMat to a cv::Mat with normalized values.
-    // @param mat The output cv::Mat, will be of type CV_8UC1
-    // @note Each pixel will be set to 255 if it is 1 in the BinMat, otherwise 0.
-    // @todo Support other types like CV_32FC1, etc.
+    /// @brief Writes this matrix as a `CV_8UC1` cv::Mat holding 0 or 255 per pixel,
+    /// which is what an image viewer or an OpenCV operation expects of a binary
+    /// image. **API TIER 3** -- see fromCVMat.
+    /// @param mat The output; always `CV_8UC1`.
     void toCVMatNormalized(cv::Mat& mat) const;
 #endif // BINCV_WITH_OPENCV
 
-    // @todo add multi-element / slicing access that indexes by BinMat range
-
     /// @brief Gets the value of a single element at (row, col). Not a reference.
+    /// **API TIER 1** -- `cv::Mat::at`'s contract on a binary image.
     /// @note DEBUG-CHECKED, UNCHECKED IN RELEASE, as cv::Mat::at is. An index
     /// outside [0, height) x [0, width) trips a BINCV_ASSERT in a debug
     /// build and is undefined behavior in a release one -- it does not
-    /// throw, and did until the policy deliberately changed. This is what
+    /// throw. This is what
     /// keeps the bounds test out of every per-pixel loop and lets a release
     /// build inline the access down to a row offset, a shift and a mask.
     /// @note Reading a column in [width, alignedWidth * WordBits) therefore
     /// silently returns a padding bit rather than reporting the mistake.
     bool at(int row, int col) const;
 
-    /// @brief Sets a single element at (row, col) to value.
+    /// @brief Sets a single element at (row, col) to value. **API TIER 1** -- the
+    /// write half of `cv::Mat::at`'s contract.
     /// @note Debug-checked, unchecked in release; see at.
     /// @note Writing past `width` breaks the padding-bit invariant that every
     /// word-wise reduction depends on, and release builds will not stop you.
@@ -344,94 +346,99 @@ public:
         set(row, col, value != 0);
     }
 
-    // Fast row-level access to packed words via pointers
-    // @brief Needed for efficient access to values when being more performant
-    // @note Users need to be careful as they expose the internal storage directly
-    // and need to deal with pixel alignment and word packing.
-
-    // @brief Gets a const pointer to the start of the specified row.
-    // @note Out of bounds access is not protected and may lead to undefined behavior.
-    // This is intended for performance-sensitive code where bounds are checked externally.
+    /// @brief First word of row `row`, read-only. **API TIER 3** -- `cv::Mat::ptr`'s
+    /// shape, but the row it points at is bit-packed words, which OpenCV has no
+    /// equivalent of.
+    /// @note Unchecked: an out-of-range row is undefined behavior. The caller
+    /// addresses pixels within the row through impl::wordIndex / impl::bitMask,
+    /// or hands the whole matrix to a kernel as a view, which is the usual way.
     const WordType* ptr(int row) const;
 
-    // @brief Gets a pointer to the start of the specified row.
-    // @note Out of bounds access is not protected and may lead to undefined behavior.
-    // This is intended for performance-sensitive code where bounds are checked externally.
+    /// @brief First word of row `row`, writable. **API TIER 3** -- see the const form.
+    /// @note Writing past `width` breaks the padding-bit invariant; see set.
     WordType* ptr(int row);
 
-    // @brief Resizes the BinMat to given dimensions.
-    // @note For smaller sizes, it will clear the existing data.
-    // @note For larger sizes, it will zero-fill the new area, appending rows
-    // and columns as needed at larger indices.
-    // @note To extend size at specific dimensions, use pad instead.
-    // @note Allocates owning storage, so this detaches a wrapped matrix from the
-    // caller's buffer instead of writing outside it.
+    /// @brief Reshapes the matrix to `newWidth` x `newHeight`, keeping the pixels
+    /// that still fit and zero-filling the rest. **API TIER 3** -- a crop or
+    /// extension at the origin: NOT `cv::resize` (no interpolation) and not
+    /// `cv::Mat::resize` (which changes rows only).
+    /// @note Pixels at indices past the new extent are dropped; new rows and
+    /// columns are zero. To add rows or columns on a chosen side, use pad.
+    /// @note Allocates owning storage, so this detaches a wrapped matrix from the
+    /// caller's buffer instead of writing outside it.
+    /// @throws std::invalid_argument if either dimension is negative.
     void resize(int newWidth, int newHeight);
 
-    // @brief Pads the BinMat with given value at sides with non-zero padding.
-    // @note Zero-padding unless value is specified as true.
-    // @note Allocates owning storage, as resize does.
-    // @todo Add support for "replicate" padding modes
+    /// @brief Adds `top`, `bottom`, `left` and `right` pixels of border, filled with
+    /// `value`. **API TIER 3** -- `cv::copyMakeBorder`'s role with a constant
+    /// border only: no replicate or reflect modes.
+    /// @note Zero fill unless `value` is true.
+    /// @note Allocates owning storage, as resize does.
+    /// @throws std::invalid_argument if any border is negative.
     void pad(int top, int bottom, int left, int right, bool value = false);
 
-    // @brief Returns a transposed version of the BinMat.
-    // @note The original BinMat remains unchanged.
-    // @note The result owns its storage and is built at this matrix's row
-    // alignment, whether or not this matrix wraps a caller buffer.
-    // @note An empty matrix transposes to its transposed shape, not to 0x0:
-    // 640x0 gives 0x640.
+    /// @brief A transposed copy of this matrix. **API TIER 3** -- `cv::transpose`'s
+    /// role on a bit-packed matrix, as a container method; no equivalence
+    /// against OpenCV is claimed or tested.
+    /// @note The original matrix is unchanged.
+    /// @note The result owns its storage and is built at this matrix's row
+    /// alignment, whether or not this matrix wraps a caller buffer.
+    /// @note An empty matrix transposes to its transposed shape, not to 0x0:
+    /// 640x0 gives 0x640.
     QuantMat transposed() const;
 
-    // @brief Transposes the BinMat in-place.
-    // @note The BinMat dimensions and data are updated.
-    // @note "In-place" describes the variable, not the buffer: this builds the
-    // transpose in a fresh owning allocation and adopts it, so it detaches a
-    // wrapped matrix from the caller's buffer as resize and pad do. The
-    // caller's buffer is left unmodified -- including for a square matrix,
-    // where an in-place bit transpose would otherwise be the natural reading.
+    /// @brief Transposes this matrix. **API TIER 3** -- see transposed.
+    /// @note "In-place" describes the variable, not the buffer: this builds the
+    /// transpose in a fresh owning allocation and adopts it, so it detaches a
+    /// wrapped matrix from the caller's buffer as resize and pad do. The
+    /// caller's buffer is left unmodified -- including for a square matrix,
+    /// where an in-place bit transpose would otherwise be the natural reading.
     void transpose();
 
-    // @brief Iterates over all non-zero pixels, invoking callback(row, col).
-    // @note An empty matrix is reported through BINCV_THROW rather than treated
-    // as "no non-zero pixels" -- iterating something with no pixels is a
-    // caller mistake, not a degenerate case with an obvious answer.
+    /// @brief Iterates over all non-zero pixels, invoking callback(row, col).
+    /// **API TIER 3** -- `cv::findNonZero`'s role as a callback rather than a
+    /// point list, since a point list would allocate.
+    /// @throws std::runtime_error on an empty matrix: iterating something with no
+    /// pixels is a caller mistake, not a degenerate case with an obvious answer.
     template <typename Func>
     void forEachNonZero(Func callback) const;
 
-    // @brief Prints the binary values as a human-readable matrix.
-    // @note Output uses 0/1 per pixel, with rows and columns corresponding to image layout.
-    // @note Prints in row-major order.
-    // @note Writes to stdout through <cstdio>, not std::cout, so that including
-    // this container never drags the iostream static initializers into a
-    // Tier 2 build. See the include block at the top of this file.
+    /// @brief Prints the pixels as 0/1 characters, one row per line, to stdout.
+    /// **API TIER 3** -- a debugging aid.
+    /// @note Writes through <cstdio>, not std::cout, so that including this
+    /// container never drags the iostream static initializers into an embedded
+    /// build. See the include block at the top of this file.
     void printMatrix() const;
 
-    // @brief Prints the packed words of internal storage row by row.
-    // @param hex If true, prints each word in hex. Otherwise, prints decimal.
-    // @note Prints in row-major order, to stdout. See printMatrix.
+    /// @brief Prints the packed words of the backing store, one row per line, to
+    /// stdout. **API TIER 3** -- a debugging aid.
+    /// @param hex If true, prints each word in hex; otherwise decimal.
     void printInternalData(bool hex = false) const;
 
-    // @brief Fills the entire BinMat with the given binary value.
+    /// @brief Sets every pixel to `value`. **API TIER 3** -- the role of
+    /// `cv::Mat::setTo` on a binary image.
+    /// @note Padding bits stay zero: a `true` fill writes whole words and then
+    /// clears the bits past `width`.
     void fill(bool value);
 
-    // @brief Counts the number of non-zero (set) pixels in the matrix.
-    // @return The total number of 1s in the matrix.
+    /// @brief The number of set pixels. **API TIER 1** -- the count `cv::countNonZero`
+    /// returns for the same image, checked in tests/test_opencv_interop.cpp.
+    /// @note A per-pixel loop. The bulk, word-wise form is
+    /// `bincv::countNonZero(m.constView())` in ops/reduce.hpp, which is the one
+    /// to call on a hot path; see the definition for why this member does not
+    /// simply forward to it.
     int countNonZero() const;
 
-    // @brief Returns the sparsity ratio (fraction of zero pixels).
-    // @return A float in [0.0, 1.0] representing how sparse the matrix is.
-    // @note Empty matrices have undefined sparsity: this reports through
-    // BINCV_THROW rather than inventing a value for 0/0.
+    /// @brief The fraction of pixels that are zero, in [0.0, 1.0]. **API TIER 3.**
+    /// @throws std::runtime_error on an empty matrix: sparsity is undefined for
+    /// 0/0, and no value is invented.
     float sparsity() const;
-
-    // @todo: add functions or representations for sparse formats e.g. CSR/CSC
-    // @todo: Consider adding "channels" support for multi-channel binary images
 
 private:
     // @brief Zeroes the padding bits beyond `width` in every row.
-    // @note Bulk word-wise operations (fill, and future bitwise/popcount ops) write
-    // whole words, which can set bits past the end of a row. Those bits must stay
-    // zero or countNonZero and friends would over-count once they go word-wise.
+    // @note Bulk word-wise operations (fill here, and the kernels in ops/logic.hpp
+    // and ops/reduce.hpp) write or read whole words, so bits past the end of a
+    // row must stay zero or a word-wise reduction over-counts.
     // @note This matters more, not less, now that the default stride is tight: at
     // word granularity the only padding left is the tail of the last word,
     // and that tail is read by every whole-word reduction.
@@ -446,8 +453,9 @@ private:
     // @note width stores the number of pixels in each row, while alignedWidth stores
     // the actual number of words between one row and the next. At the default
     // alignment they differ only by the ceil to a whole word.
-    // @todo rowAlignment currently aligns only the row *stride*. Aligning the base pointer
-    // too (for aligned SIMD loads) requires a custom aligned allocation helper.
+    // @note rowAlignment aligns only the row STRIDE. The base pointer is whatever
+    // `new` returns, so no kernel may assume an aligned base; the vector arms
+    // use unaligned loads.
 
     // Internal storage: row-wise packed 1-bit pixels, height * alignedWidth words.
     // Storage (not std::vector) so the same container can wrap caller-provided

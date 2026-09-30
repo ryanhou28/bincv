@@ -77,45 +77,50 @@ Inventory: [docs/API.md](docs/API.md). What each area covers and what the tiers 
 
 ## Performance and memory
 
-<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|speedup, x86-64|OpenCV, aarch64|binCV, aarch64|speedup, aarch64" source="source" -->
-| operation | OpenCV equivalent | OpenCV, x86-64 | binCV, x86-64 | speedup, x86-64 | OpenCV, aarch64 | binCV, aarch64 | speedup, aarch64 | source |
+<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|ratio, x86-64|OpenCV, aarch64|binCV, aarch64|ratio, aarch64" source="source" -->
+| operation | OpenCV equivalent | OpenCV, x86-64 | binCV, x86-64 | ratio, x86-64 | OpenCV, aarch64 | binCV, aarch64 | ratio, aarch64 | source |
 |---|---|---|---|---|---|---|---|---|
-| `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02823 | 0.002810 | 9.97× [9.82, 10.28] | 0.62656 | 0.02369 | 26.68× [26.09, 27.37] | [primitives.md](docs/reports/primitives.md) |
-| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.400 | 2.838 | 8.227× [8.189, 8.284] | [features.md](docs/reports/features.md) |
-| `pyrDown`, 1 bit in → 3 bits out, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 30.70 | 1.556× [1.536, 1.597] | 516.5 | 93.8 | 5.509× [5.480, 5.549] | [primitives.md](docs/reports/primitives.md) |
-| Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.187 | 19.520 | 1.953× [1.944, 1.972] | [features.md](docs/reports/features.md) |
-| `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01501 | 0.009270 | 1.62× [1.61, 1.63] | 0.16921 | 0.06365 | 2.658× [2.618, 2.673] | [primitives.md](docs/reports/primitives.md) |
-| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack` | 8.807 | 6.368 | 1.383× [1.350, 1.426] | 58.338 | 24.099 | 2.421× [2.412, 2.424] | [features.md](docs/reports/features.md) |
-| dense disparity, ms/frame | `cv::StereoBM` | 12.675 | 10.405 | 1.218× [1.199, 1.240] | 79.90 | 60.57 | 1.319× | [stereo.md](docs/reports/stereo.md) |
-| `erode`, 5×5 ellipse, ns/pixel | `cv::erode` | 0.2238 | 0.6985 | 0.319× [0.318, 0.323] | 1.85196 | 3.59587 | 0.514× [0.510, 0.522] | [primitives.md](docs/reports/primitives.md) |
+| `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02823 | 0.002810 | 9.97× [9.82, 10.3] | 0.6266 | 0.02369 | 26.7× [26.1, 27.4] | [primitives.md](docs/reports/primitives.md) |
+| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.47 | 2.837 | 8.27× [8.20, 8.36] | [features.md](docs/reports/features.md) |
+| `pyrDown`, 1 bit in → 3 bits out, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 30.70 | 1.56× [1.54, 1.60] | 516.5 | 93.8 | 5.51× [5.48, 5.55] | [primitives.md](docs/reports/primitives.md) |
+| Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.19 | 19.52 | 1.95× [1.94, 1.97] | [features.md](docs/reports/features.md) |
+| `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01501 | 0.009270 | 1.62× [1.61, 1.63] | 0.1692 | 0.06365 | 2.66× [2.62, 2.67] | [primitives.md](docs/reports/primitives.md) |
+| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack` | 8.807 | 6.368 | 1.38× [1.35, 1.43] | 58.34 | 24.10 | 2.42× [2.41, 2.42] | [features.md](docs/reports/features.md) |
+| dense disparity, ms/frame | `cv::StereoBM` | 12.68 | 10.41 | 1.22× [1.20, 1.24], unpaired | 79.90 | 60.57 | 1.32× [1.32, 1.32], unpaired | [stereo.md](docs/reports/stereo.md) |
+| `erode`, 5×5 ellipse, ns/pixel | `cv::erode` | 0.2238 | 0.6985 | 0.319× [0.318, 0.323] | 1.852 | 3.596 | 0.514× [0.510, 0.522] | [primitives.md](docs/reports/primitives.md) |
 
 x86-64 is a desktop Ryzen 5 5600X, aarch64 a Raspberry Pi 4 at a pinned clock. Both columns
-are one thread — compare at equal thread counts, or a ratio means nothing. Every speedup is
-the median of a sweep of whole process launches with the bootstrap 95% interval those
-launches put around it: **thirty on x86-64, ten on the device** (seven for dense disparity),
-which needs fewer because its clock is pinned.
+are one thread — compare at equal thread counts, or a ratio means nothing. **Every ratio is
+OpenCV ÷ binCV**, so above 1× binCV is ahead, and every one is the median of a sweep of whole
+process launches with the bootstrap 95% interval those launches put around it: **thirty on
+x86-64, ten on the device** (seven for dense disparity), which needs fewer because its clock
+is pinned. The dense-disparity row is *unpaired* — its two arms are separate binaries, so its
+interval comes from resampling the two sweeps independently.
 [Where it does not pay](#where-it-does-not-pay), below, covers the rows where a packed
 representation costs more than it saves.
 
 Memory is the other half, and usually the half that decides whether something fits. Each row
-is one call's peak working set, from buffer geometry, identical on both architectures:
+is one call's peak working set, from buffer geometry, identical on both architectures. The
+dense-disparity row counts output plus scratch on both sides; `cv::StereoBM`'s internal
+buffers were not measured, so that row is a lower bound — what the streaming design refuses
+to allocate is the 23 MB cost volume, and its whole scratch is 32,352 B:
 
 <!-- figure-check values="OpenCV|binCV|× smaller" source="source" -->
 | operation | OpenCV equivalent | OpenCV | binCV | × smaller | source |
 |---|---|---|---|---|---|
-| `bitwiseAnd` / `Or` / `Xor` / `Not`, bytes | `cv::bitwise_*` | 921,600 | 115,200 | 8.0× | [primitives.md](docs/reports/primitives.md) |
+| `bitwiseAnd` / `Or` / `Xor` / `Not`, bytes | `cv::bitwise_*` | 921,600 | 115,200 | 8.00× | [primitives.md](docs/reports/primitives.md) |
 | FAST input plane, bytes | `cv::FAST` on `CV_8U` | 360,960 | 46,080 | 7.83× | [footprint.md](docs/reports/footprint.md) |
 | `goodFeaturesToTrack`, bytes | `cv::goodFeaturesToTrack`, binarized | 9,014,976 | 1,580,064 | 5.71× | [footprint.md](docs/reports/footprint.md) |
 | `morphologyEx(MORPH_OPEN)`, bytes | `cv::morphologyEx` | 614,400 | 115,200 | 5.33× | [footprint.md](docs/reports/footprint.md) |
-| dense disparity, working set | `cv::StereoBM` | ≥ 722 KB, output alone | 32.4 KB scratch + 1 B/px out | ~22×, a lower bound | [stereo.md](docs/reports/stereo.md) |
+| dense disparity, output + scratch, bytes | `cv::StereoBM` | ≥ 721,920 | 393,312 | ≥ 1.84×, a lower bound | [stereo.md](docs/reports/stereo.md) |
 
 There is a CUDA backend too, against `cv::cuda` on the same GPU:
 
-<!-- figure-check values="cv::cuda, ms|binCV, ms|speedup|cv::cuda, KB|binCV, KB|× smaller" source="source" -->
-| on an RTX 3070 Ti | cv::cuda equivalent | cv::cuda, ms | binCV, ms | speedup | cv::cuda, KB | binCV, KB | × smaller | source |
+<!-- figure-check values="cv::cuda, ms|binCV, ms|ratio|cv::cuda, KiB|binCV, KiB|× smaller" source="source" -->
+| on an RTX 3070 Ti | cv::cuda equivalent | cv::cuda, ms | binCV, ms | ratio | cv::cuda, KiB | binCV, KiB | × smaller | source |
 |---|---|---|---|---|---|---|---|---|
-| dense disparity, binary entry, per frame | `cv::cuda::StereoBM(64, 9)` | 0.7134 | 0.0640 | 11.16× | 3,072.0 | 448.0 | 6.857× | [cuda.md](docs/reports/cuda.md) |
-| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | 0.2105 | 9.51× | 8,277.3 | 400.0 | 20.7× | [cuda.md](docs/reports/cuda.md) |
+| dense disparity, binary entry, per frame | `cv::cuda::StereoBM(64, 9)` | 0.7134 | 0.06400 | 11.2× | 3072.0 | 448.0 | 6.86× | [cuda.md](docs/reports/cuda.md) |
+| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.009 | 0.2105 | 9.51× | 8192.0 | 368.0 | 22.3× | [cuda.md](docs/reports/cuda.md) |
 
 **[docs/reports/](docs/reports/README.md) has the whole set** — every operation on both
 architectures and the GPU, wins and losses in the same tables, with the machines, the method
@@ -126,8 +131,8 @@ and the command that reproduces each row.
 **A non-separable structuring element.** A 5×5 ellipse costs one shifted-OR per set element,
 and binCV runs it at 0.319× of `cv::erode` on x86-64. The fused kernel shipped at that price
 because it holds 76,800 bytes against `cv::erode`'s 614,400 — when speed and footprint
-conflict here, footprint wins. A 3×3 element is 1.053× on x86-64 and 1.00× on the Pi, at the
-same 76,800 bytes. ([primitives.md](docs/reports/primitives.md))
+conflict here, footprint wins. A 3×3 element is 1.05× on x86-64 and 1.02× [0.991, 1.04] on
+the Pi, a dead heat, at the same 76,800 bytes. ([primitives.md](docs/reports/primitives.md))
 
 **Wide inputs into a bit-sliced filter.** One plane per bit means the work grows with input
 depth, and at eight bits a byte kernel's vector unit wins outright — `pyrDown` fed eight bits
@@ -135,9 +140,10 @@ runs at 0.0235× on x86-64 and 0.0701× on aarch64. That is the library outside 
 ships as 1 bit in, 3 bits out. ([limits.md](docs/reports/limits.md))
 
 **On the GPU, one path is faster and bigger.** The census dense entry beats
-`cv::cuda::StereoBM` at 1.47× but holds 4,512.0 KB against its 3,072.0, because the census
-transform expands eight bits per pixel into a 32-bit descriptor word. It is the one row in
-that report where binCV is larger. ([cuda.md](docs/reports/cuda.md))
+`cv::cuda::StereoBM` at 1.50× on time but holds 4512.0 KiB against its 3072.0 — 1.47×
+larger — because the census transform expands eight bits per pixel into a 32-bit descriptor
+word. It is the one row in that report where binCV is larger.
+([cuda.md](docs/reports/cuda.md))
 
 ## Status
 
@@ -145,4 +151,5 @@ that report where binCV is larger. ([cuda.md](docs/reports/cuda.md))
 
 ## License
 
-TBD.
+Not yet chosen. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists the third-party
+material the repository contains and the terms each carries.

@@ -1,6 +1,6 @@
 // RANSAC against cv::estimateAffine2D -- and the column that matters is memory.
 //
-// THE DENOMINATOR (CLAUDE.md): `cv::estimateAffine2D(src, dst, mask, cv::RANSAC,
+// THE DENOMINATOR: `cv::estimateAffine2D(src, dst, mask, cv::RANSAC,
 // threshold)` on the SAME correspondences with the SAME threshold. That is what a
 // caller runs today without binCV.
 //
@@ -13,12 +13,12 @@
 // nothing at that scale. That is stated here so the timing column is read as the
 // secondary one it is.
 //
-// BOTH SIDES NOW REFIT, so the timing column is a like-for-like one. binCV used to
-// return the minimal-set fit while cv::estimateAffine2D refined over its consensus
-// set, which made it faster partly by doing less -- and, more seriously, left its
-// model 13x further from a planted transform at 0.5 px of inlier noise. The driver
-// refits by default now, the arm is switchable through RansacParams::refine, and
-// this benchmark times the default.
+// BOTH SIDES REFIT, so the timing column is a like-for-like one. Returning the
+// minimal-set fit while cv::estimateAffine2D refines over its consensus set would
+// make binCV faster partly by doing less -- and, more seriously, leave its model
+// 13x further from a planted transform at 0.5 px of inlier noise. The driver refits
+// by default, the arm is switchable through RansacParams::refine, and this
+// benchmark times the default.
 //
 // AND THE HEADLINE RATIO IS NOT ABOUT THE RANSAC. Measured with the arms below, the
 // two search loops are within about 1.07x of each other at 1 000 correspondences.
@@ -44,8 +44,8 @@
 //
 // heap_probe interposes the C allocator, so it sees every path into the heap --
 // including `cv::fastMalloc`, which `cv::Mat` uses and which a replaced
-// `operator new` never observes. This file used to replace `operator new` and so
-// under-reported OpenCV badly; see heap_probe.hpp for the size of that error.
+// `operator new` never observes. A replaced `operator new` under-reports OpenCV
+// badly; see heap_probe.hpp for the size of that error.
 //
 // The figure is the HIGH-WATER of simultaneously-live bytes, not the sum of every
 // allocation. The sum counts a buffer that was already handed back, and OpenCV

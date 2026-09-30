@@ -10,9 +10,9 @@
 /// OpenCV's CUDA modules ship corner DETECTORS (`cudaimgproc`) and feature
 /// detectors (`cudafeatures2d`); there is no GPU `cornerSubPix` in
 /// cudaimgproc, cudafeatures2d, cudaarithm, cudawarping, cudafilters,
-/// cudaoptflow or cudastereo. Under ruling R2 this op therefore ships on
-/// correctness, memory and the host comparison, with its speed verdict recorded
-/// OUTSTANDING -- and **no GPU-vs-GPU speedup is claimed or implied anywhere**.
+/// cudaoptflow or cudastereo. This op therefore stands on correctness, memory
+/// and the host comparison; no GPU-vs-GPU speed comparison is possible, and
+/// **no GPU-vs-GPU speedup is claimed or implied anywhere**.
 ///
 /// **THE CLAIM IS A RESIDENCY ONE.** The four derivative planes are already on
 /// the device for the corner op. The alternative to this kernel is downloading
@@ -71,7 +71,7 @@
 /// exactly that.
 ///
 /// ---------------------------------------------------------------------------
-/// THE DEVICE DOMAIN, NAMED because it is narrower than the host's (ruling R4)
+/// THE DEVICE DOMAIN, NAMED because it is narrower than the host's
 ///
 /// * **TERNARY planes only** -- `N == 1`, which is pyramid level 0 and what
 /// corner.hpp's promise 4 already restricts corners to. The host's

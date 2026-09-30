@@ -100,9 +100,9 @@
 #             GCC/clang configuration would otherwise execute one instruction of
 #             -- from being untested source. They run in all four configurations
 #             because the kernels are core code.
-#             It was 711812 / 546572 before the sliding-window round. The 47612
-#             added to each are the three entry points and one accumulator it
-#             landed, and they are
+#             It was 711812 / 546572 before the sliding-window kernels were
+#             added. The 47612 added to each are their three entry points and
+#             one accumulator, and they are
 #             AGREEMENT sweeps rather than new value checks: Reduce.Sliding_*
 #             sweeps whole frames comparing SlidingWindowCount against recompute
 #             at every window position of every column, and Reduce.Fused_* does

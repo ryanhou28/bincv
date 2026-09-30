@@ -126,7 +126,7 @@ int main() {
     // ONE EXPLICIT STREAM for everything timed. Events recorded on a stream the
     // work does not use time the wrong thing (cuda_bench_util.hpp), and the
     // legacy default stream additionally carries cross-blocking semantics that
-    // have produced 32-second outliers on this host.
+    // have produced 32-second outliers on the reference host.
     cudaStream_t stream = nullptr;
     if (cudaStreamCreate(&stream) != cudaSuccess) {
         std::printf("SKIP: could not create a stream\n");
@@ -233,7 +233,7 @@ int main() {
                 paired.rounds);
     cudabench::printPairedSignAndSeparation(paired);
     cudabench::printPairedVerdict(paired);
-    std::printf("   the bar (the owner's, written before any measurement of this arm)"
+    std::printf("   the bar (written before any measurement of this arm)"
                 " is 1.50x.\n"
                 "   ONE RUN IS NOT A NUMBER: the figure that ships is the median of at\n"
                 "   least seven independent runs of this binary.\n\n");

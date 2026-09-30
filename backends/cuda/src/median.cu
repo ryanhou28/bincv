@@ -106,7 +106,8 @@ __global__ void denoiseMedian3Kernel(DeviceBinMatConstView src, DeviceBinMatView
 // change it. At 4096x2160 this operation's whole working set is
 // 2 * 2160 * 128 * 4 = 2.21 MB, which is about 3.6 us of traffic at the
 // reference GPU's 608 GB/s -- against a measured empty-kernel launch of
-// 7-10 us on this host. THE KERNEL IS CHEAPER THAN THE LAUNCH THAT CARRIES IT
+// 7-10 us on the reference host (an RTX 3070 Ti reached through WSL2). THE
+// KERNEL IS CHEAPER THAN THE LAUNCH THAT CARRIES IT
 // AT EVERY FRAME SIZE, and it would take roughly an eightfold increase over 4K
 // to change that. No kernel shape can move a number that is not the kernel's.
 //

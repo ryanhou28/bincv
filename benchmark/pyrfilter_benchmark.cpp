@@ -93,7 +93,7 @@ int main() {
              bincv::pyrDownFiltered<PyrDownFilter::Box2x2, 3, 1, W,
                                     bincv::PyrDownBorder::Reflect101>(src, d3); }},
 #if defined(BINCV_WITH_OPENCV)
-        // THE DENOMINATOR (CLAUDE.md): OpenCV doing the same semantic operation on
+        // THE DENOMINATOR: OpenCV doing the same semantic operation on
         // the same content. At 8 -> 8 this is literally the same function, so it is
         // the only fair comparison for the compatibility point.
         {"cv::pyrDown 8U 640x480 (the denominator)", [&](int) {

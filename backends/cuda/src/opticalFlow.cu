@@ -3,8 +3,8 @@
 //
 // WHAT PORTED AND WHAT DID NOT
 //
-// include/bincv/ops/opticalFlow.hpp is 3,267 lines and most of it is CPU SHAPE
-// that has no device meaning: the AVX2 eight-keypoint batch and
+// Most of include/bincv/ops/opticalFlow.hpp is CPU SHAPE that has no device
+// meaning: the AVX2 eight-keypoint batch and
 // impl/lkBatch_impl.hpp, the four NEON residual kernels, StagedWindow/TapCache
 // as STACK buffers with BINCV_STAGING_BUDGET_BYTES (a Cortex-M stack budget),
 // RowReader's Staged specialization, narrowLevel and the 64-bit-word trap (the
@@ -952,45 +952,51 @@ void calcOpticalFlowPyrLK(const DeviceLKLevel* levels, size_t levelCount,
                  "cuda::calcOpticalFlowPyrLK: prevPts, nextPts and status must be non-null");
 
     const size_t xyBytes = pointCount * 2 * sizeof(float);
-    float* dPrev = nullptr;
-    float* dNext = nullptr;
-    uint8_t* dStatus = nullptr;
-    float* dErr = nullptr;
-    BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&dPrev), xyBytes));
-    BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&dNext), xyBytes));
-    BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&dStatus), pointCount));
+    // The four device arrays, freed on every exit: BINCV_CUDA_CHECK throws on a
+    // failed copy or synchronize, and a raw pointer freed after it would leak.
+    struct DeviceArrays {
+        float* prev = nullptr;
+        float* next = nullptr;
+        uint8_t* status = nullptr;
+        float* err = nullptr;
+        ~DeviceArrays() {
+            cudaFree(prev);
+            cudaFree(next);
+            cudaFree(status);
+            cudaFree(err);
+        }
+    } d;
+    BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d.prev), xyBytes));
+    BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d.next), xyBytes));
+    BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d.status), pointCount));
     if (err != nullptr) {
-        BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&dErr),
+        BINCV_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d.err),
                                     pointCount * sizeof(float)));
     }
 
-    BINCV_CUDA_CHECK(cudaMemcpy(dPrev, prevPts, xyBytes, cudaMemcpyHostToDevice));
+    BINCV_CUDA_CHECK(cudaMemcpy(d.prev, prevPts, xyBytes, cudaMemcpyHostToDevice));
     // nextPts is an INPUT under useInitialFlow, and uploading it unconditionally
     // costs one copy of an array that is about to be overwritten -- which is
     // cheaper than a branch that would make the two modes take different code.
-    BINCV_CUDA_CHECK(cudaMemcpy(dNext, nextPts, xyBytes, cudaMemcpyHostToDevice));
+    BINCV_CUDA_CHECK(cudaMemcpy(d.next, nextPts, xyBytes, cudaMemcpyHostToDevice));
 
     DeviceLKTracks tracks;
-    tracks.dPrevXY = dPrev;
-    tracks.dNextXY = dNext;
-    tracks.dStatus = dStatus;
-    tracks.dErr = dErr;
+    tracks.dPrevXY = d.prev;
+    tracks.dNextXY = d.next;
+    tracks.dStatus = d.status;
+    tracks.dErr = d.err;
     tracks.count = static_cast<uint32_t>(pointCount);
 
     const cudaError_t rc = calcOpticalFlowPyrLKAsync(levels, levelCount, tracks, params);
     if (rc == cudaSuccess) {
         BINCV_CUDA_CHECK(cudaDeviceSynchronize());
-        BINCV_CUDA_CHECK(cudaMemcpy(nextPts, dNext, xyBytes, cudaMemcpyDeviceToHost));
-        BINCV_CUDA_CHECK(cudaMemcpy(status, dStatus, pointCount, cudaMemcpyDeviceToHost));
+        BINCV_CUDA_CHECK(cudaMemcpy(nextPts, d.next, xyBytes, cudaMemcpyDeviceToHost));
+        BINCV_CUDA_CHECK(cudaMemcpy(status, d.status, pointCount, cudaMemcpyDeviceToHost));
         if (err != nullptr) {
             BINCV_CUDA_CHECK(
-                cudaMemcpy(err, dErr, pointCount * sizeof(float), cudaMemcpyDeviceToHost));
+                cudaMemcpy(err, d.err, pointCount * sizeof(float), cudaMemcpyDeviceToHost));
         }
     }
-    cudaFree(dPrev);
-    cudaFree(dNext);
-    cudaFree(dStatus);
-    if (dErr != nullptr) cudaFree(dErr);
     if (rc != cudaSuccess) {
         BINCV_THROW(std::runtime_error,
                     std::string("cuda::calcOpticalFlowPyrLK: ") + cudaGetErrorString(rc));

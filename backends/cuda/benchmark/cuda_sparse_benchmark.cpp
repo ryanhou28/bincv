@@ -15,7 +15,7 @@
 // benchmark/CMakeLists.txt and hand-excludes exactly one name, so a target that
 // exists only when an OpenCV is pointed at is one the gate tries to build on
 // every machine that has not built one. Without that OpenCV every binCV arm
-// still runs and the role verdicts print BLOCKED rather than being given a
+// still runs and the role results print as unmeasured rather than being given a
 // substitute bar.
 //
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@
 // form `if (stream == 0) cudaSafeCall(cudaDeviceSynchronize())` sits in cudev's
 // grid transform, in every cudafilters filter, in cudawarping and three times
 // in cudastereo. Measured elsewhere in this backend at up to 7.18x against
-// binCV controls at 1.03x. Two published headlines had to be withdrawn over it.
+// binCV controls at 1.03x -- enough to turn a wash into a headline.
 // So every arm here, the launch floor included, runs on `gStream` and the
 // events are recorded on it.
 //
@@ -282,8 +282,8 @@ void printDecisionRule() {
 " THE DECISION RULE, WRITTEN BEFORE ANY OF THE NUMBERS BELOW WERE TAKEN\n"
 "===========================================================================\n"
 " Per case, because there is no project-wide bar and inventing one is\n"
-" forbidden. Where a threshold is a judgement nobody has made it is a\n"
-" STOP AND ASK and is left empty rather than filled in.\n"
+" forbidden. Where a threshold is a judgement nobody has made it is\n"
+" left empty rather than filled in.\n"
 "\n"
 " THE ONE MAGNITUDE EVERY CASE SHARES, and where it comes from: a difference\n"
 " smaller than the larger of the two arms' printed sample RANGES is not a\n"
@@ -321,8 +321,8 @@ void printDecisionRule() {
 "   PREDICTION: binCV ~= CV_32S within the spread; ~4x ahead of CV_8U; memory\n"
 "   a wash.\n"
 "\n"
-" CASE B -- is the gate still the right answer on device? (issue #61's own\n"
-" question). Four arms on identical inputs: device brute force, device gated,\n"
+" CASE B -- is the gate still the right answer on device?\n"
+" Four arms on identical inputs: device brute force, device gated,\n"
 " host brute force, host gated. TWO-SIDED:\n"
 "   * SPEED: the gate's speed rationale survives only if the device gated arm\n"
 "     beats the device brute-force arm by more than both printed ranges at the\n"
@@ -334,7 +334,7 @@ void printDecisionRule() {
 "     so before the numbers arrive.\n"
 "   * ACCURACY: untouched by the device and not re-measured here. The device\n"
 "     computes the same admitted set bit for bit; the suite pins it.\n"
-"   EXPECTED FINDING, pre-registered: on device the gate is an ACCURACY\n"
+"   EXPECTED FINDING, written before measuring: on device the gate is an ACCURACY\n"
 "   feature and not a speed feature. If the measurement contradicts this it is\n"
 "   reported as a finding, not smoothed.\n"
 "   WHAT IT COVERS: a kernel-resident microbenchmark. The number that would\n"
@@ -343,8 +343,8 @@ void printDecisionRule() {
 "   kernels. That is a deferral, not a number to invent.\n"
 "\n"
 " CASE C -- sparse stereo. cv::cuda has NO sparse stereo API (cudastereo's\n"
-" four entries are all dense), so ruling R2 would make the speed verdict\n"
-" OUTSTANDING -- but a stronger bar exists and is used instead, because the\n"
+" four entries are all dense), so no like-for-like GPU comparison exists\n"
+" -- but a stronger bar exists and is used instead, because the\n"
 " bar is the best existing option a caller actually has: binCV's own device\n"
 " denseDisparityBinary on the same frame, then index the map at the keypoints,\n"
 " recorded in docs/reports/cuda.md at 0.39 ms and 442 KB.\n"
@@ -380,10 +380,10 @@ void printDecisionRule() {
 "     rejects.\n"
 " Anything other than ~1.00x there means the switch is not switching.\n"
 "\n"
-" STOP AND ASK -- thresholds nobody has set, left empty on purpose:\n"
+" UNSET THRESHOLDS -- judgements nobody has made, left empty on purpose:\n"
 "   1. CASE D's accuracy floor: how much tracking yield may route (a) give up\n"
 "      against cv::cuda LK and still be worth recommending? Case D is\n"
-"      ship-blocked on it.\n"
+"      not shippable until it is set.\n"
 "   2. CASE C's sub-pixel residual floor: the residual is published; what\n"
 "      residual would make the sparse arm not worth running is unset.\n"
 "   3. CASE A's fallback: if binCV lands slower than the CV_32S arm, does the\n"
@@ -420,7 +420,7 @@ int main(int argc, char** argv) {
 #if BINCV_CUDA_SPARSE_OPENCV
     std::printf(" OpenCV %s -- cv::cuda role arms COMPILED IN\n", CV_VERSION);
 #else
-    std::printf(" cv::cuda role arms NOT compiled in: CASE A and CASE D print BLOCKED.\n"
+    std::printf(" cv::cuda role arms NOT compiled in: CASE A and CASE D print UNMEASURED.\n"
                 " Point BINCV_CUDA_OPENCV_DIR at an OpenCV with cudafeatures2d and\n"
                 " cudaoptflow to price them. No substitute bar is invented.\n");
 #endif
@@ -721,7 +721,7 @@ int main(int argc, char** argv) {
                                  2 * descBytes + kPipelineCount * 16);
     }
 #else
-    std::printf("\n CASE A ROLE BAR: BLOCKED -- no cv::cuda::DescriptorMatcher compiled in.\n"
+    std::printf("\n CASE A ROLE BAR: UNMEASURED -- no cv::cuda::DescriptorMatcher compiled in.\n"
                 " No substitute is quoted, and a CPU number is not a GPU bar.\n");
 #endif
 
@@ -766,7 +766,7 @@ int main(int argc, char** argv) {
         cudabench::printPaired("device brute force, 470x470",
                                "device GATED (48 px, octave band 1)", p, "kernel");
 
-        // The host arms, on the same inputs. INDICATIVE: this host is not
+        // The host arms, on the same inputs. INDICATIVE: the reference host is not
         // timing-grade under WSL2, and the spread printed beside each number is
         // what says so.
         std::vector<bincv::DescriptorMatch> hostOut(kPipelineCount);
@@ -1131,7 +1131,7 @@ int main(int argc, char** argv) {
                         "   DIFFERENT ALGORITHMS and a status byte is not an accuracy\n"
                         "   measurement -- route (a)'s derived integer floor is 0.2887 px per\n"
                         "   axis with sub-pixel off. The floor that would decide Case D is\n"
-                        "   STOP AND ASK 1 and is not filled in here.\n",
+                        "   unset threshold 1 and is not filled in here.\n",
                         lkTracked, kStereoKeypoints, binTracked);
 
             // The MEASURED footprint, meter 2 on both sides, replicated.
@@ -1185,9 +1185,9 @@ int main(int argc, char** argv) {
                         static_cast<double>(lkWorking) / static_cast<double>(binWorking));
         }
 #else
-        std::printf("\n CASE D ROLE BAR: BLOCKED -- no cv::cuda::SparsePyrLKOpticalFlow\n"
+        std::printf("\n CASE D ROLE BAR: UNMEASURED -- no cv::cuda::SparsePyrLKOpticalFlow\n"
                     " compiled in. The footprint arithmetic above stands on its own; the\n"
-                    " speed verdict does not, and no substitute bar is invented.\n");
+                    " speed result does not, and no substitute bar is invented.\n");
 #endif
     }
 

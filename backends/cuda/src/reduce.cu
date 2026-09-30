@@ -73,9 +73,10 @@ __device__ __forceinline__ void warpReduce(Quad& q) {
 // The result is written through `emit`, overloaded on the caller's OUTPUT TYPE.
 // A plain count writes one counter, a split writes two, a covariance four --
 // each into exactly the object the caller allocated, so no kernel can write
-// past a smaller result type. (An earlier draft aliased a two-counter result
-// onto a four-counter struct and relied on the other two staying zero; that is
-// the shape of bug this project keeps finding, so it is typed instead.)
+// past a smaller result type. Aliasing a two-counter result onto a
+// four-counter struct and relying on the other two staying zero is the shape
+// of bug that survives every test until the layout moves, so it is typed
+// instead.
 // ---------------------------------------------------------------------------
 __device__ __forceinline__ void emit(unsigned long long* out, const Quad& q) {
     if (q.xx) atomicAdd(out, q.xx);

@@ -21,9 +21,9 @@
 // THAT ARGUMENT WAS ONCE USED TO SKIP ACCURACY ENTIRELY, AND IT IS WRONG TO. Two
 // draws cannot be compared to each other, but both can be compared to a PLANTED
 // transform, and that is a real check the suite went without. It went without it
-// because every inlier here used to be generated exactly from the transform, which
-// makes a minimal-set fit through three exact points exact -- so a refit over the
-// consensus set changed nothing and its absence was invisible. With noise on the
+// because an inlier generated exactly from the transform makes a minimal-set fit
+// through three exact points exact -- so a refit over the consensus set changes
+// nothing and its absence is invisible. With noise on the
 // inliers the un-refitted model was 13x further from the truth than OpenCV's.
 // `makeScene` therefore takes a noise level, and the tests below use it.
 #include <cstdint>

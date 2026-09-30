@@ -37,9 +37,9 @@
 /// last rows and two columns per row, because a 32-byte vector load cannot
 /// straddle the frame edge. The device reference arm computes reflect-101 per
 /// lane in index arithmetic, so the whole image goes through one arm and there
-/// is no second body to keep correct. "How much hand-written code has to stay
-/// bit-exact forever" is a metric CLAUDE.md names, and this is the one place
-/// the device is structurally SIMPLER than the host.
+/// is no second body to keep correct. How much hand-written code has to stay
+/// bit-exact forever is one of the metrics a performance decision here weighs,
+/// and this is the one place the device is structurally SIMPLER than the host.
 ///
 /// 2. **Both axes are computed unconditionally.** The host short-circuits on
 /// purpose -- on a sparse edge map most pixels fail both tests, so `And` skips
@@ -98,6 +98,9 @@ namespace cuda {
 /// @note `dst`'s padding bits are zero on return, by construction rather than by
 /// masking: a lane past `width` contributes 0 to the ballot.
 /// @note Never allocates. Device scratch: none. Shared memory: none.
+/// @note **API TIER 3.** Bit-exact against the host `bincv::edgeThreshold` for
+/// every combine, relation and spatial mode, both arms, proven by
+/// test_cuda_sensor.
 cudaError_t edgeThreshold(DeviceImageConstView<uint8_t> src, DeviceBinMatView dst,
                           uint8_t t, EdgeCombine combine = EdgeCombine::Or,
                           EdgeRelation relation = EdgeRelation::Ge,

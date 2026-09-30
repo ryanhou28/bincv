@@ -32,42 +32,30 @@
 ///
 /// This operation is a naming of `countCovariance`'s four-argument form plus one
 /// signed subtraction. It is not a loop, and the fact that it is not a loop is
-/// the outcome of an experiment rather than an implementation style:
+/// the outcome of two measurements rather than an implementation style:
 ///
 /// const CovarianceCount c = countCovariance(dx.constMagnitude(0),
 /// dy.constMagnitude(0),
 /// dx.constSign, dy.constSign,
 /// window);
 ///
-/// Two measurements settled the questions that between them fix that spelling,
-/// and BOTH went against the simpler shape this was originally specified with:
-///
 /// * **Fused, not composed.** `countNonZero(mag_x, w) + countNonZero(mag_y, w) +
 /// countAndSplit(...)` produces the same four numbers with the same popcounts,
 /// and makes THREE traversals of the window instead of one: 6 word loads per
-/// word index against this call's 4, or 5 against 3 in the selector-plane form
-/// the benchmark timed. Measured 1.27-1.29x pre-split (axis 2) and 1.20-1.27x at
-/// 31x31 against the shipped entry points. **Both of those are
-/// measured ONE LEVEL DOWN, on ops/reduce.hpp's entry points rather than on
-/// this one.** A second measurement asks the same question at THIS level, on
-/// the four-argument form this operation actually calls -- and it is `PARTIAL`:
-/// its reference-device number is NOT TAKEN (the device refused preflight with
-/// a sticky throttle flag), and its x86 table is marked "INDICATIVE ONLY --
-/// not a result, do not quote": every ratio there sits inside its own
-/// within-run spread, and re-running the same binary moves the ranking. So
-/// the ratios above are what is known, the spelling below is what
-/// decided, and the confirmation at this level is outstanding.
+/// word index against this call's 4. Measured on ops/reduce.hpp's own entry
+/// points on the reference device (a Raspberry Pi 4, aarch64), the fused form
+/// is 1.20-1.29× faster at a 31x31 window.
 /// * **Four arguments, not a selector plane.** The four-argument form XORs the
 /// two sign planes inside the word loop, so this operation needs **no scratch
-/// of any kind** -- 0 B beyond the derivative planes it must read anyway. The
-/// precomputed `sign_x ^ sign_y` plane is 11-14% FASTER per frame even after
-/// paying to form it (the axis 3), and costs a fifth frame-sized plane at
-/// every pyramid level (+25% of the derivative working set, ~51 kB over four
-/// levels). Speed and footprint disagree, and CLAUDE.md's tiebreak takes the
-/// memory. tests/test_covariance.cpp does not take the no-scratch claim on
-/// trust: it counts `operator new` across these calls -- the plain AND the
-/// C++17 over-aligned forms, which is the path a vectorized scratch buffer
-/// would take -- and requires zero, with the counter itself exercised on one
+/// of any kind** -- 0 B beyond the derivative planes it must read anyway. A
+/// precomputed `sign_x ^ sign_y` plane is 1.11-1.14× faster per frame even
+/// after paying to form it, and costs a fifth frame-sized plane at every
+/// pyramid level (+25% of the derivative working set, ~51 kB over four
+/// levels). Speed and footprint disagree, and memory wins the tie.
+/// tests/test_covariance.cpp does not take the no-scratch claim on trust: it
+/// counts `operator new` across these calls -- the plain AND the C++17
+/// over-aligned forms, which is the path a vectorized scratch buffer would
+/// take -- and requires zero, with the counter itself exercised on one
 /// allocation of each kind so that the zero is a reading and not a blind spot.
 ///
 /// A caller that already holds such a plane for other reasons should call
@@ -78,60 +66,55 @@
 /// ---------------------------------------------------------------------------
 /// SWEEPING A COLUMN OF POSITIONS? HALF OF THIS SLIDES AND HALF DOES NOT.
 ///
-/// **ops/corner.hpp's corner response, and any search sweep, want `SlidingWindowCount` for
-/// `sumXX` and `sumYY`** (ops/reduce.hpp, the INC-ROW form) -- AT A LARGE ENOUGH
-/// WINDOW. Consecutive windows in a vertical column differ by two rows out of W,
-/// and recomputing all W of them re-reads what the previous position already
-/// counted. Measured on the reference device against the shipped recompute path:
-/// **15.9x** on a dense scan at 31x31 and **5.96x** on an 8x8 search sweep
-/// (the axis 1). This function recomputes, by construction.
-///
-/// ** then measured the same choice AT ITS OWN LEVEL and it does not hold at
-/// every window size.** Sweeping a covariance is not sweeping one plane's
-/// popcount: only two of the three numbers slide, and the accumulator forces a
-/// column-major traversal. On the reference device at 640x480 the sliding corner
-/// sweep is 1.22x faster at a 31x31 window and **1.20x SLOWER at 3x3** -- the block
-/// size the reference pipeline runs -- over four runs whose ranking never changes.
-/// The advice above stands
-/// for large windows and is wrong for small ones; ops/corner.hpp carries the table.
+/// **ops/corner.hpp's corner response, and any search sweep, want
+/// `SlidingWindowCount` for `sumXX` and `sumYY`** (ops/reduce.hpp, the INC-ROW
+/// form) -- AT A LARGE ENOUGH WINDOW. Consecutive windows in a vertical column
+/// differ by two rows out of W, and recomputing all W of them re-reads what the
+/// previous position already counted. Measured on the reference device against
+/// the recompute path: **15.9×** on a dense scan at 31x31 and **5.96×** on an
+/// 8x8 search sweep. This function recomputes, by construction.
 ///
 /// **Read those two numbers for what they are.** `SlidingWindowCount` slides ONE
 /// plane's popcount -- it is constructed from a single `BinMatConstView` and
-/// returns a single `count` -- so 15.9x and 5.96x are `countNonZero` sweeps, not
+/// returns a single `count` -- so 15.9× and 5.96× are `countNonZero` sweeps, not
 /// covariance sweeps. `sumXX` and `sumYY` are exactly that shape and get exactly
 /// that speedup, one accumulator each. **`sumXY` has no incremental form in this
 /// library**: the cross term needs `magX & magY` split by `signX ^ signY`, and
-/// nothing in ops/reduce.hpp slides a split. A column sweep today therefore slides
+/// nothing in ops/reduce.hpp slides a split. A column sweep therefore slides
 /// two of the three numbers and RECOMPUTES the third, per position, through the
-/// four-argument `countAndSplit`. Materializing `magX & magY` and
-/// `magX & magY & (signX ^ signY)` as frame-sized planes would make the third
-/// number slide too, at the cost of TWO frame-sized planes per pyramid level --
-/// more than the one plane the axis 3 already declined on memory grounds, so it
-/// is not a free win and is not registered as one.
+/// four-argument `countAndSplit` -- and measured at its own level, on the
+/// reference device at 640x480, that sweep is 1.22× faster than recomputing at
+/// a 31x31 window and **1.20× SLOWER at 3x3**, the block size the reference
+/// pipeline (the visual-inertial odometry system, not in this repository, that
+/// binCV was built to serve stage by stage; see docs/ARCHITECTURE.md) runs,
+/// over four runs whose ranking never changes. The advice above stands for
+/// large windows and is wrong for small ones; ops/corner.hpp carries the table.
+/// Materializing `magX & magY` and `magX & magY & (signX ^ signY)` as
+/// frame-sized planes would make the third number slide too, at the cost of
+/// TWO frame-sized planes per pyramid level -- more than the one plane already
+/// declined on memory grounds above, so it is not a free win.
 ///
 /// That split is not a defect of this signature -- it is the right shape for the
 /// pattern it names. **One window is a countNonZero, not a slide**: at isolated
 /// keypoints the incremental form issues exactly the same popcounts over exactly
-/// the same words and wins nothing (1.10x, which is call structure and not
-/// incremental state). The LK covariance -- one window per
-/// tracked keypoint -- is exactly that pattern, and is what this file is for.
-///
-/// The two are not alternatives to choose between by taste. The access pattern
+/// the same words and wins nothing (1.10×, which is call structure and not
+/// incremental state). The LK covariance -- one window per tracked keypoint --
+/// is exactly that pattern, and is what this file is for. The access pattern
 /// decides, and ops/reduce.hpp's "WHICH SHAPE TO REACH FOR" section is the table.
 ///
 /// ---------------------------------------------------------------------------
 /// THE N-BIT LEVEL: THE SAME POPCOUNTS, WEIGHTED OVER PLANE PAIRS
 ///
-/// **Why this is here at all.** A measurement found the hybrid LK tracker missing its
-/// accuracy tolerance on the reference pipeline's own edge-map content, and
-/// separated the causes: on the windows that never clip, four 1-BIT pyramid levels
-/// are still ~600x worse than one, because a level whose pixels are BITS cannot
-/// localise sub-pixel motion better than its own quantization and that error is
-/// multiplied by 2^level on the way down. A measurement had already put the levels
-/// at 1/3/4/5 bits -- a frame statistic superseded with the alphabet the
-/// arithmetic can REACH, 1/3/5/7. So the fix is N-bit levels -- and before the
-/// N-bit form below existed binCV could not form the LK covariance above one bit
-/// AT ALL, which is what blocked measuring a bit-depth choice.
+/// **Why this is here at all.** A level whose pixels are BITS cannot localise
+/// sub-pixel motion better than its own quantization, and that error is
+/// multiplied by 2^level on the way down: on the reference pipeline's own
+/// edge-map content, four 1-bit pyramid levels track ~600× worse than one on the
+/// windows that never clip. The fix is N-bit levels, and an N-bit level needs
+/// this kernel to form its covariance at all. (Three bit-depth figures appear in
+/// this library and they are three different things: a frame statistic puts the
+/// levels' DISTINCT VALUES at 1/3/4/5 bits; the alphabet the box-filter
+/// arithmetic can REACH is 1/3/5/7; the pyramid that ships is 1/2/2/2,
+/// impl/lkBatch_impl.hpp.)
 ///
 /// **The formulation.** For magnitude planes
 /// `m[0..N-1]` and sign plane `s`, a pixel is `Ix = +/- SUM_i 2^i * m_x[i]`, so:
@@ -167,54 +150,46 @@
 /// **At N = 1 that is 4 popcounts per word -- exactly what `countCovariance`
 /// issues** (`popcount(a)`, `popcount(b)`, `popcount(a & b)`,
 /// `popcount(a & b & sel)`), which is the arithmetic statement of "ternary is the
-/// N = 1 instance". The predicted cost ratios against N = 1 are therefore 3.5x,
-/// 7.5x and 13x at N = 2, 3, 4.
+/// N = 1 instance". The predicted cost ratios against N = 1 are therefore 3.50×,
+/// 7.50× and 13.0× at N = 2, 3, 4.
 ///
-/// **WHAT THE REFERENCE DEVICE ACTUALLY CHARGES.** At `uint32_t` (the
-/// shipped default word width), 640x480, a 31x31 window, 200 keypoints:
+/// **WHAT THE REFERENCE DEVICE CHARGES.** Reference device (a Raspberry Pi 4),
+/// `uint32_t` (the shipped default word width), 640x480, a 31x31 window, 200
+/// keypoints, the kernel as it ships:
 ///
-/// N = 1 903 ns/window 1.00x (predicted 1.00x) 153600 B/level
-/// N = 2 3187 ns/window 3.53x (predicted 3.50x) 230400 B/level
-/// N = 3 5907 ns/window 6.54x (predicted 7.50x) 307200 B/level
-/// N = 4 11023 ns/window 12.20x (predicted 13.00x) 384000 B/level
+/// N = 1 0.896 µs/window 1.00× (predicted 1.00×) 153600 B/level
+/// N = 2 2.930 µs/window 3.27× (predicted 3.50×) 230400 B/level
+/// N = 3 6.189 µs/window 6.91× (predicted 7.50×) 307200 B/level
+/// N = 4 10.55 µs/window 11.8× (predicted 13.0×) 384000 B/level
 ///
-/// Re-measured after triage tidied the per-row accumulator (run 4, the kernel
-/// that ships): 896 / 2930 / 6189 / 10551 ns, i.e. 1.00x / 3.27x / 6.91x / 11.78x.
-/// Across the four runs the W = 31 `uint32_t` ratios span 3.0-3.5x, 6.4-6.9x and
-/// 11.8-12.5x, which is the honest width of "3.5x / 6.5x / 12.2x" -- the spread
-/// between BINARIES, not within one.
-///
-/// So at W = 31 `3N^2 + N` is a good model and a slight OVER-estimate, which is the
-/// right way for a price to be wrong when a decision is taken against it.
+/// Across four builds of unchanged source the W = 31 `uint32_t` ratios span
+/// 3.0-3.5×, 6.4-6.9× and 11.8-12.5× -- the spread between BINARIES, not within
+/// one -- so at W = 31 `3N^2 + N` is a good model and a slight OVER-estimate,
+/// which is the right way for a price to be wrong when a decision is taken
+/// against it.
 ///
 /// **THE MODEL'S VALIDITY RANGE IS PART OF THE MODEL, AND IT IS NOT ALL WINDOW
-/// SIZES.** The table above is W = 31. The same run's smaller windows (the
-/// per-cell band table):
+/// SIZES.** The same source in another of those binaries (its W = 31 row is the
+/// calibration against the table above):
 ///
-/// uint32_t W = 7 4.76x / 7.22x / 12.96x at N = 2, 3, 4
-/// uint32_t W = 15 4.06x / 6.61x / 12.02x
-/// uint32_t W = 31 3.53x / 6.54x / 12.20x
+/// uint32_t W = 7 4.76× / 7.22× / 13.0× at N = 2, 3, 4
+/// uint32_t W = 15 4.06× / 6.61× / 12.0×
+/// uint32_t W = 31 3.53× / 6.54× / 12.2×
 ///
-/// At W = 7 the model UNDER-estimates N = 2 by 36%, outside the pre-registered
-/// +/-25% band and in the direction that says something is quadratic that should not
-/// be -- reported, not absorbed. It is also the cell that moved most between two
-/// binaries built from unchanged source (3.27x to 4.76x), so it is layout-confounded
-/// and is NOT attributed here. **Read `3N^2 + N` as measured within +/-25% at
-/// W = 15 and W = 31, and as an under-estimate at N = 2 on small windows** -- where
-/// the per-window and per-row fixed costs are largest relative to the word work.
-/// The bytes
-/// column is the other half of the trade and is why it is printed next to the
-/// time: an N-bit level costs (N+1) bits per pixel per derivative against
-/// ternary's 2. **Weighing those two columns against the accuracy finding is a
-/// separate decision; this file takes no bit-depth decision.** Two caveats belong
-/// with the numbers rather than after them: at `uint64_t` the curve runs ~20%
-/// ABOVE the model at N >= 3 and the 64-bit word is slower in absolute terms than
-/// the 32-bit one at N = 4 -- register pressure was the obvious cause and was
-/// measured and REJECTED (scripts/covariance_nbit_codegen.sh) -- and the same
-/// kernel's absolute cost moved by up to 1.46x between two binaries built from
-/// unchanged source, so re-measure in your own binary rather than quoting these.
-/// The per-row accumulator is an open question of its own: it is O(N^2) per row
-/// here where it was O(1) at N = 1.
+/// At W = 15 and W = 31 the model holds within ±25%. At W = 7 it UNDER-estimates
+/// N = 2 by 36%, where the per-window and per-row fixed costs are largest
+/// relative to the word work; that cell also moves most between two binaries
+/// built from unchanged source (3.27× to 4.76×), so it is not attributed to
+/// anything. Two caveats belong with the numbers: at `uint64_t` the curve runs
+/// ~1.2× ABOVE the model at N >= 3 and the 64-bit word is slower in absolute
+/// terms than the 32-bit one at N = 4 -- register pressure was the obvious cause
+/// and was measured and REJECTED -- and the same kernel's absolute cost moves by
+/// up to 1.46× between two binaries built from unchanged source, so the ratios
+/// are the stable reading and absolute times are your own binary's to take.
+///
+/// The bytes column is the other half of the trade and is why it is printed
+/// next to the time: an N-bit level costs (N+1) bits per pixel per derivative
+/// against ternary's 2. This file takes no bit-depth decision.
 ///
 /// **Do not try to make this linear.** Anything linear in N is computing a
 /// different quantity.
@@ -225,7 +200,7 @@
 /// either. What it does need is somewhere to hold the per-pair counts, and that is
 /// `impl::BitSlicedPairCounts<N>` -- 4*N^2 `size_t` in AUTOMATIC storage, 512 B at
 /// N = 4, zero bytes of heap and zero bytes of caller-provided buffer. It is not a
-/// scratch BUFFER in the/no-heap sense (nothing is allocated, nothing is
+/// scratch BUFFER in the no-heap sense (nothing is allocated, nothing is
 /// passed in, nothing outlives the call), and tests/test_covariance.cpp counts
 /// `operator new` across the N-bit calls exactly as it does across the ternary
 /// ones and requires zero.
@@ -260,11 +235,7 @@
 /// **The CONTAINER spellings dispatch on the plane count**, which is a
 /// compile-time property of `SignedQuantMat<N, W>`: `TernaryMat` takes the
 /// one-popcount path, `SignedQuantMat<3, W>` takes the bit-sliced path, and
-/// neither can be reached with the other's planes. This file first shipped with
-/// N > 1 rejected outright ("no matching function"), because until the
-/// bit-sliced kernel existed there was nothing correct to send it to. That was a
-/// blocker rather than a conservatism, since a 1-bit pyramid level cannot
-/// localise sub-pixel motion and the fix is N-bit levels.
+/// neither can be reached with the other's planes.
 /// **The five-argument VIEW spelling still promises nothing about N, and
 /// cannot**: a `BinMatConstView` carries no plane count, so passing an N-bit
 /// level's LSB plane to it compiles cleanly and returns the covariance of that
@@ -275,7 +246,7 @@
 /// so N is in the type there and the same mistake does not compile. Hand
 /// assembly of the five-argument form is for a ternary level only.
 /// 2. **Windows are CLIPPED, not rejected** (see ops/reduce.hpp's region
-/// contract). A 31x31 window centerd on a keypoint within 15 pixels of an edge
+/// contract). A 31x31 window centered on a keypoint within 15 pixels of an edge
 /// is out of range, and every LK pipeline has such keypoints. The window is
 /// intersected with the image; the pixels that exist contribute and the rest
 /// do not. A window wholly outside gives `{0, 0, 0}`, which is a value and not
@@ -318,7 +289,8 @@
 // derivativeX / derivativeY write, and therefore what this reads.
 #include "../quantMat.hpp"
 // countCovariance and CovarianceCount: the fused, scratch-free reduction this
-// operation IS. Nothing in this file re-implements a word loop -- see.
+// operation IS. The region clip, the head/tail masks and the popcount all come
+// from there; the N-bit row body below is the one word loop this file adds.
 #include "reduce.hpp"
 
 namespace bincv {
@@ -424,8 +396,8 @@ inline GradientCovariance gradientCovariance(BinMatConstView<WordType> magX,
 /// `TernaryMat<W>` is `SignedQuantMat<1, W>`, so this overload is the better
 /// match at N == 1 by partial ordering and keeps the single-popcount path;
 /// `SignedQuantMat<N, W>` for N > 1 matches the N-bit overload below instead of
-/// failing to compile, which a measurement made a precondition. The two agree
-/// exactly at N == 1 -- checked at every window position, not argued.
+/// failing to compile. The two agree exactly at N == 1 -- checked at every
+/// window position, not argued.
 /// @note A thin naming of the view form, in the shape ops/derivative.hpp and
 /// ops/pyramid.hpp use for their container spellings: the container knows
 /// which of its planes are magnitude and which is sign, and the kernel does
@@ -448,11 +420,11 @@ inline GradientCovariance gradientCovariance(const TernaryMat<WordType>& dx,
 //
 // WHY THE ROW BODY LIVES HERE AND NOT IN ops/reduce.hpp
 //
-// The reduction interface for N-bit levels is "specified
-// over plane pairs, not over a single mask", and this is that interface. It is
-// kept in this file because nothing else in the library reduces plane PAIRS --
-// ops/reduce.hpp's entry points are the bulk reductions exports, and adding a
-// pair-weighted one there would export a shape with exactly one caller.
+// The reduction for an N-bit level is over plane PAIRS, not over a single mask.
+// It is kept in this file because nothing else in the library reduces plane
+// pairs -- ops/reduce.hpp's entry points are the bulk reductions the library
+// exports, and adding a pair-weighted one there would export a shape with
+// exactly one caller.
 //
 // What is NOT re-implemented here is anything ops/reduce.hpp already owns: the
 // region clip, the head/tail masks, the single-pass row skeleton and the popcount
@@ -469,8 +441,8 @@ namespace impl {
 ///
 /// @note **This is the whole of the N-bit form's state, and it is AUTOMATIC storage** --
 /// 4*N^2 counters, 512 B at N = 4. No heap, and nothing the caller has to
-/// provide: the no-scratch property axis 3 bought at N = 1 survives at
-/// N > 1 unchanged, because the sign planes are still XORed inside the word
+/// provide: the no-scratch property of the ternary form survives at N > 1
+/// unchanged, because the sign planes are still XORed inside the word
 /// loop rather than materialized as a plane.
 /// @note `xx` and `yy` use the UPPER TRIANGLE only (`i <= j`). `m_x[i] & m_x[j]`
 /// is symmetric in its indices, so the lower half would be the same numbers
@@ -567,22 +539,21 @@ inline void bitSlicedPairRowRegion(const WordType* (&mx)[N], const WordType* (&m
 }
 
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-/// @brief The whole clipped region's plane-pair counts, in NEON lanes. **INTERNAL**
-///. `N` in {1, 2} at `uint32_t` — the shipped 1/2/2/2 ladder.
+/// @brief The whole clipped region's plane-pair counts, in NEON lanes. **INTERNAL.**
+/// `N` in {1, 2} at `uint32_t` — the shipped 1/2/2/2-bit pyramid.
 ///
-/// ** WAS WRITTEN FOR THIS AND THIS FUNCTION WAS NOT
-/// OBEYING IT.** `bitSlicedPairRowRegion` issues `3N^2 + N` **scalar** `popcountWord`
-/// calls per word — fourteen at `N = 2` — and on aarch64 there is no scalar popcount:
-/// every one is `fmov` in, `cnt`, `addv`, `fmov` out.
-/// measured the consequence on the reference device: the covariance is **27.5% of
-/// `track`** there against 18.2% on x86, and **5.9× slower than x86** where the
-/// iteration loop — which does have a NEON path — is only 3.6× slower. That gap IS the
-/// missing kernel.
+/// **THE BULK-ONLY RULE ON POPCOUNTS EXISTS FOR THIS.** `bitSlicedPairRowRegion`
+/// issues `3N^2 + N` **scalar** `popcountWord` calls per word — fourteen at
+/// `N = 2` — and on aarch64 there is no scalar popcount: every one is `fmov` in,
+/// `cnt`, `addv`, `fmov` out. Measured on the reference device (a Raspberry Pi 4)
+/// with the scalar body alone, the covariance is **27.5% of `track`** against
+/// 18.2% on x86-64, and **5.9× slower than x86-64** where the iteration loop —
+/// which does have a NEON path — is only 3.6× slower. That gap IS this kernel.
 ///
 /// The counts go into LANES and stay there to the end of the window, so the register
-/// domain is crossed **once per point per level** instead of `14 * rows` times. This is
-/// the shape gave the residual accumulator, applied to
-/// the operation that sits next to it and never got it.
+/// domain is crossed **once per point per level** instead of `14 * rows` times — the
+/// shape ops/opticalFlow.hpp's NEON residual accumulator has, applied to the
+/// operation that sits next to it.
 ///
 /// **Bit-exact:** the same integers, counted the same way. The scalar body above is the
 /// portable one AND the oracle, and `tests/test_covariance.cpp` compares them.
@@ -620,11 +591,11 @@ inline void bitSlicedPairRegionNeon(const BinMatConstView<WordType> (&magX)[N],
                                            static_cast<uint32_t>(ax & ay & sel)};
                 accA = vaddq_u32(accA, counts(vld1q_u32(lanes)));
             } else {
-                // ONE array round trip a word, not four. The first version built each
-                // of the four operand vectors through its own stack array -- sixteen
-                // stores and four loads a word, each load waiting on its stores -- and
-                // that was measured eating most of the win. Everything below is a
-                // SHUFFLE of the one vector `{ax0, ax1, ay0, ay1}`.
+                // ONE array round trip a word, not four. Building each of the four
+                // operand vectors through its own stack array -- sixteen stores and
+                // four loads a word, each load waiting on its stores -- measured
+                // eating most of the win. Everything below is a SHUFFLE of the one
+                // vector `{ax0, ax1, ay0, ay1}`.
                 const uint32_t base[4] = {static_cast<uint32_t>(rowX[0][w] & mask),
                                           static_cast<uint32_t>(rowX[1][w] & mask),
                                           static_cast<uint32_t>(rowY[0][w] & mask),
@@ -801,8 +772,9 @@ inline GradientCovariance gradientCovariance(const BinMatConstView<WordType> (&m
 
     impl::BitSlicedPairCounts<N> total;
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-    // the shipped ladder's depths get the bulk-only rule's reservation cashed in. Anything else
-    // takes the portable body below, which is also the exactness oracle.
+    // The shipped pyramid's depths (N = 1 and 2 at uint32_t) take the NEON arm;
+    // anything else takes the portable body below, which is also the exactness
+    // oracle.
     if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
         impl::bitSlicedPairRegionNeon<N, WordType>(magX, magY, signX, signY, r, total);
         return impl::combineBitSlicedPairs<N>(total);
@@ -823,9 +795,9 @@ inline GradientCovariance gradientCovariance(const BinMatConstView<WordType> (&m
         // ===================================================================
         // THE ACCUMULATOR SHAPE IS CHOSEN ON N, AND IT IS MEASURED.
         //
-        // item 4 gives window reductions a PER-ROW partial accumulator, to
-        // break the serialized dependency chain through popcount latency.
-        // measured that worth 1.08x -- AT N = 1, where BitSlicedPairCounts is four
+        // ops/reduce.hpp's window reductions carry a PER-ROW partial accumulator,
+        // to break the serialized dependency chain through popcount latency,
+        // measured worth 1.08x -- AT N = 1, where BitSlicedPairCounts is four
         // counters. At N = 4 it is SIXTY-FOUR, and the per-row zero-and-add is
         // ~3N^2+N adds plus 4N^2 words of zeroing against 1-2 uint64_t words of
         // real work per row. Both shapes were measured on the reference device:
@@ -842,11 +814,10 @@ inline GradientCovariance gradientCovariance(const BinMatConstView<WordType> (&m
         // timing and nothing else. tests/test_covariance.cpp's N sweeps are what
         // hold that.
         //
-        // The noise floor was measured rather than assumed: compiled the SAME
-        // arm into two translation units and timed both. On the device that spread
-        // is 0.0-0.3%, so the numbers above are real; on an x86 development machine
-        // it reaches 10.6%, which is why declined to close this question on a
-        // single-binary A/B and was right to.
+        // The noise floor was measured rather than assumed: the SAME arm compiled
+        // into two translation units and timed both spreads 0.0-0.3% on the
+        // device, so the numbers above are real; on an x86 development machine it
+        // reaches 10.6%, which is why a single-binary x86 A/B cannot decide it.
         // ===================================================================
         if constexpr (N == 1) {
             impl::BitSlicedPairCounts<N> row;
@@ -863,8 +834,8 @@ inline GradientCovariance gradientCovariance(const BinMatConstView<WordType> (&m
 
 /// @brief The 2x2 gradient covariance of an N-bit signed derivative pair over
 /// `window`. **API TIER 3.** This is the container spelling of the kernel above.
-/// @tparam N The level's bit depth -- 1 for a ternary level, 3/4/5 for the upper
-/// pyramid levels the reference ladder reaches.
+/// @tparam N The level's bit depth -- 1 for a ternary level, up to 7 for an upper
+/// pyramid level.
 /// @param dx Horizontal derivative, N-bit -- what `derivativeX` writes from a
 /// `QuantMat<N>` level (ops/derivative.hpp).
 /// @param dy Vertical derivative, with `dx`'s dimensions and bit depth.

@@ -33,18 +33,21 @@
 ///    **That 4x is an instruction count and it buys nothing here, measured.**
 ///    The same OpenCV matcher run over identical bytes as `CV_8U` and as
 ///    `CV_32S` -- `matchHamming_gpu<int>` is instantiated, so both are real
-///    paths -- reads 5.233 ms against 5.143 ms at 5000x5000: **1.02x**. The
-///    profile says why: `math_pipe_throttle` is 871 of ~108,000 warp stall
-///    samples, under 1%, while `barrier` is 35,540. The matcher is
-///    `__syncthreads()`-bound, and a kernel that is not math-bound does not
-///    care how wide its popcounts are.
+///    paths -- is indistinguishable between the two at 5000x5000 on the
+///    reference GPU (within 2%, ranges overlapping; sparseMatch.hpp carries
+///    the figures with their conditions). The profile says why:
+///    `math_pipe_throttle` is 871 of ~108,000 warp stall samples, under 1%,
+///    while `barrier` is 35,540. The matcher is `__syncthreads()`-bound, and a
+///    kernel that is not math-bound does not care how wide its popcounts are.
 ///
-///    The device matcher's 9.1x lead over that arm is **kernel shape**, not
-///    popcount width: two barriers per launch against one per descriptor chunk
-///    per train block, and 0.25% of peak DRAM against 12.5%. Word emission is
+///    The device matcher's lead over that arm -- 9.51x at 5000x5000 on one
+///    explicit stream, 2.0087 ms against 0.2105 ms on the reference GPU (RTX
+///    3070 Ti), from cuda_role_benchmark -- is **kernel shape**, not popcount
+///    width: two barriers per launch against one per descriptor chunk per
+///    train block, and 0.25% of peak DRAM against 12.5%. Word emission is
 ///    still the right output -- it is what lets a matcher hold a descriptor in
 ///    eight registers and costs nothing to keep -- but it is not where the
-///    lead comes from, and this header no longer says it is.
+///    lead comes from.
 ///
 /// The case for a device arm rests on residency and on memory: once keypoints
 /// are on the device, the alternative is downloading a 361 KB frame to describe
@@ -205,6 +208,9 @@ inline void checkBriefArgs(const DeviceBriefPattern& pattern,
 } // namespace impl
 
 /// @brief Descriptors for a whole keypoint set, unsteered. **API TIER 3.**
+/// Bit-exact against the host `bincv::computeBrief` on the same image,
+/// keypoints and pattern, both arms, proven by
+/// test_cuda_orientation_descriptor.
 /// @param pattern An UNSTEERED pattern (`bins == 1`), uploaded by
 /// `uploadBriefPattern`.
 /// @param out `keypoints.count` descriptors of `pattern.bits / 32` words, and
@@ -234,16 +240,23 @@ inline cudaError_t computeBrief(DeviceImageConstView<uint16_t> img,
 }
 
 /// @brief `computeBrief` steered by per-keypoint angles. **API TIER 3.**
+/// Bit-exact against the host `bincv::computeBriefSteered` on the same
+/// angles, including the bin selected at every one of the 30 bin boundaries,
+/// proven by test_cuda_orientation_descriptor.
 /// @param dAngles One angle per keypoint in device memory, radians --
 /// `keypointOrientation`'s output, byte for byte.
 /// @param pattern A STEERED pattern (`bins == kBriefAngleBins`).
-/// @note **THE ANGLE DOMAIN IS [-2*pi, 2*pi] AND THE KERNEL ASSERTS IT.** Bin
-/// selection ends in a float-to-unsigned cast, which is undefined behaviour
-/// outside that range and which the two host ISAs already resolve
-/// differently; the device is a third resolution. `keypointOrientation`'s
-/// (-pi, pi] needs no pre-conditioning. An accumulated or otherwise
-/// unwrapped angle is the CALLER's to wrap first, and a Debug build says so
-/// by trapping in the kernel rather than returning a plausible descriptor.
+/// @note **THE ANGLE DOMAIN IS [-2*pi, 2*pi], AND IT IS THE ONE DOMAIN IN THIS
+/// BACKEND THE LAUNCHER CANNOT REFUSE.** Bin selection ends in a
+/// float-to-unsigned cast, which is undefined behaviour outside that range
+/// and which the two host ISAs already resolve differently; the device is a
+/// third resolution. The angles live in device memory, so checking them on
+/// the launch path would cost a synchronize; instead the kernel asserts the
+/// domain in a Debug build, by trapping rather than returning a plausible
+/// descriptor, and a Release build gives an unspecified descriptor for an
+/// out-of-range angle. `keypointOrientation`'s (-pi, pi] needs no
+/// pre-conditioning; an accumulated or otherwise unwrapped angle is the
+/// CALLER's to wrap first.
 /// @note NOT the host's bin-by-bin traversal. The host runs bin by bin because
 /// it flattens one ~4 KB offset table per bin on the stack; the device
 /// computes each sample's address inline -- one integer multiply-add per

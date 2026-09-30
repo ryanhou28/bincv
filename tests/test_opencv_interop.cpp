@@ -165,8 +165,7 @@ void testFromCVMatAllocationFailure() {
     //, because at no longer bounds-checks in release and so cannot catch
     // it. The word count is the check that matters: sizeInWords must equal
     // height * alignedWidth for the ORIGINAL shape, not the attempted one --
-    // which pins the same property the deleted BINCV_CHECK_THROWS(m.at(63, 63))
-    // used to pin, and pins it directly rather than through an accessor. That
+    // which pins the property directly rather than through an accessor. That
     // accessor's own bounds check is covered by tests/test_assert_abort.cpp.
     BINCV_CHECK_EQ(m.getWidth(), size_t(8));
     BINCV_CHECK_EQ(m.getHeight(), size_t(2));
@@ -268,7 +267,7 @@ void testRealFrameCorners() {
     BINCV_CHECK(w > 32 && h > 32);
 
     // The SAME binary content on both sides: 1 bit per pixel for binCV, CV_8U
-    // holding {0, 1} for OpenCV. That is CLAUDE.md's denominator rule.
+    // holding {0, 1} for OpenCV. That is the denominator every comparison here uses.
     cv::Mat bytes(h, w, CV_8U);
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
@@ -279,6 +278,8 @@ void testRealFrameCorners() {
     BINCV_CHECK_EQ(bin.countNonZero(), cv::countNonZero(input));
 
     bincv::GoodFeaturesParams params;  // the reference pipeline's parameters verbatim
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     bincv::TernaryMat<uint32_t> dx(static_cast<size_t>(w), static_cast<size_t>(h));
     bincv::TernaryMat<uint32_t> dy(static_cast<size_t>(w), static_cast<size_t>(h));
     bincv::derivativeX(bin, dx);

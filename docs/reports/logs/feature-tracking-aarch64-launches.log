@@ -1,18 +1,19 @@
 # launch sweep -- 10 separate processes of one benchmark
-# benchmark: ./build/benchmark/feature_tracking_sequence /home/ryan/bincv-data/euroc-v1_02-cam0
+# benchmark: build/benchmark/feature_tracking_sequence /home/ryan/bincv-data/euroc-v1_02-cam0
 # launches: 10
 # arch:     aarch64
 # host:     Raspberry Pi 4 Model B Rev 1.5
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
-# commit:   880704b
-# governor: performance
+# commit:   4c4b3bf
+# sources:  benchmark/feature_tracking_sequence.cpp=631a55d47d44 benchmark/reference_sensor.hpp=6f2907b2ddd7 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=36791a71f6a2 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=5bc9214bf036 include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=53b5f5b990b6 include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/edge.hpp=64c2acb990a1 include/bincv/ops/medianWide.hpp=2effc9c26555 include/bincv/ops/opticalFlow.hpp=591d93a693a5 include/bincv/ops/pyramid.hpp=59388d95dccc include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/resample.hpp=d0db5aee157f include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6 include/bincv/threads/pool.hpp=461774e785bb
+# governor: performance (restored to performance on exit)
 # throttled before: throttled=0x80000
-# temp before: temp=55.0'C
+# temp before: temp=60.3'C
 # pinning:  taskset -c 3
 # sleep between launches: 0s
-# date:     2026-09-22T17:11:58-07:00
-# loadavg at start: 0.53 0.19 0.10 1/310 1823089
+# date:     2026-09-29T16:51:05-07:00
+# loadavg at start: 0.88 0.36 0.25 1/315 4024866
 # NO launch is discarded -- a cold start is part of what varies between
 # launches, and trimming it would trim the tail this sweep measures.
 
@@ -50,21 +51,21 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.297 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.292 ms/frame  74.2%
+ detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.284 ms/frame  74.1%
  build (pyrDown + derivatives)    0.850 ms/frame  19.2%
-  ... sensor stage               0.501 ms/frame  11.3%
-  ... median                     0.168 ms/frame   3.8%
+  ... sensor stage               0.505 ms/frame  11.4%
+  ... median                     0.172 ms/frame   3.9%
   ... edge                       0.331 ms/frame   7.5%
-  ... pyrDown                    0.190 ms/frame   4.3%
-  ... derivatives                0.158 ms/frame   3.5%
+  ... pyrDown                    0.189 ms/frame   4.3%
+  ... derivatives                0.153 ms/frame   3.5%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.440 ms/frame
- OpenCV :   23.638 ms/frame
- RATIO : 5.32x
+ binCV :    4.432 ms/frame
+ OpenCV :   23.709 ms/frame
+ RATIO : 5.35x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -108,21 +109,21 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.275 ms/frame  73.8%
- build (pyrDown + derivatives)    0.866 ms/frame  19.5%
-  ... sensor stage               0.521 ms/frame  11.7%
-  ... median                     0.188 ms/frame   4.2%
+ detect                          0.297 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.274 ms/frame  74.1%
+ build (pyrDown + derivatives)    0.846 ms/frame  19.2%
+  ... sensor stage               0.501 ms/frame  11.3%
+  ... median                     0.167 ms/frame   3.8%
   ... edge                       0.332 ms/frame   7.5%
-  ... pyrDown                    0.189 ms/frame   4.3%
-  ... derivatives                0.153 ms/frame   3.4%
+  ... pyrDown                    0.190 ms/frame   4.3%
+  ... derivatives                0.153 ms/frame   3.5%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.438 ms/frame
- OpenCV :   23.809 ms/frame
- RATIO : 5.36x
+ binCV :    4.418 ms/frame
+ OpenCV :   23.744 ms/frame
+ RATIO : 5.37x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -167,20 +168,20 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
  detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.274 ms/frame  74.1%
- build (pyrDown + derivatives)    0.847 ms/frame  19.2%
-  ... sensor stage               0.503 ms/frame  11.4%
-  ... median                     0.170 ms/frame   3.8%
-  ... edge                       0.331 ms/frame   7.5%
-  ... pyrDown                    0.190 ms/frame   4.3%
+ track (LK)                      3.279 ms/frame  74.0%
+ build (pyrDown + derivatives)    0.853 ms/frame  19.3%
+  ... sensor stage               0.509 ms/frame  11.5%
+  ... median                     0.175 ms/frame   3.9%
+  ... edge                       0.332 ms/frame   7.5%
+  ... pyrDown                    0.189 ms/frame   4.3%
   ... derivatives                0.153 ms/frame   3.5%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.420 ms/frame
- OpenCV :   23.571 ms/frame
- RATIO : 5.33x
+ binCV :    4.430 ms/frame
+ OpenCV :   23.737 ms/frame
+ RATIO : 5.36x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -224,21 +225,21 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.271 ms/frame  74.0%
- build (pyrDown + derivatives)    0.852 ms/frame  19.3%
-  ... sensor stage               0.508 ms/frame  11.5%
-  ... median                     0.173 ms/frame   3.9%
-  ... edge                       0.333 ms/frame   7.5%
-  ... pyrDown                    0.190 ms/frame   4.3%
-  ... derivatives                0.153 ms/frame   3.5%
+ detect                          0.297 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.281 ms/frame  74.1%
+ build (pyrDown + derivatives)    0.850 ms/frame  19.2%
+  ... sensor stage               0.506 ms/frame  11.4%
+  ... median                     0.172 ms/frame   3.9%
+  ... edge                       0.332 ms/frame   7.5%
+  ... pyrDown                    0.189 ms/frame   4.3%
+  ... derivatives                0.153 ms/frame   3.4%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.422 ms/frame
- OpenCV :   23.469 ms/frame
- RATIO : 5.31x
+ binCV :    4.429 ms/frame
+ OpenCV :   23.655 ms/frame
+ RATIO : 5.34x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -283,19 +284,19 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
  detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.282 ms/frame  74.0%
- build (pyrDown + derivatives)    0.857 ms/frame  19.3%
-  ... sensor stage               0.497 ms/frame  11.2%
-  ... median                     0.164 ms/frame   3.7%
-  ... edge                       0.331 ms/frame   7.5%
+ track (LK)                      3.292 ms/frame  74.2%
+ build (pyrDown + derivatives)    0.846 ms/frame  19.1%
+  ... sensor stage               0.500 ms/frame  11.3%
+  ... median                     0.167 ms/frame   3.8%
+  ... edge                       0.332 ms/frame   7.5%
   ... pyrDown                    0.190 ms/frame   4.3%
-  ... derivatives                0.167 ms/frame   3.8%
+  ... derivatives                0.154 ms/frame   3.5%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
  binCV :    4.437 ms/frame
- OpenCV :   23.638 ms/frame
+ OpenCV :   23.652 ms/frame
  RATIO : 5.33x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
@@ -340,21 +341,21 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.281 ms/frame  74.0%
- build (pyrDown + derivatives)    0.853 ms/frame  19.2%
-  ... sensor stage               0.509 ms/frame  11.5%
-  ... median                     0.175 ms/frame   4.0%
-  ... edge                       0.332 ms/frame   7.5%
+ detect                          0.297 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.283 ms/frame  74.1%
+ build (pyrDown + derivatives)    0.848 ms/frame  19.1%
+  ... sensor stage               0.502 ms/frame  11.3%
+  ... median                     0.169 ms/frame   3.8%
+  ... edge                       0.331 ms/frame   7.5%
   ... pyrDown                    0.189 ms/frame   4.3%
-  ... derivatives                0.153 ms/frame   3.4%
+  ... derivatives                0.155 ms/frame   3.5%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.433 ms/frame
- OpenCV :   23.686 ms/frame
- RATIO : 5.34x
+ binCV :    4.429 ms/frame
+ OpenCV :   23.608 ms/frame
+ RATIO : 5.33x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -399,20 +400,20 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
  detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.280 ms/frame  74.1%
- build (pyrDown + derivatives)    0.849 ms/frame  19.2%
-  ... sensor stage               0.502 ms/frame  11.3%
+ track (LK)                      3.312 ms/frame  74.3%
+ build (pyrDown + derivatives)    0.848 ms/frame  19.0%
+  ... sensor stage               0.503 ms/frame  11.3%
   ... median                     0.169 ms/frame   3.8%
-  ... edge                       0.332 ms/frame   7.5%
+  ... edge                       0.331 ms/frame   7.4%
   ... pyrDown                    0.190 ms/frame   4.3%
-  ... derivatives                0.155 ms/frame   3.5%
+  ... derivatives                0.154 ms/frame   3.4%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.427 ms/frame
- OpenCV :   23.590 ms/frame
- RATIO : 5.33x
+ binCV :    4.458 ms/frame
+ OpenCV :   23.636 ms/frame
+ RATIO : 5.30x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -456,21 +457,21 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.278 ms/frame  73.8%
- build (pyrDown + derivatives)    0.862 ms/frame  19.4%
-  ... sensor stage               0.505 ms/frame  11.4%
-  ... median                     0.171 ms/frame   3.8%
-  ... edge                       0.332 ms/frame   7.5%
+ detect                          0.300 ms/frame   6.8% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.290 ms/frame  74.2%
+ build (pyrDown + derivatives)    0.845 ms/frame  19.0%
+  ... sensor stage               0.500 ms/frame  11.3%
+  ... median                     0.166 ms/frame   3.7%
+  ... edge                       0.333 ms/frame   7.5%
   ... pyrDown                    0.190 ms/frame   4.3%
-  ... derivatives                0.165 ms/frame   3.7%
+  ... derivatives                0.152 ms/frame   3.4%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.439 ms/frame
- OpenCV :   23.659 ms/frame
- RATIO : 5.33x
+ binCV :    4.435 ms/frame
+ OpenCV :   23.580 ms/frame
+ RATIO : 5.32x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -514,21 +515,21 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.299 ms/frame   6.8% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.277 ms/frame  74.0%
- build (pyrDown + derivatives)    0.850 ms/frame  19.2%
-  ... sensor stage               0.505 ms/frame  11.4%
-  ... median                     0.172 ms/frame   3.9%
-  ... edge                       0.331 ms/frame   7.5%
+ detect                          0.299 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.290 ms/frame  74.0%
+ build (pyrDown + derivatives)    0.856 ms/frame  19.3%
+  ... sensor stage               0.508 ms/frame  11.4%
+  ... median                     0.174 ms/frame   3.9%
+  ... edge                       0.332 ms/frame   7.5%
   ... pyrDown                    0.190 ms/frame   4.3%
-  ... derivatives                0.153 ms/frame   3.5%
+  ... derivatives                0.157 ms/frame   3.5%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.427 ms/frame
- OpenCV :   23.541 ms/frame
- RATIO : 5.32x
+ binCV :    4.445 ms/frame
+ OpenCV :   23.705 ms/frame
+ RATIO : 5.33x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -572,21 +573,21 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.298 ms/frame   6.6% (82 detections in 1709 frames = 4.8%)
- track (LK)                      3.331 ms/frame  74.3%
- build (pyrDown + derivatives)    0.854 ms/frame  19.1%
-  ... sensor stage               0.508 ms/frame  11.3%
-  ... median                     0.174 ms/frame   3.9%
-  ... edge                       0.332 ms/frame   7.4%
-  ... pyrDown                    0.190 ms/frame   4.2%
-  ... derivatives                0.154 ms/frame   3.4%
+ detect                          0.298 ms/frame   6.7% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.303 ms/frame  74.3%
+ build (pyrDown + derivatives)    0.847 ms/frame  19.1%
+  ... sensor stage               0.503 ms/frame  11.3%
+  ... median                     0.170 ms/frame   3.8%
+  ... edge                       0.332 ms/frame   7.5%
+  ... pyrDown                    0.190 ms/frame   4.3%
+  ... derivatives                0.152 ms/frame   3.4%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    4.484 ms/frame
- OpenCV :   23.478 ms/frame
- RATIO : 5.24x
+ binCV :    4.448 ms/frame
+ OpenCV :   23.650 ms/frame
+ RATIO : 5.32x
  NOTE: binCV builds ONE pyramid per frame (the previous frame's is
  swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
  calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
@@ -597,8 +598,50 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
  binCV has its NEON path here, so this is SIMD against
  SIMD on the deployment target -- the comparison criterion 4 is about.
 
-# loadavg at end: 1.00 0.92 0.55 1/309 1829073
+# loadavg at end: 1.01 0.94 0.63 1/315 4032226
 # throttled after: throttled=0x80000
-# temp after: temp=63.3'C
-# date:     2026-09-22T17:21:26-07:00
+# temp after: temp=64.2'C
+# date:     2026-09-29T17:00:50-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio i2:OpenCV :/i2:binCV :) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                  n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / ... derivatives                10     0.1530     0.1520     0.1570  1.033     3.3%      --  [  0.1525,   0.1545]   0.65%   1.010x
+# i1 / ... edge                       10     0.3320     0.3310     0.3330  1.006     0.6%      --  [  0.3310,   0.3320]   0.15%   1.003x
+# i1 / ... median                     10     0.1695     0.1660     0.1750  1.054     5.3%      --  [  0.1670,   0.1730]   1.77%   1.021x
+# i1 / ... pyrDown                    10     0.1900     0.1890     0.1900  1.005     0.5%      --  [  0.1890,   0.1900]   0.26%   1.005x
+# i1 / ... sensor stage               10     0.5030     0.5000     0.5090  1.018     1.8%      --  [  0.5010,   0.5065]   0.55%   1.007x
+# i1 / build (pyrDown + derivatives)  10     0.8480     0.8450     0.8560  1.013     1.3%      --  [  0.8460,   0.8515]   0.32%   1.004x
+# i1 / detect                         10     0.2980     0.2970     0.3000  1.010     1.0%      --  [  0.2970,   0.2985]   0.25%   1.003x
+# i1 / track (LK)                     10     3.2870     3.2740     3.3120  1.012     1.2%      --  [  3.2810,   3.2965]   0.24%   1.003x
+# i2 / OpenCV :                       10    23.6535    23.5800    23.7440  1.007     0.7%      --  [ 23.6290,  23.7210]   0.19%   1.003x
+# i2 / binCV :                        10     4.4335     4.4180     4.4580  1.009     0.9%      --  [  4.4290,   4.4450]   0.18%   1.003x
+# 
+# RATIO  i2:OpenCV :  /  i2:binCV :   over 10 launches
+#   paired per launch (the published estimator)
+#     median 5.3318   min 5.3019   max 5.3744   scatter 1.4%
+#     bootstrap 95% CI of the median: [5.3170, 5.3496]   +/- 0.31%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.003x
+#   ratio of the two medians, same launches
+#     point 5.3352   bootstrap 95% CI: [5.3206, 5.3539]
+#     the two intervals differ by 0.07% and 0.08% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       --- binCV per-stage, AT THE REAL DUTY CYCLE ---
+#     i2       --- CRITERION 4: speed against the byte-per-pixel denomina

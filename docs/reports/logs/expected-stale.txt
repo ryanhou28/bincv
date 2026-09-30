@@ -4,7 +4,6 @@
 # Adding a line here is a decision to publish a figure that is known
 # not to describe the current code, and belongs in review.
 #
-#
 # This baseline is the repository's state when the gate was introduced. It is not a
 # clean slate -- it is the backlog the gate exists to stop growing.
 #
@@ -38,43 +37,80 @@
 # binaries. The only function that differs anywhere is detectFast<uint32_t>, and
 # the two logs that measure IT were re-taken rather than listed here.
 #
-#
 # 5. The two CUDA sweeps went stale on a block-size sweep of three constants, and every figure QUOTED from them is still true. Checked per row rather than assumed: descriptor's kRefBlock and orientation's kRefBlock size only the FALLBACK arms, and the published rows take neither -- a 256-bit descriptor is 8 words against the ballot arm's 32-word cap, and ORB's radius 15 satisfies the warp arm's radius <= 15 -- while covariance's kRegionBlock has no published row at all and is a null below gridFor's 4096-block cap. The benchmarks' own off-switch controls DO reach the changed arms, which is why the gate fires and is right to; no published figure does. They leave this list at the next re-take on an unloaded host.
 #
-corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
-cuda_role-x86_64-cuda-launches.log	7c8055f	backends/cuda/src/covariance.cu,backends/cuda/src/descriptor.cu,backends/cuda/src/orientation.cu
-cuda_role_lk-x86_64-cuda-launches.log	06246c2	backends/cuda/src/covariance.cu,backends/cuda/src/descriptor.cu,backends/cuda/src/orientation.cu
-denoise-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-dense-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
-dense-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
-dense_opencv-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-dense_opencv-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-derivative-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-derivative-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
-feature-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/fast.hpp
-feature-tracking-aarch64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
-feature-tracking-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
-feature-tracking-x86_64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
-features-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/fast.hpp
-goodfeatures-aarch64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
-goodfeatures-x86_64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
-lk_headtohead-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
-lk_headtohead-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
-lk_memorybound-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp
-lk_memorybound-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp
-logic-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-logic-x86_64-launches-repeat.log	0b9b73c	include/bincv/impl/binMat_impl.hpp
-logic-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
-morphology-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-morphology-x86_64-launches-repeat.log	a152536	include/bincv/impl/binMat_impl.hpp
-morphology-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
-pyramid-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
-pyrfilter-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
-pyrfilter-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
-pyrfilter-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
-reduce-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-reduce-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
-spacing-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-wordtype_narrow-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-wordtype_narrow-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-wordwidth-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+# 6. The repository-cleanup pass (2026-09-28) touched code lines in headers
+# every benchmark includes: an #include added in core/view.hpp, core/parallel.hpp,
+# threads/pool.hpp and ops/edge.hpp; BINCV_ASSERTs added in ops/pack.hpp and
+# ops/denseDisparity.hpp (compiled out under NDEBUG); a dead store pair removed
+# from impl/binMat_impl.hpp; two unused functions removed from ops/pyramid.hpp;
+# __builtin_ctzll moved behind impl::ctzWord in ops/subpix.hpp; and a runtime
+# off-switch around stagedCovariance's NEON arm in ops/opticalFlow.hpp. Checked
+# rather than assumed on x86-64: every benchmark behind a newly stale log was
+# built at 7cf195d and at the edited tree, Release with the same flags, and
+# disassembled with addresses normalised out -- all nineteen are
+# INSTRUCTION-IDENTICAL, so the x86-64 figures are still true of this code. On
+# aarch64 the same lines compile the same way except the one NEON region that
+# changed, stagedCovariance: the device rows that run the tracker gained one
+# predictable branch per point per level, and rather than argue it they were
+# RE-TAKEN on the device at 4c4b3bf (lk_headtohead, feature-tracking,
+# lk_memorybound; ten launches each, clock sampled at 1.80 GHz throughout) --
+# every cell landed inside its previous interval, and those three logs are
+# fresh. The spot-check log of the pipeline keeps its earlier stamp. The CUDA
+# sweeps went stale on launcher-side refusals (argument checks before a launch;
+# no kernel changed) and on benchmark-source edits: the kernel-resident timings
+# are unaffected and the wall-clock rows gain a few host compares; a re-take on
+# an unloaded host is owed for those too.
+#
+# 7. Every log now carries a `# sources:` line (each measured file with a hash of
+# its comment-stripped content), backfilled from the commit it stamps while that
+# commit still existed locally, so the gate reads the same on every clone. That
+# made bitwidth_crossover-x86_64-launches.log mappable for the first time -- it
+# had named a launcher outside the repository -- and it is stale under the same
+# header edits as the rest of cause 6 plus the sweep script's own comment. Its
+# figures are the x86-64 column of limits.md's crossover table, which that page
+# says predates the benchmark's build change and stands until re-taken; on that
+# host the two pyramid benchmarks agreed before the change (32.20 against
+# 32.40 us). It leaves this list at the next x86-64 re-take.
+#
+bitwidth_crossover-x86_64-launches.log	80ff0a8	benchmark/crossover_sweep.sh,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp,include/bincv/ops/subpix.hpp
+cuda_role-x86_64-cuda-launches.log	7c8055f	backends/cuda/benchmark/cuda_bench_util.hpp,backends/cuda/benchmark/cuda_role_benchmark.cpp,backends/cuda/include/bincv/cuda/orientation.hpp,backends/cuda/src/census.cu,backends/cuda/src/corner.cu,backends/cuda/src/covariance.cu,backends/cuda/src/denseDisparity.cu,backends/cuda/src/descriptor.cu,backends/cuda/src/fast.cu,backends/cuda/src/opticalFlow.cu,backends/cuda/src/orientation.cu,backends/cuda/src/pack.cu,include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/denseDisparity.hpp,include/bincv/ops/edge.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pack.hpp,include/bincv/ops/pyramid.hpp
+cuda_role_lk-x86_64-cuda-launches.log	06246c2	backends/cuda/benchmark/cuda_bench_util.hpp,backends/cuda/benchmark/cuda_role_benchmark.cpp,backends/cuda/include/bincv/cuda/orientation.hpp,backends/cuda/src/census.cu,backends/cuda/src/corner.cu,backends/cuda/src/covariance.cu,backends/cuda/src/denseDisparity.cu,backends/cuda/src/descriptor.cu,backends/cuda/src/fast.cu,backends/cuda/src/opticalFlow.cu,backends/cuda/src/orientation.cu,backends/cuda/src/pack.cu,include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/denseDisparity.hpp,include/bincv/ops/edge.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pack.hpp,include/bincv/ops/pyramid.hpp
+cuda_sparse-x86_64-cuda-launches.log	a608102	backends/cuda/benchmark/cuda_bench_util.hpp,backends/cuda/benchmark/cuda_sparse_benchmark.cpp,include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pack.hpp
+denoise-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+denoise-x86_64-launches.log	aa8d4bb	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+dense-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/denseDisparity.hpp,include/bincv/ops/pack.hpp
+dense-x86_64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/denseDisparity.hpp,include/bincv/ops/pack.hpp
+dense_opencv-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/denseDisparity.hpp
+dense_opencv-x86_64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/denseDisparity.hpp
+derivative-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+derivative-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+fast_bitplane-aarch64-launches.log	550d45a	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+fast_bitplane-x86_64-launches.log	550d45a	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+feature-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/fast.hpp
+feature-tracking-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/edge.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp,include/bincv/threads/pool.hpp
+feature-tracking-x86_64-launches.log	880704b	include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/edge.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp,include/bincv/threads/pool.hpp
+features-x86_64-launches.log	05ab53c	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/fast.hpp
+goodfeatures-aarch64-launches.log	6d74d57	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+goodfeatures-x86_64-launches.log	6d74d57	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+lk_batch_off-x86_64-launches.log	5c6a47d	include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/edge.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp,include/bincv/threads/pool.hpp
+lk_batch_on-x86_64-launches.log	5c6a47d	include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/edge.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp,include/bincv/threads/pool.hpp
+lk_headtohead-x86_64-launches.log	05ab53c	include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
+lk_memorybound-x86_64-launches.log	80ff0a8	include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp
+logic-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+logic-x86_64-launches-repeat.log	0b9b73c	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+logic-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+morphology-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+morphology-x86_64-launches-repeat.log	a152536	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+morphology-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+pyramid-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+pyrfilter-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+pyrfilter-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+pyrfilter-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+reduce-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+reduce-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+spacing-x86_64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+wordtype_narrow-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/edge.hpp
+wordtype_narrow-x86_64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/edge.hpp
+wordwidth-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp

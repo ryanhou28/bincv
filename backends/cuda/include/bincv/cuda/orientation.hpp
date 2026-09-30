@@ -109,10 +109,17 @@ struct DiscPod {
     int radius;
 };
 
+/// @brief Whether `radius` is inside the domain every entry point below
+/// accepts. **INTERNAL.** `halfWidth` has 32 entries indexed by |dy|, so 31 is
+/// the largest radius the pod can hold; the entry points refuse anything else
+/// BEFORE building the pod, in every build, because a larger radius here is a
+/// stack write past the array and not an assertion.
+inline bool discRadiusOk(int radius) { return radius >= 1 && radius <= 31; }
+
 /// @brief The host's disc, as a POD. **INTERNAL.**
+/// @pre `discRadiusOk(radius)`.
 inline DiscPod makeDiscPod(int radius) {
-    BINCV_ASSERT(radius >= 1 && radius <= 31,
-                 "cuda keypointOrientation: radius out of [1, 31]");
+    BINCV_ASSERT(discRadiusOk(radius), "cuda keypointOrientation: radius out of [1, 31]");
     DiscPod d{};
     d.radius = radius;
     for (int dy = 0; dy <= radius; ++dy) {
@@ -159,7 +166,11 @@ inline bool quadArmApplies(DeviceImageConstView<SrcT> img, int radius) {
 } // namespace impl
 
 /// @brief Orientation of a whole keypoint set on a WIDE device image, from the
-/// intensity centroid over a disc of `radius`. **API TIER 3.**
+/// intensity centroid over a disc of `radius`. **API TIER 3.** The moments are
+/// bit-exact against the host `bincv::keypointOrientation` on the same image
+/// and keypoints, and the angle is `atan2f` of them where the host's is
+/// `std::atan2` -- a bounded ULP difference the suite measures rather than a
+/// bit-exactness claim; proven by test_cuda_orientation_descriptor.
 /// @param keypoints Device-resident `(x, y)` pairs -- the host family's own
 /// interleaved-float contract, so an upload is a raw copy.
 /// @param dAngles `keypoints.count` floats in device memory: radians in
@@ -170,7 +181,8 @@ inline bool quadArmApplies(DeviceImageConstView<SrcT> img, int radius) {
 /// not the disc, for the host's reason -- the descriptor that consumes this
 /// angle samples the square.
 /// @param radius Disc radius in pixels, in [1, 31]. 15 pairs with the 31-pixel
-/// descriptor patch.
+/// descriptor patch. Outside [1, 31] every overload returns
+/// `cudaErrorInvalidValue` without launching, in every build.
 /// @param dMoments Optional, `2 * count` `long long` in device memory: `m10`
 /// then `m01` per keypoint. These ARE bit-exact against the host where the
 /// angle cannot be; a caller needing a reproducible downstream decision
@@ -183,6 +195,8 @@ inline cudaError_t keypointOrientation(DeviceImageConstView<uint8_t> img,
                                        uint8_t* dKeep = nullptr, int radius = 15,
                                        long long* dMoments = nullptr,
                                        cudaStream_t stream = nullptr) {
+    BINCV_ASSERT(impl::discRadiusOk(radius), "cuda keypointOrientation: radius out of [1, 31]");
+    if (!impl::discRadiusOk(radius)) return cudaErrorInvalidValue;
     return impl::keypointOrientationImpl(img, keypoints, dAngles, dKeep, dMoments,
                                          impl::makeDiscPod(radius), stream);
 }
@@ -199,12 +213,17 @@ inline cudaError_t keypointOrientation(DeviceImageConstView<uint16_t> img,
                                        uint8_t* dKeep = nullptr, int radius = 15,
                                        long long* dMoments = nullptr,
                                        cudaStream_t stream = nullptr) {
+    BINCV_ASSERT(impl::discRadiusOk(radius), "cuda keypointOrientation: radius out of [1, 31]");
+    if (!impl::discRadiusOk(radius)) return cudaErrorInvalidValue;
     return impl::keypointOrientationImpl(img, keypoints, dAngles, dKeep, dMoments,
                                          impl::makeDiscPod(radius), stream);
 }
 
 /// @brief The same orientation on a BIT-PLANE block: `planes.planes` planes,
-/// plane `p` weighted by `2^p`. **API TIER 3.**
+/// plane `p` weighted by `2^p`. **API TIER 3.** Moments bit-exact against the
+/// host's bit-plane `keypointOrientation`, proven by
+/// test_cuda_orientation_descriptor; `planes.planes` outside [1, 32] and
+/// `radius` outside [1, 31] return `cudaErrorInvalidValue` without launching.
 /// @param planes The host's own `QuantMat` layout -- plane `p` at rows
 /// `[p * H, (p + 1) * H)` of one matrix -- so a `QuantMat<N>` uploads as one
 /// copy and a `BinMat` is `planes == 1`.
@@ -222,6 +241,9 @@ inline cudaError_t keypointOrientation(DevicePlaneBlockConstView planes,
                                        cudaStream_t stream = nullptr) {
     BINCV_ASSERT(planes.planes >= 1 && planes.planes <= 32,
                  "cuda keypointOrientation: planeCount out of [1, 32]");
+    BINCV_ASSERT(impl::discRadiusOk(radius), "cuda keypointOrientation: radius out of [1, 31]");
+    if (planes.planes < 1 || planes.planes > 32) return cudaErrorInvalidValue;
+    if (!impl::discRadiusOk(radius)) return cudaErrorInvalidValue;
     return impl::keypointOrientationImpl(planes, keypoints, dAngles, dKeep, dMoments,
                                          impl::makeDiscPod(radius), stream);
 }

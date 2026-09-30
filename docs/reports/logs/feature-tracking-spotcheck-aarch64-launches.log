@@ -6,6 +6,7 @@
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # commit:   80ff0a8
+# sources:  benchmark/feature_tracking_sequence.cpp=631a55d47d44 benchmark/reference_sensor.hpp=6f2907b2ddd7 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=ff0da83d8957 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=7dc4ba96228d include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=1a0eda51555e include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/edge.hpp=9acb1064ba95 include/bincv/ops/medianWide.hpp=2effc9c26555 include/bincv/ops/opticalFlow.hpp=6b8b1b862fc8 include/bincv/ops/pyramid.hpp=b24cd24378a5 include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/resample.hpp=d0db5aee157f include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6 include/bincv/threads/pool.hpp=8c105ffb045f
 # governor: performance
 # throttled before: throttled=0x80000
 # temp before: temp=56.9'C
@@ -312,3 +313,45 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
 # temp after: temp=61.8'C
 # date:     2026-09-21T17:15:21-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio i2:OpenCV :/i2:binCV :) ----
+# 5 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                  n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / ... derivatives                 5     0.1520     0.1500     0.1640  1.093     9.2%      --  [  0.1500,   0.1640]   4.61%   1.079x
+# i1 / ... edge                        5     0.3320     0.3310     0.3320  1.003     0.3%      --  [  0.3310,   0.3320]   0.15%   1.003x
+# i1 / ... median                      5     0.1740     0.1710     0.1750  1.023     2.3%      --  [  0.1710,   0.1750]   1.15%   1.018x
+# i1 / ... pyrDown                     5     0.1900     0.1900     0.1900  1.000     0.0%      --  [  0.1900,   0.1900]   0.00%   1.000x
+# i1 / ... sensor stage                5     0.5070     0.5040     0.5090  1.010     1.0%      --  [  0.5040,   0.5090]   0.49%   1.006x
+# i1 / build (pyrDown + derivatives)   5     0.8490     0.8480     0.8640  1.019     1.9%      --  [  0.8480,   0.8640]   0.94%   1.018x
+# i1 / detect                          5     0.4580     0.4580     0.4600  1.004     0.4%      --  [  0.4580,   0.4600]   0.22%   1.004x
+# i1 / track (LK)                      5     3.7910     3.7860     3.8010  1.004     0.4%      --  [  3.7860,   3.8010]   0.20%   1.003x
+# i2 / OpenCV :                        5    23.5720    23.5370    23.6540  1.005     0.5%      --  [ 23.5370,  23.6540]   0.25%   1.003x
+# i2 / binCV :                         5     5.1010     5.0930     5.1240  1.006     0.6%      --  [  5.0930,   5.1240]   0.30%   1.005x
+# 
+# RATIO  i2:OpenCV :  /  i2:binCV :   over 5 launches
+#   paired per launch (the published estimator)
+#     median 4.6160   min 4.6112   max 4.6371   scatter 0.6%
+#     bootstrap 95% CI of the median: [4.6112, 4.6371]   +/- 0.28%
+#     launches with the ratio above 1.00: 5 of 5
+#     smallest resolvable difference at 5 launches: 1.005x
+#   ratio of the two medians, same launches
+#     point 4.6211   bootstrap 95% CI: [4.6112, 4.6371]
+#     the two intervals differ by 0.00% and 0.00% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       --- binCV per-stage, AT THE REAL DUTY CYCLE ---
+#     i2       --- CRITERION 4: speed against the byte-per-pixel denomina

@@ -1,4 +1,5 @@
-// The sparse rectified stereo matcher, priced at birth (CLAUDE.md's rule).
+// The sparse rectified stereo matcher, priced at birth: an operation gets its
+// benchmark arm when it is written.
 //
 // Core-only: no OpenCV denominator exists -- cv::StereoBM is dense and prices a
 // different operation entirely -- so these arms compare binCV's stages against

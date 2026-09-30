@@ -14,7 +14,7 @@
 #
 # WHY A SECOND SCRIPT RATHER THAN A FLAG ON run_launches.sh. The same reason
 # the backend forks its kernels: what is SHARED here is the log's header --
-# `# benchmark:` and `# commit:` are the contract scripts/check_figure_staleness.py
+# `# benchmark:`, `# commit:` and `# sources:` are the contract scripts/check_figure_staleness.py
 # reads, and a second spelling of them would put a whole sweep outside the gate
 # without saying so. What is FORKED is the protocol, because almost none of the
 # host runner's applies. Its long argument is about what a LAUNCH pays once:
@@ -39,7 +39,8 @@
 #   driver       the driver schedules every launch, and on WSL2 the launch cost
 #                IS the figure for the several ops that sit on the launch floor.
 #                Its CUDA version is recorded beside it because it need not be
-#                the toolkit's -- here it is 12.6 over an 11.1 nvcc.
+#                the toolkit's: a driver is routinely newer than the nvcc that
+#                built the kernels.
 #   nvcc         which compiler produced the SASS, read from the build tree
 #                that produced the binary rather than from PATH, because those
 #                are routinely different on a machine with two toolkits.
@@ -49,8 +50,8 @@
 #   opencv       which OpenCV supplies the role comparison's denominators. Half
 #                of every ratio in the report's speed table comes from it.
 #   gpu clock    before and after, with the throttle reasons and temperature --
-#                the device analogue of the host runner's governor and the Pi's
-#                vcgencmd readings. The clock is NOT lockable on every host
+#                the device analogue of the host runner's governor and clock
+#                readings. The clock is NOT lockable on every host
 #                (WSL2 exposes no application clocks at all), so the header says
 #                which case this was rather than implying a locked clock.
 #   profiler     that no profiler was attached. ncu serialises kernels and
@@ -64,8 +65,8 @@
 #
 # THE OUTPUT IS ONE FILE, with `### run N` between launches, which is the shape
 # scripts/aggregate_launches.py established and scripts/aggregate_cuda_runs.py
-# now reads: one committed artifact per sweep, and the per-process structure
-# the project's rule needs kept inside it.
+# now reads: one committed artifact per sweep, with the per-process structure
+# the medians are taken over kept inside it.
 #
 # USAGE
 #     scripts/run_cuda_launches.sh -n 7 <benchmark> [benchmark args...]
@@ -221,8 +222,9 @@ esac
 
 # ---------------------------------------------------------------- the build
 # What compiled the kernels, read from the tree that produced the binary. The
-# nvcc on PATH is routinely not the one CMake used: this backend builds only
-# under cuda-11.1 while the driver exposes 12.6.
+# nvcc on PATH is routinely not the one CMake used on a machine with more than
+# one toolkit installed, and the driver's CUDA version is routinely newer than
+# either.
 if [ -z "$BUILD_DIR" ]; then
     d="$(cd "$(dirname "$BENCH")" && pwd)"
     while [ "$d" != / ]; do
@@ -273,6 +275,9 @@ host_model() {
     echo "# kernel:   $(uname -r)"
     echo "# compiler: $(g++ --version 2>/dev/null | head -1)"
     echo "# commit:   $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)$(git -C "$REPO_ROOT" diff --quiet 2>/dev/null || echo ' (dirty)')"
+    # The measured code, as content hashes -- what the staleness gate reads; the
+    # commit above is a note for a person (see run_launches.sh).
+    echo "# sources:  $(python3 "${SCRIPT_DIR}/check_figure_staleness.py" --stamp "$BENCH" 2>/dev/null || echo "(unmappable -- the gate could not resolve ${BENCH}; see check_figure_staleness.py --explain)")"
     echo "# device:   $(nvq name) (compute $(nvq compute_cap), $(nvq memory.total))"
     echo "# driver:   $(nvq driver_version), exposing CUDA $(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9.]*\).*/\1/p' | head -1)"
     echo "# nvcc:     ${NVCC}"

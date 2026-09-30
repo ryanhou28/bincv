@@ -24,11 +24,11 @@
 ///   * SLIDING (the default): a per-disparity accumulator ring -- each row
 ///     advance costs one bit-sliced add and one subtract per disparity instead
 ///     of re-evaluating the window's rows. Scratch grows LINEAR in D at ~0.8 KB
-///     per disparity (u64): ~92 KB total at the reference configuration --
-///     still an order of magnitude under StereoBM's output alone.
-///   * RECOMPUTE: v1's shape, scratch INDEPENDENT of D (~47 KB), for the target
-///     where that property outranks ~4x of the band work. The equality of the
-///     two arms' output maps is a test, not a hope.
+///     per disparity (uint64): ~92 KB total at the reference configuration
+///     (752x480, 64 disparities, 9x9).
+///   * RECOMPUTE: scratch INDEPENDENT of D (~47 KB), for the target where that
+///     property outranks ~4x of the band work. The equality of the two arms'
+///     output maps is a test, not a hope.
 ///
 /// ---------------------------------------------------------------------------
 /// WHAT IS BIT-SLICED AND WHAT IS NOT
@@ -45,12 +45,12 @@
 /// WORD TYPE, measured rather than defaulted: this kernel is pure word
 /// arithmetic with no narrow-guarded vector paths, and its scratch is a band,
 /// not a frame -- so the library's uint32 default (argued from row-stride waste)
-/// buys nothing here, and **uint64 measured 1.63x faster on the reference
-/// device**. The binary path's vector arms (NEON, AVX2) exist at uint64 only,
+/// buys nothing here, and **uint64 measured 1.63× faster on the reference
+/// device (a Raspberry Pi 4, aarch64)**. The binary path's vector arms (NEON, AVX2) exist at uint64 only,
 /// for the same reason it is the recommended type there. **The guidance is for
 /// 64-bit cores and INVERTS at 32-bit pointer width**: on a Cortex-M7, where
 /// every uint64 operation is synthesized from register pairs, uint64 measured
-/// 1.30x SLOWER than uint32 on this kernel (targets/stm32h753). Callers on
+/// 1.30× SLOWER than uint32 on this kernel (an STM32H753, targets/stm32h753). Callers on
 /// 64-bit cores should instantiate at uint64, and at the native word size
 /// elsewhere, unless they have measured a reason otherwise.
 ///
@@ -102,7 +102,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// @brief The disparity byte written where no candidate could be evaluated.
 inline constexpr uint8_t kDenseDisparityInvalid = 255;
 
-/// @brief Search and aggregation parameters for `denseDisparity`.
+/// @brief Search and aggregation parameters for `denseDisparity`. **API TIER 3.**
 struct DenseDisparityParams {
     /// @brief Disparity range, `0 <= min <= max <= 254` (255 is the invalid
     /// marker). The range encodes "how close can a surface be".
@@ -115,8 +115,8 @@ struct DenseDisparityParams {
     int winHeight = 9;
 
     /// @brief Take the RECOMPUTE arm: re-evaluate the vertical window per row
-    /// per disparity, keeping scratch INDEPENDENT of the disparity range
-    /// (v1's shape). Off by default -- the sliding accumulator is ~4x the
+    /// per disparity, keeping scratch INDEPENDENT of the disparity range.
+    /// Off by default -- the sliding accumulator is ~4x the
     /// band work back for ~0.8 KB of scratch per disparity -- and switchable
     /// so the benchmark can time both and the tests can hold them to
     /// IDENTICAL output maps.
@@ -147,9 +147,8 @@ namespace impl {
 #ifdef BINCV_DENSE_STAGE_TIMING
 /// @brief Where `denseDisparityBinary`'s time goes, by stage. **DIAGNOSTIC ONLY —
 /// off by default and compiled out otherwise.** Exists so a vector pass lands on
-/// the stage that owns the time instead of the one that looks expensive; the LK
-/// stage profile earned its keep the same way after three guessed optimizations
-/// in a row measured under 2%. Nanoseconds, accumulated; the clock reads sit in
+/// the stage that owns the time instead of the one that looks expensive.
+/// Nanoseconds, accumulated; the clock reads sit in
 /// the per-disparity loop, a few percent of overhead that is compared only
 /// against itself.
 struct DenseStageTiming {
@@ -634,7 +633,8 @@ inline void accSlideRowNeon(uint64_t* acc, size_t accPlanes, size_t rowWords,
 // The arm choice is read in loops that run ~150K times per frame, so both
 // halves are namespace-scope inline variables -- plain loads -- rather than
 // function-local statics, whose thread-safe init guard costs a fenced check
-// per call and measured 2% of the whole kernel on the reference device.
+// per call and measured 2% of the whole kernel on the reference device (a
+// Raspberry Pi 4).
 #if defined(BINCV_DENSE_AVX2)
 inline const bool kDenseSimdAvailable = __builtin_cpu_supports("avx2") != 0;
 #else
@@ -645,7 +645,7 @@ inline bool gDenseSimdOn = true;
 /// @brief Force the portable path, for the benchmark and the tests. **INTERNAL.**
 /// @note Not a tuning knob: it is how a vector arm is held to bit-exactness in
 /// ONE binary and how a benchmark shows the arm it timed -- the same contract
-/// packQuantSimdEnabled carries, for the same historical reason. It gates the
+/// packQuantSimdEnabled carries, for the same reason. It gates the
 /// NEON arm as well as the AVX2 one, so the check-count of the arm-equality
 /// test is the same on both architectures.
 inline bool& denseSimdEnabled() {
@@ -676,8 +676,8 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
     }
 #endif
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-    // The tree owned two thirds of the binary path's time on the reference
-    // device before this arm existed, so it is the one that pays for lanes.
+    // The tree owns two thirds of the binary path's scalar time on the
+    // reference device, so it is the one that pays for lanes.
     // Word-pair outer, planes inner, the carry in a REGISTER: the plane loop's
     // serial carry chain that forced the scalar body plane-outer is two lanes
     // wide here and never touches memory. In-place doubling (`dst == src`) is
@@ -872,9 +872,9 @@ inline WordType laneRangeMask(size_t i, long long lo, long long hi) {
 
 /// @brief Dense disparity over a rectified pair: census cost, box aggregation,
 /// winner-take-all, one byte per pixel. **API TIER 3.**
-/// @param left / right The rectified pair, row-major, strides in ELEMENTS.
+/// @param left,right The rectified pair, row-major, strides in ELEMENTS.
 /// @param pattern The census neighbourhood both images are transformed with.
-/// @param scratchWords / scratchRows Caller-owned, sized by the two functions
+/// @param scratchWords,scratchRows Caller-owned, sized by the two functions
 /// above; contents are unspecified on return.
 /// @param disparity `height * dispStride` bytes, every pixel written: a
 /// disparity in `[minDisparity, maxDisparity]` or `kDenseDisparityInvalid`.
@@ -899,6 +899,10 @@ inline void denseDisparity(const SrcT* left, const SrcT* right, size_t width,
     BINCV_ASSERT(params.winWidth >= 3 && params.winHeight >= 3 &&
                      (params.winWidth & 1) == 1 && (params.winHeight & 1) == 1,
                  "denseDisparity: the window must be odd and at least 3 on a side");
+    // The aggregated cost of a window is at most K per pixel, and it is held in a
+    // uint16_t whose all-ones value is the "no candidate" sentinel.
+    BINCV_ASSERT(K * static_cast<size_t>(params.winWidth) * static_cast<size_t>(params.winHeight) <= 65535,
+                 "denseDisparity: K * winWidth * winHeight must fit a uint16_t");
     BINCV_ASSERT(params.minDisparity >= 0 && params.maxDisparity >= params.minDisparity &&
                      params.maxDisparity <= 254,
                  "denseDisparity: need 0 <= min <= max <= 254 (255 marks invalid)");
@@ -958,10 +962,10 @@ inline void denseDisparity(const SrcT* left, const SrcT* right, size_t width,
     // The raw census cost of word `i` of band row `wr` at disparity `d`:
     // K XORs against the shifted right census, folded lane-wise. Deliberately
     // PER WORD, computed in registers: a row-staged spelling (shift and XOR
-    // whole rows into scratch, then gather columns for the fold) measured 12%
+    // whole rows into scratch, then gather columns for the fold) measured 1.12×
     // SLOWER on the reference device -- the strided column gather across K
     // staged rows costs more cache traffic than the autovectorizer's straight
-    // loops give back. Recorded so it is not retried on the same shape.
+    // loops give back.
     const auto rawCostWord = [&](size_t wr, int d, size_t i, WordType* cost) {
         WordType xr[K];
         for (size_t k = 0; k < K; ++k) {
@@ -1160,11 +1164,16 @@ inline size_t denseDisparityBinaryScratchWords(size_t width,
 /// and bit-exact against the scalar arm, which every test pins to the same
 /// output maps on both architectures.
 ///
+/// @param scratchWords,scratchWordCount Caller-owned, sized by
+/// `denseDisparityBinaryScratchWords`; contents are unspecified on return.
+/// @param scratchRows,scratchRowCount Accepted for symmetry with `denseDisparity`'s
+/// signature and UNUSED: the bit-sliced winner-take-all needs no integer
+/// rows. The buffer must still be non-null and at least
+/// `denseDisparityScratchRows(width)` entries, which the assert requires.
 /// @note A window with no texture (all-equal bits against all-equal bits) has
 /// an ambiguous cost everywhere and resolves to the smallest disparity by
-/// the tie rule. A texture-validity gate is a caller-side filter today --
-/// `countAnd`/windowed counts price one cheaply -- and a recorded
-/// follow-up, not a silent promise.
+/// the tie rule. There is no texture-validity gate; a caller that needs one
+/// filters on a windowed count (ops/reduce.hpp) beside the disparity map.
 template <typename WordType>
 inline void denseDisparityBinary(BinMatConstView<WordType> left,
                                  BinMatConstView<WordType> right,
@@ -1215,7 +1224,9 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
     WordType* wtaBestC = wtaBlock + hPlanes * rowWords;
     WordType* wtaBestD = wtaBestC + hPlanes * rowWords;
     WordType* wtaMask = wtaBestD + 8 * rowWords;
-    static_cast<void>(scratchRows);   // the bit-sliced stage needs no integer rows
+    static_cast<void>(scratchRows);   // accepted for symmetry with the census
+                                      // entry point; the bit-sliced stage needs
+                                      // no integer rows
 
     const auto invalidRow = [&](size_t y) {
         uint8_t* out = disparity + y * dispStride;

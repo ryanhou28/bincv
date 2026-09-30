@@ -1,4 +1,4 @@
-// -- WHERE DOES BIT-SLICING STOP PAYING?
+// WHERE DOES BIT-SLICING STOP PAYING?
 //
 // The two endpoints of pyrDown were measured against cv::pyrDown: 5.52x FASTER at
 // 1 -> 3 bits, 13.7x SLOWER at 8 -> 8. The crossover between them has never been
@@ -6,7 +6,7 @@
 // "low bit width" means <= 3, <= 5 or <= 7, and where an 8-bit specialization would
 // have to start to be worth building.
 //
-// Denominator (CLAUDE.md): cv::pyrDown on CV_8U, one thread, same content, same
+// Denominator: cv::pyrDown on CV_8U, one thread, same content, same
 // geometry. It is FLAT across the sweep on purpose -- OpenCV has no cheaper mode
 // for a caller who only needs three bits, and that is exactly the asymmetry binCV
 // exists to exploit.
@@ -45,6 +45,17 @@ constexpr auto G = PyrDownFilter::Gaussian5x5;
 constexpr auto B = PyrDownFilter::Box2x2;
 } // namespace
 
+// Each arm is timed in its own process, but all fifteen arms are COMPILED in this one
+// translation unit, and GCC's inlining budget is per unit: with fifteen heavy
+// instantiations it runs out, the pyramid's row helpers stay out of line, and the
+// cheap arms pay a call per row. Measured on the reference device (Cortex-A72,
+// g++ 14.2, -O3): the `box 1 -> 3` arm read 275.8 us from this file against 116.1 us
+// for the identical call in pyrfilter_benchmark.cpp, whose unit instantiates fewer
+// arms; the compute-bound `8 -> 8` arms did not move. benchmark/CMakeLists.txt raises
+// GCC's unit-growth caps for this target, after which the same binary reads 116.1 us
+// on that arm and matches pyrfilter_benchmark on every arm the two share. (A `flatten`
+// attribute fixes the cheap arms too but over-inlines the heavy ones: `box 8 -> 8`
+// read 2674 us flattened against 2574 with the caps raised.)
 template <PyrDownFilter F, size_t NIn, size_t NOut>
 void runArm(int arm, const char* name) {
     // Allocated INSIDE the measurement, so nothing else is resident and nothing

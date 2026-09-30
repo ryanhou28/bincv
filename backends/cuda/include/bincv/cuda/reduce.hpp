@@ -21,8 +21,10 @@
 ///
 /// A kernel launch is ~5-10 us. A 31x31 window covariance is ~60 word triples
 /// -- nanoseconds of work. **One launch per window is latency, not compute**,
-/// so the entry point a tracker uses takes the WHOLE keypoint set and issues
-/// one launch: `countCovarianceBatchAsync`, one block per window. The
+/// so the entry point a keypoint-shaped caller uses takes the WHOLE window set
+/// and issues one launch: `countCovarianceBatchAsync`, one block per window.
+/// (The device LK tracker is not that caller: it holds each window in lane
+/// registers and forms its 2x2 in place, as opticalFlow.hpp explains.) The
 /// single-region forms remain for a caller with one region, and use a
 /// grid-stride traversal instead because their region may be a whole frame.
 ///
@@ -77,6 +79,7 @@ struct DeviceCovarianceCount {
 
 /// @brief The host spelling of a device count, so `crossTerm()` is reached
 /// through `SplitCount`'s one implementation of the signed subtraction.
+/// **API TIER 3** (host-side helper, no kernel), as is the covariance one.
 inline SplitCount toHost(const DeviceSplitCount& d) {
     SplitCount out;
     out.whenClear = static_cast<size_t>(d.whenClear);
@@ -98,7 +101,9 @@ inline CovarianceCount toHost(const DeviceCovarianceCount& d) {
 // ---------------------------------------------------------------------------
 
 /// @brief Sets *dResult (device memory) to the number of set pixels in `src`.
-/// Device twin of the host Tier 1 countNonZero, equal to it by test.
+/// **API TIER 1** -- equal to `cv::countNonZero` through the host's Tier 1
+/// `bincv::countNonZero`, which this is bit-exact against by
+/// test_cuda_backend.
 cudaError_t countNonZeroAsync(DeviceBinMatConstView src, unsigned long long* dResult,
                               cudaStream_t stream = nullptr);
 
@@ -117,9 +122,10 @@ size_t countNonZero(DeviceBinMatConstView src, Rect region);
 // countAnd -- the masked count, no intermediate image
 // ---------------------------------------------------------------------------
 
-/// @brief Sets *dResult to `popcount(a & b)` over `region`. Device twin of the
-/// host countAnd; the AND happens a word at a time inside the reduction, so
-/// no scratch image exists here either.
+/// @brief Sets *dResult to `popcount(a & b)` over `region`. **API TIER 3** --
+/// a masked reduction OpenCV has no equivalent of. Bit-exact against the host
+/// `bincv::countAnd`, proven by test_cuda_backend; the AND happens a word at
+/// a time inside the reduction, so no scratch image exists here either.
 cudaError_t countAndAsync(DeviceBinMatConstView a, DeviceBinMatConstView b, Rect region,
                           unsigned long long* dResult, cudaStream_t stream = nullptr);
 
@@ -131,7 +137,9 @@ size_t countAnd(DeviceBinMatConstView a, DeviceBinMatConstView b, Rect region);
 // ---------------------------------------------------------------------------
 
 /// @brief Sets *dResult to `{whenClear, whenSet}` -- the pixels of `a & b`
-/// split by selector plane `c` -- over `region`, in one pass.
+/// split by selector plane `c` -- over `region`, in one pass. **API TIER 3.**
+/// Bit-exact against the host `bincv::countAndSplit`, proven by
+/// test_cuda_backend.
 /// @note Two popcounts per word, never forming `~c`: `whenClear` is
 /// `popcount(a&b&mask) - popcount(a&b&mask&c)`, the host's arithmetic, which
 /// is also what keeps a trailing word's padding bits from counting.
@@ -142,8 +150,7 @@ cudaError_t countAndSplitAsync(DeviceBinMatConstView a, DeviceBinMatConstView b,
 /// @brief The no-selector-plane form: the selector is `c0 ^ c1`, XORed a word
 /// at a time inside the loop. **This is the form the covariance calls** --
 /// with `c0 = sign_x`, `c1 = sign_y` -- and it needs no fifth frame-sized
-/// plane, which is the trade CLAUDE.md's memory tiebreak already settled on
-/// the host.
+/// plane -- memory wins an unforced conflict, the trade the host already made.
 cudaError_t countAndSplitAsync(DeviceBinMatConstView a, DeviceBinMatConstView b,
                                DeviceBinMatConstView c0, DeviceBinMatConstView c1,
                                Rect region, DeviceSplitCount* dResult,
@@ -160,7 +167,8 @@ SplitCount countAndSplit(DeviceBinMatConstView a, DeviceBinMatConstView b,
 // ---------------------------------------------------------------------------
 
 /// @brief Sets *dResult to `{xx, yy, xy.whenClear, xy.whenSet}` over `region`,
-/// from ONE traversal. Device twin of the host countCovariance.
+/// from ONE traversal. **API TIER 3.** Bit-exact against the host
+/// `bincv::countCovariance`, proven by test_cuda_backend.
 cudaError_t countCovarianceAsync(DeviceBinMatConstView a, DeviceBinMatConstView b,
                                  DeviceBinMatConstView c, Rect region,
                                  DeviceCovarianceCount* dResult,
@@ -184,7 +192,9 @@ CovarianceCount countCovariance(DeviceBinMatConstView a, DeviceBinMatConstView b
 // ---------------------------------------------------------------------------
 
 /// @brief One covariance per region, all in a single launch: one block per
-/// window. **THE ENTRY POINT A TRACKER USES.**
+/// window. **THE ENTRY POINT FOR A KEYPOINT-SHAPED CALLER. API TIER 3.**
+/// Bit-exact against the host `bincv::countCovariance` per region, proven by
+/// test_cuda_backend.
 /// @param dRegions `count` Rects in DEVICE memory, each clipped exactly as the
 /// single-region form clips (negative origins legal, empty ones yield zeros).
 /// @param dResults `count` results in DEVICE memory, written in region order.

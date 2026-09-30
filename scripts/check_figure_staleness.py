@@ -10,17 +10,32 @@ publishing a LOSS the library did not have, for three weeks.  `features.md` even
 carried a note saying the rows predated the optimization.  The note was not
 enough, and nothing mechanical could see the problem.
 
-WHAT IT CHECKS.  `scripts/run_launches.sh` already stamps every log it writes with
-the commit it was taken at.  So for each committed log this asks one question:
+WHAT IT CHECKS.  `scripts/run_launches.sh` writes into every log a `# sources:`
+line: each first-party file the benchmark measured, with a hash of that file's
+comment-stripped content as it was at the moment of the run.  So for each
+committed log this asks one question:
 
     does the code this benchmark MEASURES still say what it said then?
 
 The mapping from a log to that code is the part the issue called hard, and it is
 the C preprocessor's own: a log names its benchmark binary, the binary has a
 source file, and that source `#include`s a transitive set of first-party headers.
-Every file in that set is then COMPARED, at the log's commit against the working
-tree.  If any of them differs, every figure quoted from that log is a figure
-about code that no longer exists.
+Every file in that set is then COMPARED, its recorded hash against the working
+tree.  If any of them differs, or the benchmark has since gained a dependency the
+log never saw, every figure quoted from that log is a figure about code that no
+longer exists.
+
+WHY THE LOG CARRIES THE HASHES ITSELF.  The first version of this gate stamped
+only the commit and fetched "then" out of git.  This repository squash-merges, so
+the commit a log names is never on `main`; it survives as a loose object on the
+machine that took the sweep and nowhere else.  On any other clone -- the CI
+runner included -- every log was silently "unmappable", and the gate passed by
+having nothing to check.  A log that records the hashes of what it measured needs
+no history at all, so it reads the same on every clone, survives squashes,
+rebases and rewrites, and can even describe a run taken from a modified tree.
+The commit line is kept as a human-readable note.  Logs that predate the
+`# sources:` line were given one by `--backfill`, computed from the commit they
+stamp while that commit still existed locally.
 
 THE PREPROCESSOR IS NOT ENOUGH FOR A CUDA LOG, AND THAT IS THE WHOLE DIFFICULTY.
 A `.cu` is no different in kind from a `.cpp` -- same comment syntax, same quoted
@@ -97,6 +112,8 @@ while the machine is still warm rather than let a reviewer find it.
 
 Usage: python3 scripts/check_figure_staleness.py [--update-baseline] [-v]
        python3 scripts/check_figure_staleness.py --explain <log>
+       python3 scripts/check_figure_staleness.py --stamp <benchmark>      # for the runners
+       python3 scripts/check_figure_staleness.py --backfill [<log> ...] [--as <benchmark>]
 """
 
 import argparse
@@ -297,6 +314,37 @@ def benchmark_source(binary):
     return None
 
 
+WRAPPED_RE = re.compile(r'benchmark/(\w+)\b')
+
+
+def wrapper_sources(script):
+    """A sweep script and the benchmark sources it launches, or (None, []).
+
+    The one-arm-per-process sweeps (benchmark/crossover_sweep.sh,
+    benchmark/interop_sweep.sh) are what run_launches.sh is handed, so the log
+    names the script. The script is not the code that was measured; the binaries
+    it invokes as `./benchmark/<name>` are, and their sources are what this maps
+    the log to -- plus the script itself, since a change to which arms it runs
+    changes the figure too.
+    """
+    stem = os.path.basename(script)
+    for d in SOURCE_DIRS:
+        cand = os.path.join(ROOT, d, stem)
+        if not os.path.isfile(cand):
+            continue
+        try:
+            text = open(cand, encoding='utf-8', errors='replace').read()
+        except OSError:
+            return (None, [])
+        srcs = []
+        for name in sorted(set(WRAPPED_RE.findall(text))):
+            s = benchmark_source(name)
+            if s is not None and s not in srcs:
+                srcs.append(s)
+        return (cand, srcs) if srcs else (None, [])
+    return (None, [])
+
+
 def linked_sources(binary, cache={}):
     """The OTHER translation units the build links into `binary`, absolute paths.
 
@@ -324,11 +372,143 @@ def linked_sources(binary, cache={}):
     return cache.get(os.path.basename(binary), [])
 
 
+def code_hash(text):
+    """The fingerprint a `# sources:` line records: comment-stripped content, hashed.
+
+    Comment-stripped, so a comment edit under a figure does not age it -- the
+    same rule `code_differs` applies -- and twelve hex digits, which is plenty to
+    tell one revision of one file from another and keeps the line short.
+    """
+    import hashlib
+    return hashlib.sha1(strip_comments(text).encode('utf-8', 'replace')).hexdigest()[:12]
+
+
+def _text(rel, rev=None):
+    """`rel` as of `rev`, or of the working tree when `rev` is None; None if absent."""
+    if rev is not None:
+        return blob_at(rev, rel)
+    p = os.path.join(ROOT, rel)
+    if not os.path.isfile(p):
+        return None
+    try:
+        return open(p, encoding='utf-8', errors='replace').read()
+    except OSError:
+        return None
+
+
+def deps_for(binary, rev=None):
+    """Every first-party file behind `binary`, repo-relative and sorted, or None.
+
+    The same closure classify() has always taken -- the benchmark's own source
+    (or, for a sweep script, the script and the binaries it launches), the other
+    units its add_executable names, and the transitive first-party includes with
+    the backend's one link step -- but resolved against `rev` when one is given,
+    which is what lets a log that predates the `# sources:` line be given one
+    from the commit it stamps.
+    """
+    stem = os.path.basename(binary)
+    roots = []
+    for d in SOURCE_DIRS:
+        for ext in SOURCE_EXTS:
+            cand = os.path.join(d, stem + ext)
+            if _text(cand, rev) is not None:
+                roots.append(cand)
+                break
+        if roots:
+            break
+    if not roots and binary.endswith('.sh'):
+        for d in SOURCE_DIRS:
+            cand = os.path.join(d, stem)
+            script = _text(cand, rev)
+            if script is None:
+                continue
+            for name in sorted(set(WRAPPED_RE.findall(script))):
+                for d2 in SOURCE_DIRS:
+                    for ext in SOURCE_EXTS:
+                        c2 = os.path.join(d2, name + ext)
+                        if _text(c2, rev) is not None:
+                            roots.append(c2)
+                            break
+                    else:
+                        continue
+                    break
+            if roots:
+                roots.append(cand)
+            break
+    if not roots:
+        return None
+    # the other translation units the build links into this binary
+    for rel in LINK_LISTS:
+        text = _text(rel, rev)
+        if text is None:
+            continue
+        here = os.path.dirname(rel)
+        for body in TARGET_RE.findall(text):
+            words = body.split()
+            if words and words[0] == stem:
+                for w in words[1:]:
+                    c = os.path.normpath(os.path.join(here, w))
+                    if w.endswith(SOURCE_EXTS) and _text(c, rev) is not None and c not in roots:
+                        roots.append(c)
+    seen = set()
+
+    def walk(rel):
+        if rel in seen:
+            return
+        text = _text(rel, rev)
+        if text is None:
+            return
+        seen.add(rel)
+        if os.path.dirname(rel) == CUDA_HEADER_DIR:
+            impl = os.path.join(CUDA_SRC_DIR, os.path.splitext(os.path.basename(rel))[0] + '.cu')
+            walk(impl)
+        for inc in INCLUDE_RE.findall(text):
+            for base in [os.path.dirname(rel)] + list(INCLUDE_DIRS):
+                cand = os.path.normpath(os.path.join(base, inc))
+                if not cand.startswith('..') and _text(cand, rev) is not None:
+                    walk(cand)
+                    break
+    for r in roots:
+        walk(r)
+    return sorted(seen)
+
+
+def sources_line(binary, rev=None):
+    """The `path=hash ...` text of a `# sources:` line for `binary`, or None."""
+    deps = deps_for(binary, rev)
+    if deps is None:
+        return None
+    return ' '.join('%s=%s' % (d, code_hash(_text(d, rev))) for d in deps)
+
+
+def parse_sources(field):
+    """A `# sources:` field as {path: hash}; empty when absent or not a record."""
+    out = {}
+    for tok in (field or '').split():
+        if '=' in tok and not tok.startswith('('):
+            path, h = tok.rsplit('=', 1)
+            out[path] = h
+    return out
+
+
+def judge_sources(recorded, current_deps, hash_of):
+    """The files that moved under a self-describing log.
+
+    A recorded file moved if its hash now differs (or it is gone); a file the
+    benchmark depends on today but the log never recorded is code that moved too,
+    because the figure was taken without it. Pure, so the self-check can pin it.
+    """
+    moved = [p for p in sorted(recorded) if hash_of(p) != recorded[p]]
+    if current_deps is not None:
+        moved += [d for d in current_deps if d not in recorded]
+    return sorted(set(moved))
+
+
 def read_header(path):
     """The `# key: value` preamble a launch runner writes, as a dict.
 
-    `benchmark` and `commit` are the two fields this gate needs, which makes them
-    the contract run_launches.sh and run_cuda_launches.sh both have to keep.
+    `benchmark`, `commit` and `sources` are the fields this gate needs, which makes
+    them the contract run_launches.sh and run_cuda_launches.sh both have to keep.
     """
     fields = {}
     try:
@@ -392,6 +572,27 @@ def self_check():
         print('SELF-CHECK FAILED: a // inside a string literal was treated as a comment',
               file=sys.stderr)
         return False
+    # The rule a self-describing log is judged by, on synthetic inputs: a changed
+    # hash, a vanished file and a dependency the log never saw each age it, and
+    # nothing else does.
+    rec = {'a.hpp': 'h1', 'b.hpp': 'h2'}
+    now = {'a.hpp': 'h1', 'b.hpp': 'h2'}
+    cases = [
+        ('unchanged', dict(now), ['a.hpp', 'b.hpp'], []),
+        ('one file changed', dict(now, **{'a.hpp': 'h9'}), ['a.hpp', 'b.hpp'], ['a.hpp']),
+        ('one file gone', {'a.hpp': 'h1'}, ['a.hpp'], ['b.hpp']),
+        ('a new dependency', dict(now), ['a.hpp', 'b.hpp', 'c.hpp'], ['c.hpp']),
+        ('no benchmark line', dict(now), None, []),
+    ]
+    for label, cur, deps, want in cases:
+        got = judge_sources(rec, deps, lambda p: cur.get(p))
+        if got != want:
+            print('SELF-CHECK FAILED: %s -- expected %s, got %s' % (label, want, got),
+                  file=sys.stderr)
+            return False
+    if code_hash('int f();\n// note\n') != code_hash('int f();\n'):
+        print('SELF-CHECK FAILED: a comment changed a source hash', file=sys.stderr)
+        return False
     return cuda_kernels_are_reachable()
 
 
@@ -454,6 +655,19 @@ def classify(path):
     head = read_header(path)
 
     commit = head.get('commit', '')
+    recorded = parse_sources(head.get('sources', ''))
+    if recorded:
+        binary = head.get('benchmark', '').split()[0] if head.get('benchmark') else ''
+        current = deps_for(binary) if binary else None
+        stamp = commit.split()[0] if commit else '(no commit)'
+
+        def hash_of(rel):
+            text = _text(rel)
+            return None if text is None else code_hash(text)
+        moved = judge_sources(recorded, current, hash_of)
+        deps = sorted(set(recorded) | set(current or []))
+        return (('stale' if moved else 'fresh'), stamp, deps, moved)
+
     if not commit:
         return ('unmappable', 'no commit stamp -- predates run_launches.sh recording one')
     if '(dirty)' in commit:
@@ -467,11 +681,14 @@ def classify(path):
     if not binary:
         return ('unmappable', 'no benchmark line -- cannot tell what it measured')
     source = benchmark_source(binary)
+    wrapped = []
+    if source is None and binary.endswith('.sh'):
+        source, wrapped = wrapper_sources(binary)
     if source is None:
         return ('unmappable', 'no source found for %s' % os.path.basename(binary))
 
     deps = set()
-    for root in [source] + linked_sources(binary):
+    for root in [source] + wrapped + linked_sources(binary):
         first_party_deps(root, deps)
     deps = sorted(deps)
     moved = [d for d in deps if code_differs(commit, d)]
@@ -500,8 +717,64 @@ def explain(path):
     return 1 if moved else 0
 
 
+def backfill(logs, as_binary=''):
+    """Give logs that predate the `# sources:` line one, from the commit they stamp.
+
+    Only while that commit still exists locally -- which is the whole reason to
+    do it now rather than later -- and only for logs taken from a clean tree,
+    because a dirty stamp names code nobody can recover. `as_binary` overrides
+    the benchmark line for a log whose recorded launcher is not in the repository.
+    """
+    done, skipped = [], []
+    for path in logs:
+        name = os.path.basename(path)
+        head = read_header(path)
+        if head.get('sources'):
+            skipped.append((name, 'already has a sources line'))
+            continue
+        commit = head.get('commit', '')
+        if not commit or '(dirty)' in commit:
+            skipped.append((name, 'no clean commit stamp'))
+            continue
+        commit = commit.split()[0]
+        if not git('rev-parse', '--verify', '--quiet', commit + '^{commit}'):
+            skipped.append((name, 'commit %s is not in this history' % commit))
+            continue
+        binary = as_binary or (head.get('benchmark', '').split()[0] if head.get('benchmark') else '')
+        if not binary:
+            skipped.append((name, 'no benchmark line'))
+            continue
+        line = sources_line(binary, commit)
+        if line is None:
+            skipped.append((name, 'no source found for %s at %s' % (os.path.basename(binary), commit)))
+            continue
+        text = open(path, encoding='utf-8', errors='replace').read()
+        anchor = re.search(r'^# commit:[^\n]*\n', text, re.M)
+        if not anchor:
+            skipped.append((name, 'no commit line to insert after'))
+            continue
+        note = '' if not as_binary else ' (recorded as %s; resolved as %s)' % (
+            head.get('benchmark', '').split()[0] if head.get('benchmark') else '?', as_binary)
+        text = text[:anchor.end()] + '# sources:  %s%s\n' % (line, note) + text[anchor.end():]
+        open(path, 'w', encoding='utf-8').write(text)
+        done.append((name, commit, len(line.split())))
+    for name, commit, n in done:
+        print('  backfilled %-52s from %s, %d files' % (name, commit, n))
+    for name, why in skipped:
+        print('  skipped    %-52s %s' % (name, why))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument('--stamp', metavar='BENCHMARK', default='',
+                    help='print the `# sources:` text for a benchmark binary or sweep script, '
+                         'for the runners to write into a log header')
+    ap.add_argument('--backfill', nargs='*', metavar='LOG',
+                    help='add a `# sources:` line to logs that predate it, from the commit '
+                         'they stamp (all logs when none are named)')
+    ap.add_argument('--as', dest='as_binary', metavar='BENCHMARK', default='',
+                    help='with --backfill on one log: the benchmark to resolve it as')
     ap.add_argument('--update-baseline', action='store_true',
                     help='rewrite expected-stale.txt from what is stale now')
     ap.add_argument('--note', default='',
@@ -515,9 +788,25 @@ def main():
     if not self_check():
         return 2
 
+    if args.stamp:
+        line = sources_line(args.stamp)
+        if line is None:
+            print('(unmappable -- no source found for %s)' % os.path.basename(args.stamp))
+            return 3
+        print(line)
+        return 0
+
     if not git('rev-parse', '--git-dir'):
         print('not a git repository -- cannot tell when anything was taken')
         return 0
+
+    if args.backfill is not None:
+        logs = [os.path.join(LOGS, n) for n in sorted(os.listdir(LOGS)) if n.endswith('.log')] \
+            if not args.backfill else args.backfill
+        if args.as_binary and len(logs) != 1:
+            print('--as applies to exactly one log', file=sys.stderr)
+            return 2
+        return backfill(logs, args.as_binary)
 
     if args.explain:
         return explain(args.explain)

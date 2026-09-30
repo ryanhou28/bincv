@@ -464,7 +464,7 @@ BINCV_TEST(CudaVocabulary, DeviceArrayIsZeroFilledAndDeepCopies) {
     BINCV_CHECK_EQ(cudaMemcpy(a.data(), seed.data(), seed.size() * sizeof(uint32_t),
                               cudaMemcpyHostToDevice),
                    cudaSuccess);
-    // Copy means deep copy (CLAUDE.md): the copy has its own allocation.
+    // Copy means deep copy: the copy has its own allocation.
     bincv::cuda::DeviceArray<uint32_t> b(a);
     BINCV_CHECK(b.data() != a.data());
     std::vector<uint32_t> copied(8, 0u);

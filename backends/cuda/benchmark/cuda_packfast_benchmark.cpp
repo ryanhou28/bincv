@@ -26,7 +26,8 @@
 // explicit stream and one meter. Reproducing it here would be a fifth answer to
 // a question that file exists to answer once.
 //
-// THE PROTOCOL, and every part of it is load-bearing on this host:
+// THE PROTOCOL, and every part of it is load-bearing on the reference host
+// (an RTX 3070 Ti reached through WSL2):
 //
 //   * ONE EXPLICIT STREAM for every arm and for the launch floor. Events
 //     recorded on the legacy default stream while the body enqueues elsewhere

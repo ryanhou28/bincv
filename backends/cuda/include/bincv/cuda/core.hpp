@@ -15,13 +15,15 @@
 /// The TYPES are forked on purpose: a `DeviceBinMatView`'s pointer addresses
 /// GPU memory, and making that a distinct type is what turns "passed a host
 /// view to a device kernel" into a compile error instead of a runtime
-/// corruption. No call can hide where its memory lives (CLAUDE.md); that rule
-/// is applied here at the view level, not only at the container level.
+/// corruption. No call can hide where its memory lives -- the backend's one
+/// structural rule -- and it is applied here at the view level, not only at
+/// the container level.
 ///
 /// THE DEVICE WORD TYPE IS uint32_t, ONLY. A CUDA core is a 32-bit machine:
 /// there is no 64-bit integer datapath, so a uint64 op is two uint32 ops and a
-/// register pair -- the M7 result (u64 1.30x SLOWER at 32-bit width), not the
-/// Pi's. The 32-bit granule is also what the hardware primitives speak:
+/// register pair -- the same shape as a 32-bit Cortex-M7, where the host
+/// library measured uint64 words 1.30x SLOWER than uint32. The 32-bit granule
+/// is also what the hardware primitives speak:
 /// `__popc` counts a 32-bit register and `__ballot_sync` packs one bit per
 /// lane of a 32-lane warp -- a packed pixel word in one instruction. Wider
 /// MEMORY access is a kernel detail (uint4 loads move four words), never a
@@ -247,9 +249,17 @@ static_assert(offsetof(DevicePlaneBlockConstView, stride) ==
               "plane block and bit matrix must share their field placement");
 
 /// @brief Names `planes` bit-planes inside a device matrix allocated as
-/// `width x (planes * height)`.
+/// `width x (planes * height)`. **API TIER 3** (host-side helper, no kernel).
 /// @note Host-side setup, not a kernel helper: it is where the block's row count
 /// is divided by N, and the one place that division happens.
+/// @note **`planes` is 1 to 8 -- this is the `QuantMat` spelling**, the range
+/// `packQuant` produces and the pyramid, derivative and covariance families
+/// consume, and it is asserted. The view type itself carries up to 32 planes
+/// (`binarize`, `keypointOrientation` and a census block use it that way); a
+/// block wider than 8 is named by writing the aggregate directly,
+/// `DevicePlaneBlockView{ptr, width, height, stride, planes}`, so that the
+/// division this helper hides is visible where the plane count is not
+/// `QuantMat`'s.
 inline DevicePlaneBlockView planeBlock(DeviceBinMatView block, size_t planes) {
     BINCV_ASSERT(planes >= 1 && planes <= 8,
                  "planeBlock: N outside QuantMat's supported range");
@@ -259,7 +269,7 @@ inline DevicePlaneBlockView planeBlock(DeviceBinMatView block, size_t planes) {
                                 planes};
 }
 
-/// @brief The read-only spelling of `planeBlock`.
+/// @brief The read-only spelling of `planeBlock`; the same 1..8 domain.
 inline DevicePlaneBlockConstView planeBlock(DeviceBinMatConstView block, size_t planes) {
     BINCV_ASSERT(planes >= 1 && planes <= 8,
                  "planeBlock: N outside QuantMat's supported range");

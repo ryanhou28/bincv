@@ -7,9 +7,9 @@
 /// ---------------------------------------------------------------------------
 /// WHY A BLOB AND NOT A DIRECTORY OF FILES
 ///
-/// The design notes move all decoding to the host: nothing on a caller's real
-/// path decodes anything, and encoded files turn up only when reading a
-/// **dataset** to test against. What carries the decoded frames to a target is
+/// binCV moves all decoding to the host (docs/ARCHITECTURE.md, "binCV links no
+/// codec, on any target"): nothing on a caller's real path decodes anything, and
+/// encoded files turn up only when reading a **dataset** to test against. What carries the decoded frames to a target is
 /// this: one flat file, a small header, frames back to back. A bare-metal
 /// target has no filesystem, no directory iteration and no `argv`, and one flat
 /// byte range works unchanged as a file to `fread` or mmap on desktop, an app
@@ -32,8 +32,8 @@
 ///     bytes 20-31  reserved, zero
 ///
 /// The u32 fields are **little-endian**. That is a decision, not a hedge: every
-/// target binCV runs on -- x86-64, aarch64, Cortex-M, RISC-V -- is
-/// little-endian, so the natural byte order is also the portable one here.
+/// target binCV runs on -- x86-64, aarch64, Cortex-M -- is little-endian, so the
+/// natural byte order is also the portable one here.
 /// The parse below reads bytes, so even an exotic host gets the right answer.
 ///
 /// A frame body is EXACTLY the body of a PNM image -- pnm.hpp's formats, reused
@@ -85,7 +85,7 @@ inline constexpr uint32_t kSequenceModePacked = 1;
 /// @brief The fixed header size; frame 0's body starts here.
 inline constexpr size_t kSequenceHeaderBytes = 32;
 
-/// @brief What a `readSequenceHeader` call found, or why it did not.
+/// @brief What a `readSequenceHeader` call found, or why it did not. **API TIER 3.**
 struct SequenceHeader {
     uint32_t mode = 0;      ///< `kSequenceMode8Bit` or `kSequenceModePacked`
     size_t width = 0;
@@ -95,7 +95,7 @@ struct SequenceHeader {
     bool valid = false;
 };
 
-/// @brief One frame's body within a blob, or `valid == false`.
+/// @brief One frame's body within a blob, or `valid == false`. **API TIER 3.**
 struct SequenceFrameRange {
     const uint8_t* data = nullptr;
     size_t size = 0;        ///< always `frameBytes` when valid

@@ -404,6 +404,46 @@ bool cudaDevicePresent() {
 // WIDE ORIENTATION
 // ---------------------------------------------------------------------------
 
+// The radius domain, refused in every build and BEFORE the disc pod is built:
+// the pod's half-width table has 32 entries, so a radius of 40 would be a
+// stack write past it in a build where the assertion is compiled out. All
+// three overloads refuse both ends of the domain, the bit-plane one refuses an
+// empty plane count beside it, and the bound itself launches.
+BINCV_TEST(CudaOrientation, RadiusOutsideOneToThirtyOneIsRefused) {
+    const size_t w = 96, h = 64, count = 3;
+    const auto img8 = makeFrame<uint8_t>(w, h, 0xBADC0DEull);
+    const auto img16 = makeFrame<uint16_t>(w, h, 0xBADC0DFull);
+    const std::vector<float> xy = {40.f, 30.f, 50.f, 31.f, 60.f, 32.f};
+    for (int radius : {0, 32, 40, -1}) {
+        BINCV_CHECK_EQ_UNLESS_CHECKED(
+            runWide<uint8_t>(img8, w, h, xy, count, radius, true, true).err,
+            cudaErrorInvalidValue);
+        BINCV_CHECK_EQ_UNLESS_CHECKED(
+            runWide<uint16_t>(img16, w, h, xy, count, radius, true, true).err,
+            cudaErrorInvalidValue);
+    }
+    bc::DeviceBinMat plane(static_cast<int>(w), static_cast<int>(h));
+    bc::DeviceArray<float> dxy(count * 2);
+    cudaMemcpy(dxy.data(), xy.data(), count * 2 * sizeof(float), cudaMemcpyHostToDevice);
+    bc::DeviceArray<float> dang(count);
+    const bc::DevicePlaneBlockConstView block{plane.constView().ptr, w, h,
+                                              plane.constView().stride, 1};
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bc::keypointOrientation(block, bc::keypointSet(dxy.data(), count), dang.data(),
+                                nullptr, 32),
+        cudaErrorInvalidValue);
+    const bc::DevicePlaneBlockConstView noPlanes{plane.constView().ptr, w, h,
+                                                 plane.constView().stride, 0};
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bc::keypointOrientation(noPlanes, bc::keypointSet(dxy.data(), count), dang.data(),
+                                nullptr, 15),
+        cudaErrorInvalidValue);
+    BINCV_CHECK_EQ(bc::keypointOrientation(block, bc::keypointSet(dxy.data(), count),
+                                           dang.data(), nullptr, 31),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+}
+
 BINCV_TEST(CudaOrientation, WideAllThreeArmsAgreeWithHost) {
     struct Shape {
         size_t w, h;

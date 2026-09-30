@@ -6,6 +6,7 @@
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # commit:   80ff0a8
+# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/logic_benchmark.cpp=0748273db337 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/logic.hpp=bd14f7da7dc8 include/bincv/quantMat.hpp=9571cce97de6
 # governor: performance
 # throttled before: throttled=0x80000
 # temp before: temp=59.9'C
@@ -1292,3 +1293,111 @@ OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
 # temp after: temp=63.7'C
 # date:     2026-09-21T16:31:41-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio t1:bitwiseAnd OpenCV CV_8U/t1:bitwiseAnd binCV uint32) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                            n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# b1 / bitwiseAnd OpenCV CV_8U  10     0.6266     0.6133     0.6381  1.040     4.0%      --  [  0.6197,   0.6358]   1.29%   1.015x
+# b1 / bitwiseAnd binCV uint32  10    0.02369    0.02070    0.02470  1.193    16.9%      --  [ 0.02289,  0.02392]   2.17%   1.035x
+# b1 / bitwiseAnd binCV uint64  10    0.02319    0.02016    0.02375  1.178    15.5%      --  [ 0.02212,  0.02353]   3.04%   1.048x
+# b1 / bitwiseNot OpenCV CV_8U  10     0.3152     0.3023     0.3268  1.081     7.8%      --  [  0.3113,   0.3225]   1.79%   1.023x
+# b1 / bitwiseNot binCV uint32  10    0.01965    0.01711    0.02062  1.205    17.9%      --  [ 0.01892,  0.01998]   2.70%   1.039x
+# b1 / bitwiseNot binCV uint64  10    0.01924    0.01817    0.02075  1.142    13.4%      --  [ 0.01873,  0.02050]   4.60%   1.065x
+# b1 / bitwiseOr OpenCV CV_8U   10     0.6429     0.6153     0.6587  1.070     6.7%      --  [  0.6335,   0.6497]   1.26%   1.015x
+# b1 / bitwiseOr binCV uint32   10    0.02382    0.02227    0.02509  1.127    11.8%      --  [ 0.02341,  0.02423]   1.72%   1.018x
+# b1 / bitwiseOr binCV uint64   10    0.02272    0.02012    0.02390  1.188    16.6%      --  [ 0.02238,  0.02343]   2.31%   1.031x
+# b1 / bitwiseXor OpenCV CV_8U  10     0.6468     0.6112     0.6618  1.083     7.8%      --  [  0.6320,   0.6509]   1.46%   1.024x
+# b1 / bitwiseXor binCV uint32  10    0.02346    0.02077    0.02477  1.193    17.0%      --  [ 0.02263,  0.02428]   3.52%   1.037x
+# b1 / bitwiseXor binCV uint64  10    0.02286    0.02150    0.02375  1.105     9.8%      --  [ 0.02228,  0.02329]   2.22%   1.026x
+# b2 / bitwiseAnd OpenCV CV_8U  10     0.6225     0.6186     0.6256  1.011     1.1%      --  [  0.6202,   0.6239]   0.29%   1.004x
+# b2 / bitwiseAnd binCV uint32  10    0.04582    0.04202    0.04833  1.150    13.8%      --  [ 0.04347,  0.04678]   3.61%   1.054x
+# b2 / bitwiseAnd binCV uint64  10    0.04505    0.04234    0.05080  1.200    18.8%      --  [ 0.04291,  0.04731]   4.88%   1.050x
+# b2 / bitwiseNot OpenCV CV_8U  10     0.3735     0.3706     0.3816  1.030     3.0%      --  [  0.3728,   0.3779]   0.67%   1.012x
+# b2 / bitwiseNot binCV uint32  10    0.02719    0.02608    0.02771  1.062     6.0%      --  [ 0.02681,  0.02746]   1.20%   1.014x
+# b2 / bitwiseNot binCV uint64  10    0.02713    0.01880    0.02816  1.498    34.5%      --  [ 0.02678,  0.02785]   1.97%   1.026x
+# b2 / bitwiseOr OpenCV CV_8U   10     0.6227     0.6193     0.6273  1.013     1.3%      --  [  0.6205,   0.6247]   0.33%   1.003x
+# b2 / bitwiseOr binCV uint32   10    0.04541    0.04285    0.05081  1.186    17.5%      --  [ 0.04361,  0.04841]   5.28%   1.066x
+# b2 / bitwiseOr binCV uint64   10    0.04535    0.04119    0.05012  1.217    19.7%      --  [ 0.04293,  0.04745]   4.98%   1.056x
+# b2 / bitwiseXor OpenCV CV_8U  10     0.6225     0.6185     0.6260  1.012     1.2%      --  [  0.6203,   0.6243]   0.32%   1.003x
+# b2 / bitwiseXor binCV uint32  10    0.04637    0.03979    0.05091  1.279    24.0%      --  [ 0.04341,  0.04960]   6.67%   1.069x
+# b2 / bitwiseXor binCV uint64  10    0.04451    0.04221    0.04813  1.140    13.3%      --  [ 0.04295,  0.04763]   5.26%   1.070x
+# b3 / bitwiseAnd OpenCV CV_8U  10     0.6165     0.6123     0.6238  1.019     1.9%      --  [  0.6144,   0.6196]   0.42%   1.005x
+# b3 / bitwiseAnd binCV uint32  10    0.07637    0.07556    0.07728  1.023     2.3%      --  [ 0.07582,  0.07684]   0.67%   1.007x
+# b3 / bitwiseAnd binCV uint64  10    0.07644    0.07550    0.07705  1.021     2.0%      --  [ 0.07587,  0.07677]   0.59%   1.007x
+# b3 / bitwiseNot OpenCV CV_8U  10     0.3755     0.3703     0.3832  1.035     3.4%      --  [  0.3735,   0.3785]   0.66%   1.008x
+# b3 / bitwiseNot binCV uint32  10    0.04665    0.04536    0.04804  1.059     5.7%      --  [ 0.04591,  0.04769]   1.91%   1.022x
+# b3 / bitwiseNot binCV uint64  10    0.04680    0.04568    0.04776  1.046     4.4%      --  [ 0.04612,  0.04748]   1.45%   1.015x
+# b3 / bitwiseOr OpenCV CV_8U   10     0.6168     0.6139     0.6242  1.017     1.7%      --  [  0.6148,   0.6199]   0.42%   1.005x
+# b3 / bitwiseOr binCV uint32   10    0.07604    0.07549    0.07724  1.023     2.3%      --  [ 0.07569,  0.07680]   0.73%   1.010x
+# b3 / bitwiseOr binCV uint64   10    0.07631    0.07562    0.07709  1.019     1.9%      --  [ 0.07591,  0.07673]   0.54%   1.006x
+# b3 / bitwiseXor OpenCV CV_8U  10     0.6165     0.6127     0.6243  1.019     1.9%      --  [  0.6146,   0.6198]   0.42%   1.005x
+# b3 / bitwiseXor binCV uint32  10    0.07625    0.07546    0.07706  1.021     2.1%      --  [ 0.07566,  0.07682]   0.76%   1.008x
+# b3 / bitwiseXor binCV uint64  10    0.07659    0.07579    0.07769  1.025     2.5%      --  [ 0.07593,  0.07725]   0.86%   1.009x
+# t1 / bitwiseAnd OpenCV CV_8U  10     0.6266     0.6133     0.6381  1.040     4.0%      --  [  0.6197,   0.6358]   1.29%   1.015x
+# t1 / bitwiseAnd binCV uint32  10    0.02369    0.02070    0.02470  1.193    16.9%      --  [ 0.02289,  0.02392]   2.17%   1.035x
+# t1 / bitwiseAnd binCV uint64  10    0.02319    0.02016    0.02375  1.178    15.5%      --  [ 0.02212,  0.02353]   3.04%   1.048x
+# t1 / bitwiseNot OpenCV CV_8U  10     0.3152     0.3023     0.3268  1.081     7.8%      --  [  0.3113,   0.3225]   1.79%   1.023x
+# t1 / bitwiseNot binCV uint32  10    0.01965    0.01711    0.02062  1.205    17.9%      --  [ 0.01892,  0.01998]   2.70%   1.039x
+# t1 / bitwiseNot binCV uint64  10    0.01924    0.01817    0.02075  1.142    13.4%      --  [ 0.01873,  0.02050]   4.60%   1.065x
+# t1 / bitwiseOr OpenCV CV_8U   10     0.6429     0.6153     0.6587  1.070     6.7%      --  [  0.6335,   0.6497]   1.26%   1.015x
+# t1 / bitwiseOr binCV uint32   10    0.02382    0.02227    0.02509  1.127    11.8%      --  [ 0.02341,  0.02423]   1.72%   1.018x
+# t1 / bitwiseOr binCV uint64   10    0.02272    0.02012    0.02390  1.188    16.6%      --  [ 0.02238,  0.02343]   2.31%   1.031x
+# t1 / bitwiseXor OpenCV CV_8U  10     0.6468     0.6112     0.6618  1.083     7.8%      --  [  0.6320,   0.6509]   1.46%   1.024x
+# t1 / bitwiseXor binCV uint32  10    0.02346    0.02077    0.02477  1.193    17.0%      --  [ 0.02263,  0.02428]   3.52%   1.037x
+# t1 / bitwiseXor binCV uint64  10    0.02286    0.02150    0.02375  1.105     9.8%      --  [ 0.02228,  0.02329]   2.22%   1.026x
+# t2 / bitwiseAnd OpenCV CV_8U  10     0.6225     0.6186     0.6256  1.011     1.1%      --  [  0.6202,   0.6239]   0.29%   1.004x
+# t2 / bitwiseAnd binCV uint32  10    0.04582    0.04202    0.04833  1.150    13.8%      --  [ 0.04347,  0.04678]   3.61%   1.054x
+# t2 / bitwiseAnd binCV uint64  10    0.04505    0.04234    0.05080  1.200    18.8%      --  [ 0.04291,  0.04731]   4.88%   1.050x
+# t2 / bitwiseNot OpenCV CV_8U  10     0.3735     0.3706     0.3816  1.030     3.0%      --  [  0.3728,   0.3779]   0.67%   1.012x
+# t2 / bitwiseNot binCV uint32  10    0.02719    0.02608    0.02771  1.062     6.0%      --  [ 0.02681,  0.02746]   1.20%   1.014x
+# t2 / bitwiseNot binCV uint64  10    0.02713    0.01880    0.02816  1.498    34.5%      --  [ 0.02678,  0.02785]   1.97%   1.026x
+# t2 / bitwiseOr OpenCV CV_8U   10     0.6227     0.6193     0.6273  1.013     1.3%      --  [  0.6205,   0.6247]   0.33%   1.003x
+# t2 / bitwiseOr binCV uint32   10    0.04541    0.04285    0.05081  1.186    17.5%      --  [ 0.04361,  0.04841]   5.28%   1.066x
+# t2 / bitwiseOr binCV uint64   10    0.04535    0.04119    0.05012  1.217    19.7%      --  [ 0.04293,  0.04745]   4.98%   1.056x
+# t2 / bitwiseXor OpenCV CV_8U  10     0.6225     0.6185     0.6260  1.012     1.2%      --  [  0.6203,   0.6243]   0.32%   1.003x
+# t2 / bitwiseXor binCV uint32  10    0.04637    0.03979    0.05091  1.279    24.0%      --  [ 0.04341,  0.04960]   6.67%   1.069x
+# t2 / bitwiseXor binCV uint64  10    0.04451    0.04221    0.04813  1.140    13.3%      --  [ 0.04295,  0.04763]   5.26%   1.070x
+# t3 / bitwiseAnd OpenCV CV_8U  10     0.6165     0.6123     0.6238  1.019     1.9%      --  [  0.6144,   0.6196]   0.42%   1.005x
+# t3 / bitwiseAnd binCV uint32  10    0.07637    0.07556    0.07728  1.023     2.3%      --  [ 0.07582,  0.07684]   0.67%   1.007x
+# t3 / bitwiseAnd binCV uint64  10    0.07644    0.07550    0.07705  1.021     2.0%      --  [ 0.07587,  0.07677]   0.59%   1.007x
+# t3 / bitwiseNot OpenCV CV_8U  10     0.3755     0.3703     0.3832  1.035     3.4%      --  [  0.3735,   0.3785]   0.66%   1.008x
+# t3 / bitwiseNot binCV uint32  10    0.04665    0.04536    0.04804  1.059     5.7%      --  [ 0.04591,  0.04769]   1.91%   1.022x
+# t3 / bitwiseNot binCV uint64  10    0.04680    0.04568    0.04776  1.046     4.4%      --  [ 0.04612,  0.04748]   1.45%   1.015x
+# t3 / bitwiseOr OpenCV CV_8U   10     0.6168     0.6139     0.6242  1.017     1.7%      --  [  0.6148,   0.6199]   0.42%   1.005x
+# t3 / bitwiseOr binCV uint32   10    0.07604    0.07549    0.07724  1.023     2.3%      --  [ 0.07569,  0.07680]   0.73%   1.010x
+# t3 / bitwiseOr binCV uint64   10    0.07631    0.07562    0.07709  1.019     1.9%      --  [ 0.07591,  0.07673]   0.54%   1.006x
+# t3 / bitwiseXor OpenCV CV_8U  10     0.6165     0.6127     0.6243  1.019     1.9%      --  [  0.6146,   0.6198]   0.42%   1.005x
+# t3 / bitwiseXor binCV uint32  10    0.07625    0.07546    0.07706  1.021     2.1%      --  [ 0.07566,  0.07682]   0.76%   1.008x
+# t3 / bitwiseXor binCV uint64  10    0.07659    0.07579    0.07769  1.025     2.5%      --  [ 0.07593,  0.07725]   0.86%   1.009x
+# 
+# RATIO  t1:bitwiseAnd OpenCV CV_8U  /  t1:bitwiseAnd binCV uint32   over 10 launches
+#   paired per launch (the published estimator)
+#     median 26.6768   min 25.5763   max 30.3237   scatter 17.8%
+#     bootstrap 95% CI of the median: [26.0878, 27.3706]   +/- 2.40%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.026x
+#   ratio of the two medians, same launches
+#     point 26.4483   bootstrap 95% CI: [26.0878, 27.3228]
+#     the two intervals differ by 0.00% and 0.18% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     b1       working set per call: binCV 115200 B, OpenCV 921600 B (thr
+#     b2       working set per call: binCV 393216 B, OpenCV 3145728 B (th
+#     b3       working set per call: binCV 12582912 B, OpenCV 100663296 B
+#     t1       working set per call: binCV 115200 B, OpenCV 921600 B (thr | OP  IMPLEMENTATION  ns/pixel  GB/s  vs OpenCV
+#     t2       working set per call: binCV 393216 B, OpenCV 3145728 B (th | OP  IMPLEMENTATION  ns/pixel  GB/s  vs OpenCV
+#     t3       working set per call: binCV 12582912 B, OpenCV 100663296 B | OP  IMPLEMENTATION  ns/pixel  GB/s  vs OpenCV

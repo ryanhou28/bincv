@@ -1,4 +1,4 @@
-// -- INTEROP OR SPECIALIZATION above the bit-width crossover?
+// INTEROP OR SPECIALIZATION above the bit-width crossover?
 //
 // binCV was measured 2.5-14x slower than OpenCV above the (filter-dependent)
 // crossover. The candidate answers: specialize wide-N cases internally to a byte
@@ -7,8 +7,8 @@
 // intermediates to OpenCV, which is already optimal at 8 bits.
 //
 // R = the 8->8 round trip toCVMatNormalized -> cv::pyrDown -> fromCVMat, against
-// B = native pyrDownFiltered<Gaussian5x5, 8, 8> ( 7094 us). Rule and bands
-// are pre-registered in.
+// B = native pyrDownFiltered<Gaussian5x5, 8, 8> (7094 us). The rule and its bands
+// were written before the first run.
 //
 // The per-direction conversion cost is ALSO the general answer: any operation's
 // interop decision is (native_binCV - native_OpenCV) against that tax, so the
@@ -17,7 +17,7 @@
 // ONE ARM PER PROCESS, selected by argv[1], and here is why: an earlier
 // version held every arm's working set resident at once, pumped ~1.4 MB through
 // a 1 MB L2 between samples, and inflated the cheap arms threefold. The caller
-// loops:./scripts/run_on_pi.sh pi4 'bash../benchmark/interop_sweep.sh'
+// loops: from the build directory, `bash ../benchmark/interop_sweep.sh`.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -59,8 +59,8 @@ void report(int arm, const char* name, const measure::Timing& t) {
                 t.medianNs / 1000.0, t.minNs / 1000.0, t.maxNs / 1000.0, t.spreadPct());
 }
 
-/// Peak live bytes an arm holds, computed rather than measured -- CLAUDE.md requires
-/// memory and speed together, and this experiment settles a memory/speed trade.
+/// Peak live bytes an arm holds, computed rather than measured -- memory and speed
+/// are reported together because this experiment settles a memory/speed trade.
 void reportBytes(const char* name, size_t bytes) {
     std::printf("BYTES %-38s %9zu B\n", name, bytes);
 }

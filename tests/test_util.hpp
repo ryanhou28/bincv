@@ -18,8 +18,8 @@
 /// one gate this project most depends on behind a network fetch. See
 /// tests/CMakeLists.txt.
 ///
-/// @note The premise in -- "GTest needs exceptions, so the Tier 2
-/// configuration keeps a minimal assertion path" -- is not correct, and
+/// @note The premise that GTest needs exceptions, so the Tier 2 configuration
+/// keeps a minimal assertion path, is not correct, and
 /// this file does not rely on it. Measured: googletest v1.14.0 compiles
 /// from source under -fno-exceptions (it detects the absence of __EXCEPTIONS
 /// and sets GTEST_HAS_EXCEPTIONS to 0 itself), links, runs, reports a
@@ -184,10 +184,10 @@ inline int runAll(const char* suiteName, int argc, char** argv) {
     ::bincv::test::reportCheck((expr), #expr, __FILE__, __LINE__, "")
 
 /// @brief Passes if `actual == expected`, reporting both values when it does not.
-/// @note **`actual` is evaluated EXACTLY ONCE.** It used to appear twice -- once
+/// @note **`actual` is evaluated EXACTLY ONCE.** Evaluating it twice -- once
 /// for the comparison and once inside `std::to_string` for the message --
-/// which is invisible for a plain value and a defect for a call. The two
-/// evaluations made `BINCV_CHECK_EQ(cudaFree(p), cudaSuccess)` a double
+/// is invisible for a plain value and a defect for a call: two
+/// evaluations make `BINCV_CHECK_EQ(cudaFree(p), cudaSuccess)` a double
 /// free and `BINCV_CHECK_EQ(cudaMalloc(...), cudaSuccess)` a leak, and a
 /// CUDA suite found it the expensive way. Binding the value first is what
 /// makes the obvious spelling safe, so nobody has to know this.

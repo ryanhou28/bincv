@@ -40,7 +40,7 @@ WHAT IT COMPUTES, per key, over the runs that carry it:
               established direction.  Printed only when one is established.
   p           exact two-sided sign-test p over all of those rounds.
 
-THE VERDICT HAS THREE VALUES, not two (owner's ruling, 2026-09-19).
+THE VERDICT HAS THREE VALUES, not two.
 
   DIRECTION ESTABLISHED   no round, in any run, crossed 1.00x.  The sign of the
                           difference is settled by the observations; the spread
@@ -58,7 +58,7 @@ said about the SAME rounds, so a re-judging pass can be read off one table.
 
 NOTHING GATES ON A ROUND COUNT.  Two unanimous rounds and a hundred unanimous
 rounds both satisfy "no round crossed", and a minimum-round-count rule would be
-a project-wide "X is enough" bar invented here -- which CLAUDE.md forbids.  The
+a project-wide "X is enough" bar invented here, which this project does not do.  The
 exact sign-test p is printed instead, so the reader can tell them apart from a
 number that is on the page.
 

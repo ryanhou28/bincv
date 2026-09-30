@@ -378,8 +378,8 @@ struct TrackTally {
     /// (`if (s.it >= c.maxIterations) finishLane(L)`) where `trackOnePoint`
     /// tests it at the top of a `for`. Asserting this to zero would demand a fix
     /// this landing does not make; asserting it to NON-zero would bake a defect
-    /// in as required behaviour. So it is reported, which is what CLAUDE.md asks
-    /// for when a measurement contradicts a documented claim.
+    /// in as required behaviour. So it is reported, which is what a measurement
+    /// that contradicts a documented claim gets here.
     size_t hostArmDivergentZeroIter = 0;
 };
 

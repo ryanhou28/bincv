@@ -111,12 +111,12 @@
 /// ---------------------------------------------------------------------------
 /// THE ORDER COSTS LESS THAN THE CORNER: THE SELECTION IS NOT ONE BLOCK
 ///
-/// The selection used to be one block for the whole tail -- a bitonic network
-/// over 16-byte corner records, then a greedy spacing filter that rescanned
-/// every surviving candidate once per acceptance. On the reference frame, with
-/// 25,115 candidates and 200 corners kept, that was 5.6 ms of sort and 23.1 ms
-/// of spacing against 0.13 ms of candidate generation: 98% of the operation, on
-/// one of 48 SMs, at 1.29% of the part's throughput.
+/// A one-block selection -- a bitonic network over 16-byte corner records,
+/// then a greedy spacing filter that rescans every surviving candidate once per
+/// acceptance -- costs, on the reference frame with 25,115 candidates and 200
+/// corners kept, 5.6 ms of sort and 23.1 ms of spacing against 0.13 ms of
+/// candidate generation: 98% of the operation, on one of 48 SMs, at 1.29% of
+/// the part's throughput. That is the shape this design replaces.
 ///
 /// Two facts about the REPRESENTATION replace it, and both are the same fact.
 ///
@@ -144,7 +144,7 @@
 /// launches, because a block barrier is not a device barrier.
 ///
 /// ---------------------------------------------------------------------------
-/// THE DEVICE DOMAIN, NAMED because it is narrower than the host's (ruling R4)
+/// THE DEVICE DOMAIN, NAMED because it is narrower than the host's
 ///
 /// * Word type `uint32_t`. The host compiles at 8, 16, 32 and 64.
 /// * **Ternary planes only** -- four `DeviceBinMatConstView`s, which is what the
@@ -257,10 +257,11 @@ cudaError_t cornerMinEigenValAsync(DeviceBinMatConstView magX, DeviceBinMatConst
                                    cudaStream_t stream = nullptr);
 
 /// @brief `goodFeaturesToTrack` over device ternary derivative planes: response,
-/// threshold, 3x3 NMS, rank, greedy spacing. **API TIER 2**, and **bit-for-bit
+/// threshold, 3x3 NMS, rank, greedy spacing. **API TIER 2** --
+/// `cv::goodFeaturesToTrack`'s role, different numerics -- and **bit-for-bit
 /// the same corners, order and result triple** as the host's
 /// `goodFeaturesToTrackStreaming` whenever `work.candidates` held every raw
-/// maximum.
+/// maximum, proven by test_cuda_feature_tracking_corner.
 /// @param magX,magY,signX,signY The four derivative planes, in device memory.
 /// @param params The host's four values; defaults are the pipeline's.
 /// @param work Caller-owned candidate buffer, frame-maximum word, scratch and

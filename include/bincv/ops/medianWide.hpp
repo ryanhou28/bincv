@@ -1,8 +1,8 @@
 #pragma once
 
 /// @file medianWide.hpp
-/// @brief The reference pipeline's median filter, on a WIDE (8- or 16-bit) image,
-/// with a caller-chosen neighbourhood. **API TIER 3.**
+/// @brief Median filter on a WIDE (8- or 16-bit) image over a caller-chosen
+/// neighbourhood. **API TIER 3.**
 ///
 /// ---------------------------------------------------------------------------
 /// WHY THIS EXISTS ALONGSIDE ops/denoise.hpp
@@ -11,23 +11,23 @@
 /// input, where median collapses to `maj3` -- one expression, 32 pixels per word.
 /// That is the right kernel and it is not going anywhere.
 ///
-/// But the reference filters the **grayscale** image, BEFORE binarization:
-/// the reference pipeline's top level runs `three_pix_median_filter(img)` and only then
-/// `rl_fast_edge_filter_wide(img, t)`. A binary-only median cannot sit where the
-/// reference puts it, so a caller that wanted the reference's pipeline had to
-/// borrow OpenCV for this one step.
+/// But the reference pipeline (the visual-inertial odometry system, not in this
+/// repository, that binCV was built to serve stage by stage; see
+/// docs/ARCHITECTURE.md) filters the **grayscale** image, BEFORE binarization: its
+/// frontend runs a three-sample median and only then its edge threshold. A
+/// binary-only median cannot sit where the reference puts it, so a caller that
+/// wanted the reference's pipeline would have to borrow OpenCV for this one step.
 ///
 /// ---------------------------------------------------------------------------
 /// THE NEIGHBOURHOOD IS THE CALLER'S, AND THE REFERENCE HAS TWO OF THEM
 ///
-/// the reference pipeline's denoiser carries `three_pix_median_filter` --
-/// the asymmetric L, `p1` above / `p2` center / `p3` right -- **and**
-/// `five_pix_median_filter`, the plus. Both ship here as named constants, and an
+/// The reference pipeline's denoiser carries a three-sample median -- the
+/// asymmetric L, `p1` above / `p2` center / `p3` right -- **and** a five-sample
+/// one, the plus. Both ship here as named constants, and an
 /// arbitrary offset set is a template argument rather than a fork.
 ///
 /// This is emphatically NOT `cv::medianBlur`, whose neighbourhood is a square and
-/// whose border is replicated. Tier 3, and the name is not borrowed
-/// ([CLAUDE.md](../../../CLAUDE.md)).
+/// whose border is replicated. Tier 3, and the name is not borrowed.
 ///
 /// ---------------------------------------------------------------------------
 /// THE BORDER IS ZERO FILL, AND THAT IS THE REFERENCE'S, NOT A CHOICE
@@ -37,12 +37,12 @@
 /// ZEROS. A pixel at the top row therefore takes its median against a 0, not
 /// against a replicated or reflected neighbour. ops/denoise.hpp records the same
 /// rule for the same reason.
+
 // BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
 // its gate before its first core include.
 #include "../core/simd.hpp"
-
 
 #include <cstddef>
 #include <cstdint>
@@ -62,39 +62,41 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief One sample position, relative to the pixel being written.
+/// @brief One sample position, relative to the pixel being written. **API TIER 3.**
 struct MedianOffset {
     int dy;
     int dx;
 };
 
 /// @brief A neighbourhood: `K` offsets, `K` odd so the median is a single element.
+/// **API TIER 3.**
 template <size_t K>
 struct MedianPattern {
     static_assert(K % 2 == 1, "a median needs an odd number of samples");
     MedianOffset offset[K];
 };
 
-/// @brief The reference's `three_pix_median_filter`: above, center, right.
+/// @brief The reference pipeline's three-sample median: above, center, right.
+/// **API TIER 3.**
 /// @note An asymmetric **L**, not a line and not a square. It is chosen for what it
 /// costs in race logic, not for isotropy, which is why no OpenCV kernel
 /// matches it.
 inline constexpr MedianPattern<3> kMedianReferenceL{{{-1, 0}, {0, 0}, {0, 1}}};
 
-/// @brief The reference's `five_pix_median_filter`: the plus.
+/// @brief The reference pipeline's five-sample median: the plus. **API TIER 3.**
 inline constexpr MedianPattern<5> kMedianReferencePlus{
     {{0, 0}, {0, 1}, {1, 0}, {0, -1}, {-1, 0}}};
 
 namespace impl {
 
 #if defined(BINCV_MEDIAN_AVX2)
-/// @brief Is AVX2 present? Asked once, not once per row.
 /// @brief Force the portable arm, for the benchmark and the tests. **INTERNAL.**
 inline bool& medianSimdEnabled() {
     static bool on = true;
     return on;
 }
 
+/// @brief Is AVX2 present? Asked once, not once per row. **INTERNAL.**
 inline bool hasMedianSimd() {
     static const bool kYes = __builtin_cpu_supports("avx2");
     return kYes && medianSimdEnabled();

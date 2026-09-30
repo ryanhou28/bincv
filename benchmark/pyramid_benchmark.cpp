@@ -1,4 +1,4 @@
-// -- the pyramid's bit growth, its footprint, and the cost of the box sum.
+// The pyramid's bit growth, its footprint, and the cost of the box sum.
 //
 // THIS IS NOT AN EXPERIMENT AND HAS NO DECISION RULE. What it produces is two
 // numbers -- bit growth and peak footprint of a four-level pyramid at several
@@ -19,7 +19,7 @@
 // byte-per-pixel pyramid a user has today. That denominator is exact
 // arithmetic -- one byte per pixel per level -- and needs no OpenCV to
 // compute. It is a PEAK: the levels coexist because a tracker reads all of
-// them (CLAUDE.md, benchmarking).
+// them.
 // 3. THE COST OF THE BOX SUM, the shipped formulation against the one
 // rejected, at NIn = 1, 2, 3 and 4. Both are the same kernel with the same
 // requantizer and differ only in how the four NIn-bit operands are summed:
@@ -38,9 +38,10 @@
 //
 // On x86_64 the TIMING half is indicative only -- a desktop host's spread decides
 // nothing; the growth and footprint halves are architecture-independent and
-// close anywhere. The authoritative timing run is
+// close anywhere. The authoritative timing run is on the reference device, pinned
+// and launched ten times:
 //
-//./scripts/run_on_pi.sh pi4 './benchmark/pyramid_benchmark'
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/pyramid_benchmark
 
 #include <cstddef>
 #include <cstdint>
@@ -196,6 +197,8 @@ void reportGrowthAndFootprint() {
     // box actually create", and every other row is a refusal of some of it.
     reportLadder<3, 5, 7>("1-3-5-7 uncapped");
     // The ladder measured on the reference pipeline.
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     reportLadder<3, 4, 5>("1-3-4-5 reference");
     // Progressively harder caps -- the candidates.
     reportLadder<3, 3, 3>("1-3-3-3");

@@ -11,8 +11,8 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief Size structure representing width and height
-/// @note Replaces cv::Size in core to eliminate OpenCV dependency
+/// @brief A width and a height, in pixels. **API TIER 1 as a type** -- `cv::Size`'s
+/// two fields with the same names and meaning, so core needs no OpenCV.
 struct Size {
     int width;
     int height;
@@ -38,6 +38,7 @@ struct Size {
 };
 
 /// @brief An axis-aligned rectangle in PIXELS: origin (x, y), extent (width, height).
+/// **API TIER 1 as a type** -- `cv::Rect`'s fields, names and half-open meaning.
 ///
 /// @note Field names and order are cv::Rect's, deliberately. A caller porting
 /// `cv::countNonZero(img(roi))` writes the same four numbers here, and the
@@ -45,7 +46,7 @@ struct Size {
 /// @note The rectangle covers columns [x, x + width) and rows [y, y + height) --
 /// half-open, like cv::Rect. `width` and `height` are extents, not
 /// coordinates of the far corner.
-/// @note **Signed on purpose.** A window centerd on a keypoint near an edge has a
+/// @note **Signed on purpose.** A window centered on a keypoint near an edge has a
 /// negative origin (31x31 windows over the whole frame),
 /// and the alternative -- making the caller clamp before it can express the
 /// window -- moves the same clipping arithmetic into every call site, where
@@ -53,7 +54,7 @@ struct Size {
 /// consumer in ops/ clips against the image and is documented as doing so.
 /// @note No intersection or union arithmetic here. This is the argument type a
 /// kernel takes, not a geometry library; ops/reduce.hpp does the one
-/// clipping operation the MVP needs, internally.
+/// clipping operation its callers need, internally.
 struct Rect {
     int x;       ///< Column of the left edge; may be negative (clipped by the op)
     int y;       ///< Row of the top edge; may be negative (clipped by the op)
@@ -87,14 +88,16 @@ struct Rect {
     bool operator!=(const Rect& other) const { return !(*this == other); }
 };
 
-/// @brief Morphological structuring element shapes
+/// @brief Morphological structuring element shapes. **API TIER 1 as a type** -- the
+/// same enumerator names and values as OpenCV's.
 enum MorphShape {
     MORPH_RECT = 0,      ///< Rectangular structuring element
     MORPH_CROSS = 1,     ///< Cross-shaped structuring element
     MORPH_ELLIPSE = 2    ///< Elliptical structuring element
 };
 
-/// @brief Morphological operation types
+/// @brief Morphological operation types. **API TIER 1 as a type** -- the same
+/// enumerator names and values as OpenCV's.
 enum MorphOp {
     MORPH_ERODE = 0,     ///< Erosion operation
     MORPH_DILATE = 1,    ///< Dilation operation
@@ -105,7 +108,8 @@ enum MorphOp {
     MORPH_BLACKHAT = 6   ///< Black hat (close - original)
 };
 
-/// @brief Border extrapolation types
+/// @brief Border extrapolation types. **API TIER 1 as a type** -- the same enumerator
+/// names and values as OpenCV's, so `BORDER_REFLECT_101` is 4 on both sides.
 enum BorderType {
     BORDER_CONSTANT = 0,   ///< Constant border (iiiiii|abcdefgh|iiiiiii with some specified i)
     BORDER_REPLICATE = 1,  ///< Replicate border (aaaaaa|abcdefgh|hhhhhhh)
@@ -134,13 +138,11 @@ template <size_t N, typename WordType = uint32_t> class QuantMat;
 /// BinMat8/16/32/64 aliases below are unaffected.
 template <typename WordType = uint32_t> using BinMat = QuantMat<1, WordType>;
 
-/// @brief Type aliases for convenience
-/// @note These provide easy access to BinMat with different word sizes
-
 /// @brief A point with sub-pixel coordinates -- the tracker's and the refiner's.
-/// @note **Declared here rather than in ops/opticalFlow.hpp, where it used to live.**
-/// `ops/subpix.hpp` needs it and nothing else from the tracker, and a two-float
-/// POD is not worth including three thousand lines of Lucas-Kanade to reach.
+/// **API TIER 1 as a type** -- `cv::Point2f`'s two fields.
+/// @note Declared here rather than in ops/opticalFlow.hpp: `ops/subpix.hpp` needs it
+/// and nothing else from the tracker, and a two-float POD is not worth including
+/// three thousand lines of Lucas-Kanade to reach.
 struct Point2f {
     float x = 0.0f;
     float y = 0.0f;
@@ -154,13 +156,12 @@ struct Point2f {
 /// gated on `sizeof(WordType) == 4`.
 ///
 /// A wider word looks like it should mean fewer operations per row, and
-/// that is exactly what reductions measure. For
-/// *tracking* it opts out of every vector path instead: `uint64_t` measures
-/// **1.32× slower on `track`**,
-/// and an integrator who chose it for a real VIO frontend measured **8.6× slower**
-/// keypoint tracking before finding the gate.
+/// that is exactly what reductions measure. For *tracking* it opts out of every
+/// vector path instead: `uint64_t` measures **1.32× slower on `track`**, and an
+/// integrator who chose it for a real VIO frontend measured **8.6× slower** keypoint
+/// tracking before finding the gate.
 ///
-/// The tracker now refuses to compile at a depth that HAS vector kernels with a word
+/// The tracker refuses to compile at a depth that HAS vector kernels with a word
 /// that cannot reach them, so this is a recommendation rather than a trap — but
 /// spelling it `DefaultWord` is cheaper than reading that diagnostic.
 using DefaultWord = uint32_t;

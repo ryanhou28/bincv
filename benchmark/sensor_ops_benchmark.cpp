@@ -1,4 +1,4 @@
-// medianWide and edgeThreshold, each against its OWN scalar arm (issue #55).
+// medianWide and edgeThreshold, each against its OWN scalar arm.
 //
 // These are the two ops whose unmeasured state prompted the benchmark-at-birth
 // rule -- 78% of the pipeline the day something called them -- and they still
@@ -8,8 +8,9 @@
 //
 // THE RULE, WRITTEN FIRST: metrics are ms/frame at the reference size and the
 // arm-on/arm-off ratio from ONE binary via the new runtime switches. A ratio
-// near 1.00x is not a shrug -- it is the mis-attached-#define failure CLAUDE.md
-// records (three "improvements" once measured against a compiled-out block),
+// near 1.00x is not a shrug -- it is the mis-attached-#define failure this project
+// has already paid for once (three "improvements" measured against a compiled-out
+// block),
 // and it means the arm is not running where this file says it is.
 
 #include <cstdint>

@@ -64,6 +64,7 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief Search and window parameters for the sparse rectified stereo matcher.
+/// **API TIER 3.**
 struct StereoMatchParams {
     /// @brief Disparity range, level-0 pixels, `0 <= min < max`. Disparity is
     /// `leftX - rightX`, so the range encodes "how close can a point be".
@@ -100,7 +101,7 @@ struct StereoMatchParams {
     bool subPixel = true;
 };
 
-/// @brief One left keypoint's stereo result.
+/// @brief One left keypoint's stereo result. **API TIER 3.**
 struct StereoMatch {
     float disparity = 0.0f;    ///< `leftX - rightX`, level-0 pixels
     unsigned distance = 0;     ///< descriptor Hamming of the accepted candidate
@@ -119,8 +120,7 @@ struct StereoMatch {
 /// tests, each gated by two float comparisons before any descriptor word is
 /// read. At pipeline counts (hundreds against hundreds) the gate leaves a
 /// few candidates per keypoint; a row-bucketed index would need scratch,
-/// and the no-scratch rule outranks a constant factor here until a profile
-/// says otherwise.
+/// and the no-scratch rule outranks a constant factor at those counts.
 template <typename WordType>
 inline void stereoDescriptorMatch(const float* leftXY, size_t leftCount,
                                   const WordType* leftDesc, const float* rightXY,

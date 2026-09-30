@@ -1,4 +1,5 @@
-#include <stdint.h>
+#include <cstdint>
+
 #include "bincv/util.hpp"
 
 namespace bincv {
