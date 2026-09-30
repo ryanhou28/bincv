@@ -39,7 +39,7 @@
 #
 # 5. The two CUDA sweeps went stale on a block-size sweep of three constants, and every figure QUOTED from them is still true. Checked per row rather than assumed: descriptor's kRefBlock and orientation's kRefBlock size only the FALLBACK arms, and the published rows take neither -- a 256-bit descriptor is 8 words against the ballot arm's 32-word cap, and ORB's radius 15 satisfies the warp arm's radius <= 15 -- while covariance's kRegionBlock has no published row at all and is a null below gridFor's 4096-block cap. The benchmarks' own off-switch controls DO reach the changed arms, which is why the gate fires and is right to; no published figure does. They leave this list at the next re-take on an unloaded host.
 #
-# 6. The pre-release documentation pass (2026-09-28) touched code lines in headers
+# 6. The repository-cleanup pass (2026-09-28) touched code lines in headers
 # every benchmark includes: an #include added in core/view.hpp, core/parallel.hpp,
 # threads/pool.hpp and ops/edge.hpp; BINCV_ASSERTs added in ops/pack.hpp and
 # ops/denseDisparity.hpp (compiled out under NDEBUG); a dead store pair removed

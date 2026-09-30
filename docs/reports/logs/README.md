@@ -38,8 +38,8 @@ The stamps those older logs carry, and the commits on `main` that merged the sam
 | `550d45a` | `cb995e7` | the bit-plane FAST gate read once per call |
 | `d13ea10`, `a8214de`, `9ab7325` | `77c46a0` | the RANSAC estimators |
 
-Logs taken on the pre-release branch (`b36dc73`, `211acaa`, `4c4b3bf`) name commits of that
-branch; their `# sources:` lines are what the gate reads, so nothing depends on where those
+Logs taken on the repository-cleanup branch (`b36dc73`, `211acaa`, `4c4b3bf`) name commits of
+that branch; their `# sources:` lines are what the gate reads, so nothing depends on where those
 commits end up.
 
 `expected-stale.txt` lists the logs whose measured code has moved, with the argument for why
