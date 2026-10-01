@@ -100,8 +100,9 @@ Seven instructions add every pixel in the word, and the count does not depend on
 pixels the word holds. No carry ever crosses between pixels, because each pixel's carry
 lives in its own bit position of the carry word.
 
-This is **bitslicing**: each bit position of a word is an independent lane, and the
-computation is written as a circuit of logic instructions that advances every lane at once.
+This arithmetic uses the techniques of **bitslicing**: each bit position of a word is an
+independent lane, and the computation is written as a circuit of logic instructions that
+advances every lane at once.
 
 The same idea counts per pixel. A **bit-sliced sum** of k one-bit inputs answers, for every
 bit position separately, how many of the inputs are set — and it returns planes, not a
