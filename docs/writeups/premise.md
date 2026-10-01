@@ -100,6 +100,12 @@ Seven instructions add every pixel in the word, and the count does not depend on
 pixels the word holds. No carry ever crosses between pixels, because each pixel's carry
 lives in its own bit position of the carry word.
 
+None of this is new. The technique is **bit-slicing**, best known from cryptography, where
+Eli Biham's 1997 software DES ran 64 encryptions at once, one per bit position of a 64-bit
+word. Bit-serial array processors of the 1970s and 80s, such as the ICL DAP and Goodyear's
+MPP, did their image arithmetic the same way, over bit-planes. binCV applies it to the
+low-bit-width images a vision pipeline already produces.
+
 The same idea counts per pixel. A **bit-sliced sum** of k one-bit inputs answers, for every
 bit position separately, how many of the inputs are set — and it returns planes, not a
 number, so the next operation is still word-parallel. That is the opposite of a population
