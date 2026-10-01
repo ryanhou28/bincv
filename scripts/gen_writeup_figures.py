@@ -180,15 +180,17 @@ def fig_bytes_vs_bits():
             '0001111000011000']
     rows = [[int(c) for c in r] for r in mask]
     W, cell = 8, 20
-    svg = Svg(820, 330, 'A 16 by 4 binary mask stored as 64 bytes and as eight 8-bit words')
+    svg = Svg(860, 404, 'A 16 by 4 binary mask stored as 64 bytes and as eight 8-bit words, with eight pixels of '
+                        'one row expanded both ways: eight bytes of which one bit each carries the image, and one '
+                        '8-bit word')
 
-    ax, bx, gy = 30, 440, 62
+    ax, bx, gy = 30, 470, 62
     svg.text(ax, 30, 'One byte per pixel (CV_8U)', 'fg', 14, weight='600')
     svg.text(ax, 48, '64 pixels = 64 bytes', 'muted', 12)
     grid(svg, ax, gy, rows, cell)
     for r in range(4):
         for c in range(16):
-            svg.rect(ax + c * cell + 1.5, gy + r * cell + 1.5, cell - 3, cell - 3, 'box')
+            svg.rect(ax + c * cell, gy + r * cell, cell, cell, 'word')
 
     svg.text(bx, 30, 'One bit per pixel, 8-bit words', 'fg', 14, weight='600')
     svg.text(bx, 48, '64 pixels = 8 words = 8 bytes', 'muted', 12)
@@ -199,31 +201,82 @@ def fig_bytes_vs_bits():
     for s in range(0, 16, W):
         svg.text(bx + (s + W / 2) * cell, gy + 4 * cell + 16, 'word %d' % (s // W), 'muted', 11, 'middle')
 
-    # Zoom on row 1, word 0.
-    r, w0 = 1, 0
-    bits = rows[r][w0 * W:(w0 + 1) * W]
-    value = sum(b << i for i, b in enumerate(bits))
-    zx, zy, zc = 240, 212, 34
-    src_x = bx + 0 * cell
+    r = 1
+    bits = rows[r][:W]
     src_y = gy + r * cell
-    svg.rect(src_x, src_y, W * cell, cell, 'ring')
-    svg.text(src_x - 10, src_y + cell / 2 + 4, 'row 1', 'hi', 11, 'end')
-    svg.arrow(src_x + W * cell / 2 - 30, gy + 4 * cell + 24, zx + W * zc / 2 + 60, zy - 26, hi=True)
-    svg.text(zx - 12, zy - 8, 'pixel', 'muted', 11, 'end')
-    svg.text(zx - 12, zy + zc + 16, 'bit', 'muted', 11, 'end')
+    zy = 236
+
+    # Left zoom: the same eight pixels as eight bytes, every bit of every byte drawn.
+    bc = 6
+    svg.rect(ax, src_y, W * cell, cell, 'ring')
+    svg.arrow(ax + W * cell / 2, gy + 4 * cell + 8, ax + W * cell / 2 + 40, zy - 30, hi=True)
+    svg.text(ax, zy - 12, 'Row 1, pixels 0\u20137: eight bytes', 'fg', 13, weight='600')
     for i, b in enumerate(bits):
-        svg.text(zx + i * zc + zc / 2, zy - 8, str(i), 'muted', 11, 'middle', mono=True)
-        svg.rect(zx + i * zc, zy, zc, zc, ('on' if b else 'off') + ' cell')
-        svg.text(zx + i * zc + zc / 2, zy + zc / 2 + 5, str(b), 'oninv' if b else 'fg', 14, 'middle', mono=True)
-        svg.text(zx + i * zc + zc / 2, zy + zc + 16, str(i), 'muted', 11, 'middle', mono=True)
-    svg.rect(zx, zy, W * zc, zc, 'word')
-    tx = zx + W * zc + 24
-    svg.text(tx, zy + 12, 'pixel x is bit x mod W of word x / W', 'fg', 13)
+        x = ax + i * W * bc
+        for k in range(W):
+            lsb = k == W - 1
+            cls = ('on' if b else 'off') if lsb else 'pad'
+            svg.rect(x + k * bc, zy, bc, 30, cls + ' cell')
+        svg.rect(x, zy, W * bc, 30, 'word')
+        svg.text(x + W * bc / 2, zy + 46, '0x%02X' % b, 'fg', 11, 'middle', mono=True)
+        svg.text(x + W * bc / 2, zy + 60, 'px %d' % i, 'muted', 10, 'middle', mono=True)
+    svg.text(ax, zy + 90, '64 bits stored. One bit in each byte carries the pixel;', 'fg', 12)
+    svg.text(ax, zy + 106, 'the other seven, drawn grey, are always zero.', 'fg', 12)
+
+    # Right zoom: the same eight pixels as one word.
+    zc = 30
+    svg.rect(bx, src_y, W * cell, cell, 'ring')
+    svg.arrow(bx + W * cell / 2, gy + 4 * cell + 24, bx + W * zc / 2, zy - 30, hi=True)
+    svg.text(bx, zy - 12, 'Row 1, pixels 0\u20137: one 8-bit word', 'fg', 13, weight='600')
+    for i, b in enumerate(bits):
+        svg.rect(bx + i * zc, zy, zc, 30, ('on' if b else 'off') + ' cell')
+        svg.text(bx + i * zc + zc / 2, zy + 20, str(b), 'oninv' if b else 'fg', 13, 'middle', mono=True)
+        svg.text(bx + i * zc + zc / 2, zy + 46, str(i), 'muted', 10, 'middle', mono=True)
+    svg.rect(bx, zy, W * zc, 30, 'word')
+    svg.text(bx - 8, zy + 46, 'bit', 'muted', 10, 'end')
+    value = sum(b << i for i, b in enumerate(bits))
     msb = ''.join(str(b) for b in reversed(bits))
-    svg.text(tx, zy + 32, 'as a number: 0b%s = 0x%02X' % (msb, value), 'fg', 13, mono=True)
-    svg.text(tx, zy + 50, 'pixel 0 is the least significant bit,', 'muted', 12)
-    svg.text(tx, zy + 66, 'so written as a number the row reads backwards', 'muted', 12)
-    svg.text(30, 318, 'Drawn with 8-bit words for legibility; the default word is uint32_t, 32 pixels.', 'muted', 11)
+    svg.text(bx, zy + 90, '8 bits stored. Pixel x is bit x of the row.', 'fg', 12)
+    svg.text(bx, zy + 106, 'As a number: 0b%s = 0x%02X' % (msb, value), 'fg', 12, mono=True)
+    svg.text(bx, zy + 122, 'Pixel 0 is the lowest bit, so the number reads right to left.', 'muted', 11)
+
+    svg.text(30, 388, 'Drawn with 8-bit words for legibility; the default word is uint32_t, 32 pixels.', 'muted', 11)
+    return svg
+
+
+def fig_and():
+    a = [int(c) for c in '0011110000111100']
+    b = [int(c) for c in '0000111111110000']
+    d = [x & y for x, y in zip(a, b)]
+    W, cell, n = 8, 19, 16
+    svg = Svg(860, 300, 'ANDing two 16-pixel rows: sixteen instructions when each pixel is a byte, two when each '
+                        'pixel is a bit in an 8-bit word')
+    lx, ax, bx, y0, dy = 64, 80, 480, 58, 34
+    svg.text(ax, 26, 'One byte per pixel', 'fg', 14, weight='600')
+    svg.text(ax, 43, 'each AND handles one pixel', 'muted', 11)
+    svg.text(bx, 26, 'One bit per pixel, 8-bit words', 'fg', 14, weight='600')
+    svg.text(bx, 43, 'each AND handles a whole word: 8 pixels here, 32 in a uint32_t', 'muted', 11)
+    for k, (name, row) in enumerate((('a', a), ('b', b), ('a & b', d))):
+        y = y0 + k * dy + (8 if k == 2 else 0)
+        svg.text(lx, y + 14, name, 'fg', 13, 'end', mono=True)
+        bitrow(svg, ax, y, row, cell)
+        for i in range(n):
+            svg.rect(ax + i * cell, y, cell, cell, 'word')
+        bitrow(svg, bx, y, row, cell, word=W)
+    yl = y0 + 2 * dy + 2
+    svg.line(ax, yl, ax + n * cell, yl, 'edge')
+    svg.line(bx, yl, bx + n * cell, yl, 'edge')
+    yc = y0 + 3 * dy + 28
+    svg.text(ax, yc, '16 AND instructions', 'hi', 14, weight='600')
+    svg.text(bx, yc, '2 AND instructions', 'hi', 14, weight='600')
+    yc += 34
+    svg.text(30, yc, 'bytes:', 'muted', 12)
+    svg.text(90, yc, 'for (x = 0; x < 640; ++x) d[x] = a[x] & b[x];   // 640 ANDs per VGA row', 'fg', 12, mono=True)
+    svg.text(30, yc + 20, 'bits:', 'muted', 12)
+    svg.text(90, yc + 20, 'for (i = 0; i <  20; ++i) d[i] = a[i] & b[i];   //  20 ANDs, uint32_t words', 'fg', 12,
+             mono=True)
+    svg.text(30, yc + 46, 'A compiler vectorizes the byte loop too, 16 or 32 bytes per instruction; the same vector '
+             'registers hold eight times as many pixels as bits.', 'muted', 11)
     return svg
 
 
@@ -880,6 +933,7 @@ def fig_lk_chart():
 
 FIGURES = {
     'premise-bytes-vs-bits.svg': fig_bytes_vs_bits,
+    'premise-and.svg': fig_and,
     'premise-shift-or.svg': fig_shift_or,
     'premise-bitplanes.svg': fig_bitplanes,
     'premise-adder.svg': fig_adder,

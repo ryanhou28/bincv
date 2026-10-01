@@ -1,45 +1,122 @@
-# How bits map onto the machines binCV runs on
+# How binCV uses what each architecture provides
 
-[The premise](premise.md) is machine-independent: store a pixel in one bit and a word
-instruction processes a word's worth of pixels. How much that is worth is not. It depends
-on how wide the machine's integers are, where its population count lives, what its vector
-unit already does to bytes, and how strong the byte-based alternative is on that machine.
+Processors differ in what they offer a kernel: how wide their integer registers are, which
+bit-manipulation instructions they have, and which vector extensions they add. Each of these
+can speed up some of binCV's kernels and does nothing for others.
 
-This writeup covers the four machines binCV has been measured on, and only those. Each
-figure quoted here comes from a report or target page linked beside it, and every chart is
-drawn from the report table it cites.
+This writeup has two parts. The first runs through those hardware features and the technique
+each one enables for packed bits. The second looks at the four machines binCV has been
+measured on — a desktop x86-64 CPU, a Raspberry Pi 4, an STM32 microcontroller and an
+NVIDIA GPU — and at what the measurements show. It makes no claim about machines binCV has
+not run on.
 
-## The four machines
+Every figure quoted here comes from a report or target page linked beside it, and every
+chart is drawn from the report table it cites. [The premise](premise.md) explains the
+representation itself.
+
+## Part 1: hardware features, and what each does for packed bits
+
+### Integer width: how many pixels one instruction handles
+
+A bit-packed word instruction processes as many pixels as the register has bits: 32 pixels
+per AND on a 32-bit core, 64 on a 64-bit one. So the natural technique is to **match the
+word type to the register width**. binCV is templated on its word type, from `uint8_t` to
+`uint64_t`, so the choice is the caller's.
+
+Two things limit it. On a 32-bit core a 64-bit word is emulated with two instructions and a
+register pair, so it costs more than it saves. And a wider word rounds each row's stride up
+more coarsely, which costs memory; binCV's default is `uint32_t` for that reason.
+
+### Population count: counting a word's set bits in one instruction
+
+Many binCV operations end in counting set bits. `countNonZero` counts the pixels in a region,
+a Hamming distance between two descriptors is the count of their XOR, and the gradient
+covariance in the tracker is four counts over masks. A **population count instruction**
+counts every set bit in a word at once, so a reduction costs one instruction per word.
+
+Without one, the count is a software sequence of about a dozen shifts, masks and adds per
+word — a "SIMD within a register" trick that sums bits in pairs, then nibbles, then bytes.
+Reductions then cost several times more per word, and the useful technique changes: keep the
+per-byte partial sums across many words and finish the sum once, instead of finishing it for
+every word.
+
+Where the instruction lives matters as well as whether it exists. Some instruction sets
+count bits only in vector registers. There, counting a single word from a general register
+means moving it into the vector unit and the result back out, and those moves can cost as
+much as the count. The technique is to **count in bulk**: load data straight into vector
+registers, accumulate there, and move a result out once per region. binCV offers reductions
+only over regions, masks and windows, never over a single word, so that every kernel can do
+this.
+
+### SIMD extensions: many words per instruction
+
+Vector extensions — SSE and AVX2 on x86-64, NEON on Arm — apply one instruction to a 128-
+or 256-bit register. For packed bits that is 128 or 256 pixels per AND. binCV has vector
+paths for AVX2, selected at run time, and for NEON, and each one can be switched off so a
+benchmark can measure what it is worth. SIMD also lets a kernel process several independent
+small problems side by side, as the tracker does with eight keypoints at once.
+
+SIMD also speeds up the byte-based alternative. A 256-bit register of bytes holds 32
+pixels — exactly what one `uint32_t` of bits holds. So on a machine with SIMD, the
+comparison that decides a result is bits in vector registers against bytes in vector
+registers, not bits against a byte-at-a-time loop.
+
+### DSP extensions on microcontrollers
+
+Microcontroller cores without SIMD often have a DSP extension that works on four bytes
+packed in one 32-bit register. On Armv7E-M, `USAD8` — a sum of absolute byte differences —
+adds up four bytes in one instruction when one operand is zero, which can replace the last
+steps of a software population count.
+
+### GPU warp primitives
+
+A GPU runs threads in groups — a warp of 32 on NVIDIA hardware — and provides instructions
+that work across the group. `__ballot_sync` collects one true-or-false answer from each of
+the 32 threads into a single 32-bit word. That word is the packed format, so a GPU can turn
+32 per-pixel comparisons into one packed word in one instruction. `__popc` counts the bits
+of a 32-bit register.
+
+### Summary
+
+| feature | what it speeds up | x86-64 | aarch64 | Cortex-M7 | GPU |
+|---|---|---|---|---|---|
+| native integer width | pixels per scalar instruction | 64 bits | 64 bits | 32 bits | 32 bits |
+| population count | reductions, Hamming distance, covariance | `POPCNT`, general registers | `cnt`, vector registers only | none | `__popc`, 32 bits |
+| SIMD | logic and counting over many words at once | AVX2, 256 bits | NEON, 128 bits | none | the 32-thread warp |
+| DSP byte instructions | the tail of a software population count | — | — | `USAD8` and others | — |
+| warp primitives | packing pixels from a comparison | — | — | — | `__ballot_sync` |
+
+## Part 2: what the measurements show
+
+### The four machines
 
 | | x86-64 | aarch64 | Cortex-M7 | GPU |
 |---|---|---|---|---|
 | part | AMD Ryzen 5 5600X | Broadcom BCM2711 (Raspberry Pi 4), Cortex-A72 at 1.8 GHz | STM32H753ZI, run at its 64 MHz reset clock | NVIDIA RTX 3070 Ti, SM 8.6 |
-| native integer width | 64 bits | 64 bits | 32 bits | 32 bits; no 64-bit integer datapath |
-| population count | `POPCNT`, in general registers | `cnt`, in NEON registers only | none: a software sequence | `__popc`, on a 32-bit register |
-| vector unit binCV uses | AVX2, 256 bits, selected at run time | NEON, 128 bits | none | the 32-lane warp |
 | memory | 32 KiB L1d, 512 KiB L2 per core, 32 MiB L3 | 32 KiB L1d, 1 MiB shared L2 | 512 KB AXI SRAM, 16 KiB stack as configured | ~608 GB/s device memory |
 
-Every row below differs down that table, and so do the results.
+### Integer width: 64-bit words on 64-bit cores, 32-bit words elsewhere
 
-## The word should be the machine's integer width
+On kernels whose cost is arithmetic, the word that matches the register wins, and the same
+choice loses on a core of the other width:
 
-binCV is templated on its word type, from `uint8_t` to `uint64_t`. A wider word does less
-loop overhead per pixel, so on a 64-bit core it is faster. On a 32-bit core every 64-bit
-operation is two operations and a register pair, so it is slower:
+<!-- figure-check values="measured" source="source" -->
+| machine | operation | `uint64_t` against `uint32_t` | measured | source |
+|---|---|---|---|---|
+| x86-64 | `countNonZero`, 640×480 | 1.57× faster | 0.005895 against 0.009270 ns/pixel | [primitives.md](../reports/primitives.md) |
+| aarch64 | `countNonZero`, 640×480 | 1.95× faster | 1.95× [1.95, 1.95] | [footprint.md](../reports/footprint.md) |
+| Cortex-M7 | dense disparity, 320×240 | 1.30× slower | 68,807,055 against 52,823,363 cycles | [targets/stm32h753](../../targets/stm32h753/README.md) |
+| GPU | every kernel | not offered | `uint64_t` is two 32-bit operations | [ARCHITECTURE.md §8.5](../ARCHITECTURE.md) |
 
-<!-- figure-check values="uint64_t against uint32_t" source="source" -->
-| machine | operation | uint64_t against uint32_t | source |
-|---|---|---|---|
-| x86-64 | `countNonZero`, 640×480 | 0.005895 against 0.009270 ns/pixel | [primitives.md](../reports/primitives.md) |
-| aarch64 | `countNonZero`, 640×480 | 1.95× faster | [footprint.md](../reports/footprint.md) |
-| Cortex-M7 | dense disparity, 320×240 | 1.30× slower | [targets/stm32h753](../../targets/stm32h753/README.md) |
-| GPU | every kernel | not offered: `uint64_t` is two 32-bit operations | [ARCHITECTURE.md §8.5](../ARCHITECTURE.md) |
+The x86-64 speedup is computed from the two published medians; the others are published as
+ratios. Pointwise logic is the exception: AND, OR and XOR run at memory bandwidth on both
+sides, and the word type makes no consistent difference to them
+([primitives.md](../reports/primitives.md#logic)).
 
-The default is nevertheless `uint32_t` on every machine, because the word type also sets
-how coarsely each row's stride rounds up, and at the small upper levels of a pyramid a
-64-bit stride costs up to 1.33× the bytes. Where speed and footprint conflict, footprint
-wins. A kernel whose scratch is a band rather than a frame is free to recommend otherwise,
-and dense disparity does: `uint64_t` on 64-bit cores, the native word elsewhere.
+binCV's default is still `uint32_t` on every machine, because at the small upper levels of a
+pyramid a 64-bit stride costs up to 1.33× the bytes, and where speed and footprint conflict,
+footprint wins. A kernel whose scratch is a band rather than a frame is free to recommend
+otherwise, and dense disparity does: `uint64_t` on 64-bit cores, the native word elsewhere.
 
 A caller who chooses 64-bit words is not locked out of the 32-bit kernels, because on a
 little-endian machine the two layouts are the same bytes:
@@ -51,18 +128,16 @@ little-endian machine the two layouts are the same bytes:
 runs at the native 32-bit speed on the Cortex-A72 and within 4% of it on x86-64
 ([footprint.md](../reports/footprint.md#where-speed-was-declined-to-protect-it)).
 
-## Where the population count lives
+### Population count: one instruction, a round trip, or software
 
-Counting set bits is the reduction under nearly every measurement binCV makes — a pixel
-count, a Hamming distance, a gradient covariance. The four machines put it in three
-different places.
+The four machines handle the count in three different ways.
 
 ![The population count's path on x86-64, all in general registers; on aarch64 one word at a
 time, crossing into the NEON register file and back; and on aarch64 over a whole window,
 crossing once](figures/architectures-popcount.svg)
 
-**On x86-64** `POPCNT` is an ordinary integer instruction and a per-word count costs what it
-looks like it costs.
+**On x86-64** `POPCNT` is an ordinary integer instruction, so a per-word count costs one
+instruction.
 
 **On aarch64** there is no scalar population count. `cnt` works on NEON registers, so a
 word in a general register has to cross into the vector register file and its count has to
@@ -71,7 +146,7 @@ has no public `popcount(word)`: reductions are offered over regions, masks and w
 kernel can load straight into vector registers, accumulate there, and cross once. The rule
 applies on every machine; aarch64 is the reason for it.
 
-**On the Cortex-M7** there is no instruction at all. GCC calls libgcc's software sequence,
+**On the Cortex-M7** there is no instruction at all. GCC calls libgcc's software sequence
 once per word. Four ways of counting a word, timed inside `countNonZero` on a 752×480 frame:
 
 <!-- figure-check values="cycles|against the shipped arm" source="@targets/stm32h753/README.md" -->
@@ -92,10 +167,7 @@ tracking pipeline, which performs none.
 
 **On the GPU** `__popc` counts a 32-bit register, which is one format word.
 
-## A word of bits against a vector of bytes
-
-The comparison that decides most results on the two application processors is not bits
-against bytes. It is bits against a byte kernel that has already been vectorized:
+### SIMD extensions: bits against an already vectorized byte kernel
 
 ![To scale in bits: an AVX2 register of bytes holds 32 pixels, one uint32_t word of bits
 also holds 32, and an AVX2 register of bits holds 256](figures/architectures-register.svg)
@@ -117,7 +189,7 @@ arms binCV does have are switchable at run time, so their worth is measured rath
 assumed: the eight-keypoint AVX2 batch in the tracker is worth 1.84× on tracking on x86-64,
 bit-exact with the scalar path ([limits.md](../reports/limits.md#the-vector-arms-and-proving-they-are-on)).
 
-### The window, not the word, caps the gain
+#### The window, not the word, caps the gain
 
 Inside Lucas–Kanade the unit of work is one row of a 31-pixel window:
 
@@ -128,7 +200,7 @@ In a 32-bit word the row is 31 pixels per operation against OpenCV's 16 — a 1.
 advantage — and that is the ceiling at this window size. A wider word lowers the
 utilisation to 48% without processing any more of the window.
 
-## The crossover moves with the machine
+### The bit-depth crossover moves with the machine
 
 Bit-slicing pays at low bit depth and loses at high bit depth, because the adder needs more
 planes as its input gets wider. Where it stops paying is not a property of the algorithm.
@@ -149,7 +221,7 @@ the same silicon. binCV's own times scale about as expected between the two mach
 OpenCV's do not. **A ratio measured on a desktop is not a ratio on a deployment part, in
 either direction.**
 
-## Less data does not make a compute-bound kernel faster
+### Less data does not make a compute-bound kernel faster
 
 An eighth of the bytes decides what fits on a device. It does not by itself make a kernel
 faster. Lucas–Kanade at a fixed 140 points, with the frame grown 36-fold:
@@ -163,7 +235,7 @@ four cache lines at one bit per pixel, and it would be two to four as bytes too.
 tracker is compute-bound, so its speed has to come from doing less work, and the footprint
 result stands independently of it.
 
-## On the microcontroller
+### The microcontroller: no population count, no SIMD
 
 The Cortex-M7 has no population count, no vector unit and a 32-bit `size_t`, so it is the
 machine where binCV has the least help from the hardware. The library runs there unchanged:
@@ -186,7 +258,7 @@ What has **not** been measured there is as important: no comparison against Open
 pipeline or tracker timing, and nothing at the part's full 480 MHz clock. The disparity
 figure is a floor at an eighth of the clock, not the part's number.
 
-## On the GPU
+### The GPU: warp primitives that produce the format
 
 A CUDA core is a 32-bit integer machine, and the hardware's own primitives work on 32 bits,
 so the device word is `uint32_t` and nothing else. One of those primitives packs the format
@@ -214,15 +286,15 @@ larger there. On one-bit input the dense cost is one XOR per 32-pixel word, and 
 on both axes. The full set, including where binCV does not lead, is in
 [cuda.md](../reports/cuda.md).
 
-## What holds on every machine
+### What holds on every machine
 
 - **Memory barely moves.** A plane's size is arithmetic on its geometry, so a footprint
   figure is identical on every CPU, and on the GPU differs only by the driver's allocation
   rounding. Speed is the axis that moves.
-- **The right word is the native integer width**, and the default trades that away only for
-  footprint.
-- **Reductions stay bulk**, because on one of the four machines a per-word count is a
-  round trip between register files.
-- **The byte alternative sets the bar**, and its strength differs by machine. binCV's lead
-  is largest where the data is genuinely narrow and the byte kernel is weakest, and it
-  disappears where the input is wide.
+- **Match the word to the register** for kernels whose cost is arithmetic. The default
+  gives that up only for footprint.
+- **Count in bulk**, because on one of the four machines a per-word count is a round trip
+  between register files.
+- **The byte alternative sets the bar**, and SIMD makes it stronger on some machines than
+  others. binCV's lead is largest where the data is genuinely narrow and the byte kernel is
+  weakest, and it disappears where the input is wide.

@@ -14,22 +14,40 @@ bit pattern it shows rather than drawing it by hand.
 
 ## One bit per pixel
 
-![A 16×4 binary mask stored as 64 bytes and as eight 8-bit words, with one row's word
-expanded to show that pixel x is bit x mod W](figures/premise-bytes-vs-bits.svg)
+![A 16×4 binary mask stored as 64 bytes and as eight 8-bit words. Below, pixels 0–7 of row 1
+drawn both ways: as eight bytes, 64 bits of which one per byte carries the pixel, and as one
+8-bit word](figures/premise-bytes-vs-bits.svg)
 
-Pixel `x` of a row lives at bit `x % W` of word `x / W`, where `W` is the word width. A
-640-pixel row is twenty `uint32_t` words, and a 640×480 frame is 38,400 bytes where the byte
-representation is 307,200. The figures use 8-bit words so the bits are legible; the default
-word is `uint32_t`, for a reason given [below](#memory-is-decided-by-the-design).
+Stored as bytes, every pixel in the figure takes a whole byte, and seven of its eight bits
+are always zero. Stored as bits, each 16-pixel row takes two 8-bit words, and nothing is
+wasted. Pixel `x` lives at bit `x % W` of word `x / W`, where `W` is the word width.
 
-Pixel 0 is the **least** significant bit. Written as a number, a row therefore reads
-backwards — but a shift toward the high bit moves every pixel one place to the right in the
-image, and that is the direction every kernel reasons in.
+The figures use 8-bit words so the bits stay legible. binCV's default word is `uint32_t`,
+for a reason given [below](#memory-is-decided-by-the-design), so a word holds 32 pixels: a
+640-pixel VGA row is 20 words where it would be 640 bytes, and a 640×480 frame is 38,400
+bytes where it would be 307,200.
 
-## Pixel operations become word operations
+Pixel 0 is the word's **lowest** bit. Written out as a binary number, a row's pixels
+therefore appear right to left. It matters in one place below: shifting a word *left* (`<<`)
+moves its pixels *right* in the image.
 
-Once pixels are bits, most binary operations become ordinary integer instructions over whole
-words:
+## One instruction, many pixels
+
+The speed comes from one fact: **a word holds many pixels, so one instruction processes
+many pixels.** ANDing two masks shows it most directly:
+
+![Two 16-pixel rows ANDed: sixteen instructions when each pixel is a byte, two when each
+pixel is a bit in an 8-bit word, with the corresponding loops for a 640-pixel
+row](figures/premise-and.svg)
+
+A byte loop does one AND per pixel. A packed loop does one AND per word, and each word is 32
+pixels at the default width, so the same row takes 20 instructions instead of 640. A
+compiler vectorizes the byte loop too, which narrows that gap; the same vector registers
+then hold eight times as many pixels as bits, and
+[architectures.md](architectures.md#simd-extensions-bits-against-an-already-vectorized-byte-kernel)
+follows that comparison onto real machines.
+
+Most binary operations become word instructions the same way:
 
 | on pixels | on words |
 |---|---|
@@ -154,30 +172,53 @@ as one without a copy.
 
 ## What it buys, and where it stops
 
-Measured against OpenCV on the same content stored as bytes, one thread on each side:
+Measured against OpenCV on the same content stored as bytes, one thread on each side. Every
+ratio is OpenCV's time divided by binCV's, so above 1× binCV is ahead:
 
 <!-- figure-check values="ratio, x86-64|ratio, aarch64" source="source" -->
 | operation | ratio, x86-64 | ratio, aarch64 | source |
 |---|---|---|---|
 | `bitwiseAnd` | 9.97× | 26.7× | [primitives.md](../reports/primitives.md) |
+| optical flow, 140 points | 7.19× | 8.27× | [features.md](../reports/features.md) |
+| Hamming matching, kNN=2 over 1000×1000 | 4.70× | 1.95× | [features.md](../reports/features.md) |
 | `countNonZero` | 1.62× | 2.66× | [primitives.md](../reports/primitives.md) |
+| `goodFeaturesToTrack` | 1.38× | 2.42× | [features.md](../reports/features.md) |
 | `erode`, 5×5 ellipse | 0.319× | 0.514× | [primitives.md](../reports/primitives.md) |
-| `pyrDown`, 8 bits in, 8 bits out | 0.0235× | 0.0701× | [limits.md](../reports/limits.md) |
 
-Every ratio is OpenCV's time divided by binCV's, so above 1× binCV is ahead. x86-64 is a
-desktop Ryzen 5 5600X and aarch64 a Raspberry Pi 4; [the reports](../reports/README.md) give
-the intervals, the method and the command behind each row.
+x86-64 is a desktop Ryzen 5 5600X and aarch64 a Raspberry Pi 4. [The reports](../reports/README.md)
+give the intervals, the method and the command behind each row.
 
-The last two rows are the idea's limits, and they are structural:
+The pyramid shows how the result depends on bit depth. The same 2×2 box downsample from
+640×480, against `cv::pyrDown` on bytes, at each input and output width:
+
+<!-- figure-check values="x86-64|aarch64" source="@docs/reports/limits.md" -->
+| `pyrDown`, bits in → bits out | x86-64 | aarch64 |
+|---|---|---|
+| **1 → 3, the shipped kernel** | 1.56× | 5.51× |
+| 1 → 1 | 0.605× | 5.89× |
+| 2 → 2 | 0.772× | 2.52× |
+| 3 → 3 | 0.508× | 1.68× |
+| 4 → 4 | 0.358× | 1.16× |
+| 5 → 5 | 0.272× | 0.797× |
+| 8 → 8 | 0.0736× | 0.201× |
+
+On the Raspberry Pi binCV is ahead at every depth through four bits, by up to 5.89×. On the
+desktop only the shipped one-bit-in, three-bits-out kernel is ahead: OpenCV's x86-64 pyramid
+is a much stronger baseline than its aarch64 one, which
+[architectures.md](architectures.md#the-bit-depth-crossover-moves-with-the-machine) looks at.
+The rows other than the first run the generic filtered path rather than the shipped kernel;
+[limits.md](../reports/limits.md) has both.
+
+Two limits are structural:
 
 - **A structuring element that does not separate** costs one shifted word operation per set
   element, so a 5×5 ellipse pays for every cell it covers. binCV ships it at that speed
   because it holds an eighth of the memory, and where speed and footprint conflict, footprint
   wins.
 - **Wide inputs defeat bit-slicing.** An adder needs enough output planes to hold its sum,
-  so the work per pixel grows with the input's bit depth. At eight bits in, the bit-sliced
-  form is doing gate by gate what a byte kernel's vector unit does in one instruction.
-  binCV's `pyrDown` ships as one bit in and three out, where it is ahead.
+  so the work per pixel grows with the input's bit depth, and the pyramid table falls
+  steadily as the depth rises. At eight bits in, the bit-sliced form is doing gate by gate
+  what a byte kernel's vector unit does in one instruction.
 
 The premise holds where the data is genuinely narrow. [limits.md](../reports/limits.md)
 finds each place it does not, on both machines, and
