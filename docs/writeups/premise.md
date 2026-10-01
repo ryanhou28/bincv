@@ -160,7 +160,7 @@ The same design refuses allocations rather than shrinking them. Dense stereo dis
 streams a band of rows instead of building a cost volume:
 
 <!-- figure-check values="bytes" source="@docs/reports/stereo.md" -->
-| dense disparity, 640×480 | bytes |
+| dense disparity, 752×480, 64 disparities | bytes |
 |---|---|
 | a dense cost volume at this configuration, which binCV does not allocate | 23,101,440 |
 | binCV's whole caller-provided scratch | 32,352 |
