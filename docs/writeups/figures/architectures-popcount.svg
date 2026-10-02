@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="330" viewBox="0 0 900 330" role="img" aria-label="Where the population count runs: in general registers on x86-64, and in the NEON register file on aarch64, where a per-word count crosses between register files">
+<style>
+.bg{fill:#ffffff}
+.fg{fill:#1f2328}
+.muted{fill:#59636e}
+.on{fill:#2f6fdb}
+.off{fill:#eef1f5}
+.hi{fill:#d4620f}
+.hisoft{fill:#fbe3cf}
+.neg{fill:#d4620f}
+.pad{fill:#d7dbe0}
+.cell{stroke:#aeb6bf;stroke-width:0.75}
+.word{fill:none;stroke:#1f2328;stroke-width:2}
+.box{fill:none;stroke:#59636e;stroke-width:1;stroke-dasharray:3 3}
+.ring{fill:none;stroke:#d4620f;stroke-width:2.5}
+.edge{stroke:#59636e;stroke-width:1.25;fill:none}
+.arrowhead{fill:#59636e}
+.hiedge{stroke:#d4620f;stroke-width:2;fill:none}
+.hiarrowhead{fill:#d4620f}
+.bar1{fill:#aeb6bf}
+.bar2{fill:#2f6fdb}
+.s1{stroke:#2f6fdb;stroke-width:2.5;fill:none}
+.s2{stroke:#d4620f;stroke-width:2.5;fill:none}
+.d1{fill:#2f6fdb}
+.d2{fill:#d4620f}
+.gridline{stroke:#d7dbe0;stroke-width:1}
+.refline{stroke:#1f2328;stroke-width:1.5;stroke-dasharray:5 4}
+.axis{stroke:#59636e;stroke-width:1}
+.halo{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.oninv{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.fg{fill:#e6edf3}
+.muted{fill:#9198a1}
+.on{fill:#4493f8}
+.off{fill:#1c2129}
+.hi{fill:#f0883e}
+.hisoft{fill:#4a2a12}
+.neg{fill:#f0883e}
+.pad{fill:#3d444d}
+.cell{stroke:#3d444d}
+.word{stroke:#e6edf3}
+.box{stroke:#9198a1}
+.ring{stroke:#f0883e}
+.edge{stroke:#9198a1}
+.arrowhead{fill:#9198a1}
+.hiedge{stroke:#f0883e}
+.hiarrowhead{fill:#f0883e}
+.bar1{fill:#59636e}
+.bar2{fill:#4493f8}
+.s1{stroke:#4493f8}
+.s2{stroke:#f0883e}
+.d1{fill:#4493f8}
+.d2{fill:#f0883e}
+.gridline{stroke:#30363d}
+.refline{stroke:#e6edf3}
+.axis{stroke:#9198a1}
+.halo{stroke:#0d1117}
+.oninv{fill:#0d1117}
+}
+</style>
+<rect width="100%%" height="100%%" class="bg" rx="8"/>
+<text x="30" y="32" font-size="14" text-anchor="start" class="fg" font-weight="600">x86-64</text>
+<text x="90" y="32" font-size="11" text-anchor="start" class="muted">POPCNT reads and writes general registers</text>
+<rect x="30" y="46" width="82.6" height="30" class="off cell" rx="4"/>
+<text x="71.3" y="66" font-size="12" text-anchor="middle" class="fg mono">load word</text>
+<line x1="115.6" y1="61" x2="130.6" y2="61" class="edge"/>
+<path d="M137.6 61L130.6 65L130.6 57Z" class="arrowhead"/>
+<rect x="140.6" y="46" width="60.4" height="30" class="off cell" rx="4"/>
+<text x="170.8" y="66" font-size="12" text-anchor="middle" class="fg mono">popcnt</text>
+<line x1="204" y1="61" x2="219" y2="61" class="edge"/>
+<path d="M226 61L219 65L219 57Z" class="arrowhead"/>
+<rect x="229" y="46" width="38.2" height="30" class="off cell" rx="4"/>
+<text x="248.1" y="66" font-size="12" text-anchor="middle" class="fg mono">add</text>
+<text x="30" y="110" font-size="14" text-anchor="start" class="fg" font-weight="600">aarch64, one word at a time</text>
+<text x="258" y="110" font-size="11" text-anchor="start" class="muted"></text>
+<rect x="30" y="124" width="97.4" height="30" class="off cell" rx="4"/>
+<text x="78.7" y="144" font-size="12" text-anchor="middle" class="fg mono">word in GPR</text>
+<line x1="130.4" y1="139" x2="145.4" y2="139" class="edge"/>
+<path d="M152.4 139L145.4 143L145.4 135Z" class="arrowhead"/>
+<rect x="155.4" y="124" width="45.6" height="30" class="off cell" rx="4"/>
+<text x="178.2" y="144" font-size="12" text-anchor="middle" class="fg mono">fmov</text>
+<line x1="204" y1="139" x2="219" y2="139" class="hiedge"/>
+<path d="M226 139L219 143L219 135Z" class="hiarrowhead"/>
+<rect x="229" y="124" width="38.2" height="30" class="hisoft cell" rx="4"/>
+<text x="248.1" y="144" font-size="12" text-anchor="middle" class="fg mono">cnt</text>
+<line x1="270.2" y1="139" x2="285.2" y2="139" class="edge"/>
+<path d="M292.2 139L285.2 143L285.2 135Z" class="arrowhead"/>
+<rect x="295.2" y="124" width="45.6" height="30" class="hisoft cell" rx="4"/>
+<text x="318" y="144" font-size="12" text-anchor="middle" class="fg mono">addv</text>
+<line x1="343.8" y1="139" x2="358.8" y2="139" class="hiedge"/>
+<path d="M365.8 139L358.8 143L358.8 135Z" class="hiarrowhead"/>
+<rect x="368.8" y="124" width="45.6" height="30" class="off cell" rx="4"/>
+<text x="391.6" y="144" font-size="12" text-anchor="middle" class="fg mono">fmov</text>
+<line x1="417.4" y1="139" x2="432.4" y2="139" class="edge"/>
+<path d="M439.4 139L432.4 143L432.4 135Z" class="arrowhead"/>
+<rect x="442.4" y="124" width="38.2" height="30" class="off cell" rx="4"/>
+<text x="461.5" y="144" font-size="12" text-anchor="middle" class="fg mono">add</text>
+<text x="740" y="144" font-size="12" text-anchor="start" class="hi" font-weight="600">two crossings per word</text>
+<text x="30" y="188" font-size="14" text-anchor="start" class="fg" font-weight="600">aarch64, a whole window</text>
+<text x="226" y="188" font-size="11" text-anchor="start" class="muted"></text>
+<rect x="30" y="202" width="104.8" height="30" class="hisoft cell" rx="4"/>
+<text x="82.4" y="222" font-size="12" text-anchor="middle" class="fg mono">ld1 128 bits</text>
+<line x1="137.8" y1="217" x2="152.8" y2="217" class="edge"/>
+<path d="M159.8 217L152.8 221L152.8 213Z" class="arrowhead"/>
+<rect x="162.8" y="202" width="38.2" height="30" class="hisoft cell" rx="4"/>
+<text x="181.9" y="222" font-size="12" text-anchor="middle" class="fg mono">cnt</text>
+<line x1="204" y1="217" x2="219" y2="217" class="edge"/>
+<path d="M226 217L219 221L219 213Z" class="arrowhead"/>
+<rect x="229" y="202" width="82.6" height="30" class="hisoft cell" rx="4"/>
+<text x="270.3" y="222" font-size="12" text-anchor="middle" class="fg mono">add bytes</text>
+<line x1="314.6" y1="217" x2="329.6" y2="217" class="edge"/>
+<path d="M336.6 217L329.6 221L329.6 213Z" class="arrowhead"/>
+<rect x="339.6" y="202" width="82.6" height="30" class="hisoft cell" rx="4"/>
+<text x="380.9" y="222" font-size="12" text-anchor="middle" class="fg mono">… per row</text>
+<line x1="425.2" y1="217" x2="440.2" y2="217" class="edge"/>
+<path d="M447.2 217L440.2 221L440.2 213Z" class="arrowhead"/>
+<rect x="450.2" y="202" width="97.4" height="30" class="hisoft cell" rx="4"/>
+<text x="498.9" y="222" font-size="12" text-anchor="middle" class="fg mono">widen, addv</text>
+<line x1="550.6" y1="217" x2="565.6" y2="217" class="hiedge"/>
+<path d="M572.6 217L565.6 221L565.6 213Z" class="hiarrowhead"/>
+<rect x="575.6" y="202" width="45.6" height="30" class="off cell" rx="4"/>
+<text x="598.4" y="222" font-size="12" text-anchor="middle" class="fg mono">fmov</text>
+<text x="740" y="222" font-size="12" text-anchor="start" class="fg" font-weight="600">one crossing per window</text>
+<rect x="30" y="262" width="14" height="14" class="off cell" rx="3"/>
+<text x="50" y="273" font-size="12" text-anchor="start" class="fg">general-purpose registers</text>
+<rect x="230" y="262" width="14" height="14" class="hisoft cell" rx="3"/>
+<text x="250" y="273" font-size="12" text-anchor="start" class="fg">NEON register file</text>
+<line x1="400" y1="269" x2="424" y2="269" class="hiedge"/>
+<text x="432" y="273" font-size="12" text-anchor="start" class="fg">a crossing between the two</text>
+<text x="30" y="302" font-size="11" text-anchor="start" class="muted">aarch64 has no scalar population count, so the crossings cost about as much as the count. binCV offers counts over regions, masks</text>
+<text x="30" y="318" font-size="11" text-anchor="start" class="muted">and windows only, never over one word, so a kernel can keep the data in vector registers and pay the crossing once.</text>
+</svg>

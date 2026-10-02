@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="330" viewBox="0 0 860 330" role="img" aria-label="Lucas-Kanade cost per point stays flat as the frame grows 36-fold at a fixed point count, on both machines">
+<style>
+.bg{fill:#ffffff}
+.fg{fill:#1f2328}
+.muted{fill:#59636e}
+.on{fill:#2f6fdb}
+.off{fill:#eef1f5}
+.hi{fill:#d4620f}
+.hisoft{fill:#fbe3cf}
+.neg{fill:#d4620f}
+.pad{fill:#d7dbe0}
+.cell{stroke:#aeb6bf;stroke-width:0.75}
+.word{fill:none;stroke:#1f2328;stroke-width:2}
+.box{fill:none;stroke:#59636e;stroke-width:1;stroke-dasharray:3 3}
+.ring{fill:none;stroke:#d4620f;stroke-width:2.5}
+.edge{stroke:#59636e;stroke-width:1.25;fill:none}
+.arrowhead{fill:#59636e}
+.hiedge{stroke:#d4620f;stroke-width:2;fill:none}
+.hiarrowhead{fill:#d4620f}
+.bar1{fill:#aeb6bf}
+.bar2{fill:#2f6fdb}
+.s1{stroke:#2f6fdb;stroke-width:2.5;fill:none}
+.s2{stroke:#d4620f;stroke-width:2.5;fill:none}
+.d1{fill:#2f6fdb}
+.d2{fill:#d4620f}
+.gridline{stroke:#d7dbe0;stroke-width:1}
+.refline{stroke:#1f2328;stroke-width:1.5;stroke-dasharray:5 4}
+.axis{stroke:#59636e;stroke-width:1}
+.halo{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.oninv{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.fg{fill:#e6edf3}
+.muted{fill:#9198a1}
+.on{fill:#4493f8}
+.off{fill:#1c2129}
+.hi{fill:#f0883e}
+.hisoft{fill:#4a2a12}
+.neg{fill:#f0883e}
+.pad{fill:#3d444d}
+.cell{stroke:#3d444d}
+.word{stroke:#e6edf3}
+.box{stroke:#9198a1}
+.ring{stroke:#f0883e}
+.edge{stroke:#9198a1}
+.arrowhead{fill:#9198a1}
+.hiedge{stroke:#f0883e}
+.hiarrowhead{fill:#f0883e}
+.bar1{fill:#59636e}
+.bar2{fill:#4493f8}
+.s1{stroke:#4493f8}
+.s2{stroke:#f0883e}
+.d1{fill:#4493f8}
+.d2{fill:#f0883e}
+.gridline{stroke:#30363d}
+.refline{stroke:#e6edf3}
+.axis{stroke:#9198a1}
+.halo{stroke:#0d1117}
+.oninv{fill:#0d1117}
+}
+</style>
+<rect width="100%%" height="100%%" class="bg" rx="8"/>
+<line x1="110" y1="240" x2="600" y2="240" class="gridline"/>
+<text x="100" y="244" font-size="11" text-anchor="end" class="muted">0.8×</text>
+<line x1="110" y1="189" x2="600" y2="189" class="gridline"/>
+<text x="100" y="193" font-size="11" text-anchor="end" class="muted">0.9×</text>
+<line x1="110" y1="138" x2="600" y2="138" class="refline"/>
+<text x="100" y="142" font-size="11" text-anchor="end" class="muted">1.0×</text>
+<line x1="110" y1="87" x2="600" y2="87" class="gridline"/>
+<text x="100" y="91" font-size="11" text-anchor="end" class="muted">1.1×</text>
+<line x1="110" y1="36" x2="600" y2="36" class="gridline"/>
+<text x="100" y="40" font-size="11" text-anchor="end" class="muted">1.2×</text>
+<text x="110" y="260" font-size="12" text-anchor="middle" class="fg mono">320×240</text>
+<text x="110" y="276" font-size="11" text-anchor="middle" class="muted">9.4 KiB</text>
+<text x="273.33" y="260" font-size="12" text-anchor="middle" class="fg mono">640×480</text>
+<text x="273.33" y="276" font-size="11" text-anchor="middle" class="muted">37.5 KiB</text>
+<text x="436.67" y="260" font-size="12" text-anchor="middle" class="fg mono">1280×960</text>
+<text x="436.67" y="276" font-size="11" text-anchor="middle" class="muted">150 KiB</text>
+<text x="600" y="260" font-size="12" text-anchor="middle" class="fg mono">1920×1440</text>
+<text x="600" y="276" font-size="11" text-anchor="middle" class="muted">337.5 KiB</text>
+<text transform="rotate(-90 28 138)" x="28" y="138" font-size="12" text-anchor="middle" class="muted">cost per point vs 320×240</text>
+<path d="M110 138 L273.33 187.93 L436.67 111.15 L600 106.37" class="s1"/>
+<circle cx="110" cy="138" r="4" class="d1"/>
+<text x="114" y="128" font-size="10" text-anchor="start" class="fg halo mono">25.64 µs</text>
+<circle cx="273.33" cy="187.93" r="4" class="d1"/>
+<text x="273.33" y="177.93" font-size="10" text-anchor="middle" class="fg halo mono">23.13 µs</text>
+<circle cx="436.67" cy="111.15" r="4" class="d1"/>
+<text x="436.67" y="101.15" font-size="10" text-anchor="middle" class="fg halo mono">26.99 µs</text>
+<circle cx="600" cy="106.37" r="4" class="d1"/>
+<text x="600" y="96.37" font-size="10" text-anchor="middle" class="fg halo mono">27.23 µs</text>
+<text x="672" y="106.37" font-size="12" text-anchor="start" class="fg" font-weight="600">aarch64, Cortex-A72</text>
+<path d="M110 138 L273.33 194.61 L436.67 123.33 L600 139.97" class="s2"/>
+<circle cx="110" cy="138" r="4" class="d2"/>
+<text x="114" y="157" font-size="10" text-anchor="start" class="fg halo mono">4.658 µs</text>
+<circle cx="273.33" cy="194.61" r="4" class="d2"/>
+<text x="273.33" y="213.61" font-size="10" text-anchor="middle" class="fg halo mono">4.141 µs</text>
+<circle cx="436.67" cy="123.33" r="4" class="d2"/>
+<text x="436.67" y="142.33" font-size="10" text-anchor="middle" class="fg halo mono">4.792 µs</text>
+<circle cx="600" cy="139.97" r="4" class="d2"/>
+<text x="600" y="158.97" font-size="10" text-anchor="middle" class="fg halo mono">4.64 µs</text>
+<text x="672" y="147.97" font-size="12" text-anchor="start" class="fg" font-weight="600">x86-64, Ryzen 5 5600X</text>
+<text x="110" y="300" font-size="11" text-anchor="start" class="muted">140 points, 31×31 window, one pyramid level. Labels are µs per point.</text>
+<text x="110" y="316" font-size="11" text-anchor="start" class="muted">Source: docs/reports/limits.md, the frame-size sweep.</text>
+</svg>
