@@ -931,6 +931,91 @@ def fig_lk_chart():
     return svg
 
 
+def fig_cache_ladder():
+    """Working sets of bitwiseAnd (two inputs and the output) against each machine's
+    memory levels. The sizes are geometry, computed here; the cache sizes are the
+    machines' own: docs/reports/README.md for the two application processors, ST's
+    STM32H753 datasheet (DS12117) for the microcontroller."""
+    import math
+    machines = [
+        ('Raspberry Pi 4', [('L1', 32768, '32 KiB'), ('L2', 1048576, '1 MiB'), ('DRAM', 1 << 27, '')]),
+        ('x86-64 desktop', [('L1', 32768, '32 KiB'), ('L2', 524288, '512 KiB'), ('L3', 1 << 25, '32 MiB'),
+                            ('DRAM', 1 << 27, '')]),
+        ('Cortex-M7', [('L1', 16384, '16 KiB'), ('SRAM', 524288, '512 KiB'), ('none', 1 << 27, 'no larger RAM bank')]),
+    ]
+    sizes = [(640, 480), (1024, 1024), (8192, 4096)]
+    x0, k = 250, 41
+
+    def X(v):
+        return x0 + math.log2(v / 4096) * k
+    svg = Svg(900, 420, 'Working sets of bitwiseAnd as bits and as bytes at three image sizes, on a log scale '
+                        'against the memory levels of a Raspberry Pi 4, an x86-64 desktop and a Cortex-M7')
+    shade = {'L1': 'hisoft', 'L2': 'off', 'L3': 'pad', 'DRAM': 'bg', 'SRAM': 'off', 'none': 'pad'}
+    for r, (name, bands) in enumerate(machines):
+        y = 20 + r * 50
+        svg.text(x0 - 12, y + 25, name, 'fg', 13, 'end', weight='600')
+        prev = 4096
+        for b, size, lab in bands:
+            a, c = X(prev), X(size)
+            svg.rect(a, y, c - a, 38, shade[b] + ' cell')
+            label = lab if b == 'none' else b + ('  ' + lab if lab else '')
+            svg.text(a + 6, y + 24, label, 'hi' if b == 'none' else 'fg', 12, weight='600')
+            prev = size
+    pi_l2 = X(1048576)
+    svg.line(pi_l2, 14, pi_l2, 350, 'hiedge')
+    svg.text(pi_l2 + 6, 186, 'Pi L2 ends', 'hi', 11)
+    for i, (w, h) in enumerate(sizes):
+        y = 220 + i * 52
+        bits, byts = 3 * w * h // 8, 3 * w * h
+        svg.text(x0 - 12, y + 5, '%d×%d' % (w, h), 'fg', 13, 'end')
+        svg.line(X(bits), y, X(byts), y, 'edge')
+        svg.parts.append('<circle cx="%s" cy="%s" r="8" class="on"/>' % (num(round(X(bits), 1)), y))
+        svg.parts.append('<circle cx="%s" cy="%s" r="8" class="pad"/>' % (num(round(X(byts), 1)), y))
+        svg.text(X(bits), y + 24, '{:,} B'.format(bits), 'muted', 10, 'middle', mono=True)
+        svg.text(X(byts), y + 24, '{:,} B'.format(byts), 'muted', 10, 'middle', mono=True)
+    svg.parts.append('<circle cx="%s" cy="372" r="7" class="on"/>' % x0)
+    svg.text(x0 + 14, 376, 'binCV: two input planes and the output, as bits', 'fg', 12)
+    svg.parts.append('<circle cx="%s" cy="396" r="7" class="pad"/>' % x0)
+    svg.text(x0 + 14, 400, 'OpenCV: the same three frames as bytes', 'fg', 12)
+    svg.text(890, 400, 'log scale, 4 KiB to 128 MiB', 'muted', 11, 'end')
+    return svg
+
+
+def fig_streaming():
+    """The dense cost volume against binCV's streamed band. Shapes only: the
+    figures that belong to it are measured and live in the report tables."""
+    svg = Svg(900, 330, 'A dense stereo cost volume holds a cost for every pixel at every disparity; binCV '
+                        'streams a band of rows through per-disparity running sums and emits the map row by row')
+    svg.text(30, 26, 'Cost volume: every pixel at every disparity', 'fg', 14, weight='600')
+    for k in range(10, -1, -1):
+        svg.rect(40 + k * 14, 70 - k * 4 + 20, 220, 140, ('pad' if k else 'off') + ' cell')
+    svg.text(40, 260, 'width × height × disparities, all resident', 'muted', 12)
+    svg.text(40, 280, 'before any pixel picks its disparity', 'muted', 12)
+    bx = 470
+    svg.text(bx, 26, 'binCV: a band of rows, streamed', 'fg', 14, weight='600')
+    svg.rect(bx, 50, 170, 200, 'off cell')
+    svg.rect(bx, 120, 170, 36, 'on cell')
+    svg.text(bx + 85, 143, 'window rows', 'oninv', 12, 'middle')
+    svg.arrow(bx + 85, 172, bx + 85, 200)
+    svg.text(bx + 85, 268, 'image pair, as bits', 'muted', 12, 'middle')
+    rx = bx + 210
+    svg.text(rx, 60, 'per disparity:', 'fg', 12)
+    svg.text(rx, 78, 'a running window sum', 'fg', 12)
+    for d in range(8):
+        svg.rect(rx + d * 22, 92, 16, 46, 'hisoft cell')
+    svg.text(rx, 160, 'add the entering row,', 'muted', 12)
+    svg.text(rx, 177, 'drop the leaving one', 'muted', 12)
+    svg.arrow(bx + 175, 138, rx - 6, 115)
+    svg.rect(rx, 200, 176, 24, 'on cell')
+    svg.text(rx + 88, 217, 'best disparity, this row', 'oninv', 11, 'middle')
+    svg.arrow(rx + 168, 142, rx + 168, 196)
+    svg.text(rx, 250, 'emitted, then the memory', 'muted', 12)
+    svg.text(rx, 267, 'is reused for the next row', 'muted', 12)
+    svg.text(30, 316, 'Nothing outlives a row except its answer, so the scratch depends on the width and the '
+             'disparity range, not the image height.', 'muted', 11)
+    return svg
+
+
 FIGURES = {
     'premise-bytes-vs-bits.svg': fig_bytes_vs_bits,
     'premise-and.svg': fig_and,
@@ -948,6 +1033,8 @@ FIGURES = {
     'architectures-ballot.svg': fig_ballot,
     'architectures-crossover.svg': fig_crossover_chart,
     'architectures-lk-frame-size.svg': fig_lk_chart,
+    'architectures-cache.svg': fig_cache_ladder,
+    'premise-streaming.svg': fig_streaming,
 }
 
 

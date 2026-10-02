@@ -97,12 +97,30 @@ except that each gate is a word instruction and processes W pixels at once.
 output planes, and a column showing that pixel 0 computes 3 + 2 = 5](figures/premise-adder.svg)
 
 Seven instructions add every pixel in the word, and the count does not depend on how many
-pixels the word holds. No carry ever crosses between pixels, because each pixel's carry
-lives in its own bit position of the carry word.
+pixels the word holds: 8 in the figure, 32 in a `uint32_t`. No carry ever crosses between
+pixels, because each pixel's carry lives in its own bit position of the carry word.
 
 This arithmetic uses the techniques of **bitslicing**: each bit position of a word is an
 independent lane, and the computation is written as a circuit of logic instructions that
 advances every lane at once.
+
+**What it costs, against a byte kernel.** Adding two N-bit images takes 5N − 3 word
+instructions: a half adder for the lowest bit and a full adder for each bit above it. A byte
+kernel adds one register of bytes per instruction. Compared at the same register width, the
+width cancels — a W-bit register holds W pixels as bits and W/8 as bytes — so the
+instruction ratio depends only on the operation:
+
+| operation | instructions per word, as bit-planes | instructions per pixel, bits against bytes |
+|---|---|---|
+| AND, OR, XOR, NOT | 1 | 8× fewer |
+| add two 1-bit images | 2 | 4× fewer |
+| add two 2-bit images | 7 | 1.14× fewer |
+| add two 3-bit images | 12 | 0.67×, so more |
+| add two 8-bit images | 37 | 0.22×, so more |
+
+Bitsliced arithmetic beats a vectorized byte add on instruction count only at one or two
+bits. Above that, its gain is the data: an N-bit image is N/8 of the bytes. The
+[pyramid table](#what-it-buys-and-where-it-stops) below shows the consequence.
 
 The same idea counts per pixel. A **bit-sliced sum** of k one-bit inputs answers, for every
 bit position separately, how many of the inputs are set — and it returns planes, not a
@@ -156,8 +174,18 @@ every kernel.
 ![Peak working set of one call at 640×480 for five operations, binCV against OpenCV, each
 row drawn to its own OpenCV total](figures/premise-memory.svg)
 
-The same design refuses allocations rather than shrinking them. Dense stereo disparity
-streams a band of rows instead of building a cost volume:
+The same design refuses allocations rather than shrinking them. Dense stereo compares each
+pixel with its candidate match at every disparity, and the obvious implementation stores
+all of those costs — a cost volume — before choosing. binCV streams instead:
+
+![A cost volume holding a cost for every pixel at every disparity, against binCV's band of
+window rows feeding a running sum per disparity, which yields one row of the disparity map
+at a time](figures/premise-streaming.svg)
+
+For each output row, binCV XORs the left image with the right image shifted by each
+disparity, updates a running window sum per disparity by adding the entering row and
+dropping the leaving one, and keeps the best disparity per pixel. The row is emitted and its
+memory reused, so the scratch depends on the width and the disparity range, not the height:
 
 <!-- figure-check values="bytes" source="@docs/reports/stereo.md" -->
 | dense disparity, 752×480, 64 disparities | bytes |

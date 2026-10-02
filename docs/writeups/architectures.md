@@ -6,9 +6,9 @@ can speed up some of binCV's kernels and does nothing for others.
 
 This writeup has two parts. The first runs through those hardware features and the technique
 each one enables for packed bits. The second looks at the four machines binCV has been
-measured on — a desktop x86-64 CPU, a Raspberry Pi 4, an STM32 microcontroller and an
-NVIDIA GPU — and at what the measurements show. It makes no claim about machines binCV has
-not run on.
+measured on — a desktop x86-64 CPU, a Raspberry Pi 4, an STM32 microcontroller and an NVIDIA
+GPU — and at why the same code gains more on one of them than another. It makes no claim
+about machines binCV has not run on.
 
 Every figure quoted here comes from a report or target page linked beside it, and every
 chart is drawn from the report table it cites. [The premise](premise.md) explains the
@@ -86,14 +86,104 @@ of a 32-bit register.
 | DSP byte instructions | the tail of a software population count | — | — | `USAD8` and others | — |
 | warp primitives | packing pixels from a comparison | — | — | — | `__ballot_sync` |
 
-## Part 2: what the measurements show
+## Part 2: why the speedup differs by machine
+
+The same binCV code gains far more on one machine than another:
+
+<!-- figure-check values="x86-64|Raspberry Pi 4" source="source" -->
+| operation | x86-64 | Raspberry Pi 4 | source |
+|---|---|---|---|
+| `bitwiseAnd`, 640×480 | 9.97× | 26.7× | [primitives.md](../reports/primitives.md) |
+| Hamming matching, kNN=2 over 1000×1000 | 4.70× | 1.95× | [features.md](../reports/features.md) |
+| `pyrDown`, 1 bit in → 3 bits out | 1.56× | 5.51× | [limits.md](../reports/limits.md) |
+
+Every ratio is OpenCV's time divided by binCV's, one thread each side. The sections below take
+the causes one at a time, each with the measurement that shows it.
 
 ### The four machines
 
 | | x86-64 | aarch64 | Cortex-M7 | GPU |
 |---|---|---|---|---|
 | part | AMD Ryzen 5 5600X | Broadcom BCM2711 (Raspberry Pi 4), Cortex-A72 at 1.8 GHz | STM32H753ZI, run at its 64 MHz reset clock | NVIDIA RTX 3070 Ti, SM 8.6 |
-| memory | 32 KiB L1d, 512 KiB L2 per core, 32 MiB L3 | 32 KiB L1d, 1 MiB shared L2 | 512 KB AXI SRAM, 16 KiB stack as configured | ~608 GB/s device memory |
+| memory | 32 KiB L1d, 512 KiB L2 per core, 32 MiB L3 | 32 KiB L1d, 1 MiB shared L2 | 16 KiB L1 data cache; about 1 MiB of RAM in banks, the largest 512 KiB | ~608 GB/s device memory |
+
+### SIMD widens both sides by the same factor
+
+A wider register holds more bytes and more bits alike, so SIMD speeds up OpenCV's byte
+kernels just as it speeds up binCV. A `uint32_t` word of bits holds 32 pixels, and so does a
+256-bit AVX2 register of bytes:
+
+![To scale in bits: an AVX2 register of bytes holds 32 pixels, one uint32_t word of bits
+also holds 32, and an AVX2 register of bits holds 256](figures/architectures-register.svg)
+
+Compared at equal register width, the width cancels, and what remains depends on the
+operation, not the machine. Pointwise logic keeps the full 8×; arithmetic keeps less with
+every added bit, as [the premise](premise.md#arithmetic-becomes-a-circuit) works out:
+
+| operation | instructions per pixel, bits against bytes, at equal register width |
+|---|---|
+| AND, OR, XOR, NOT | 8× fewer |
+| add two 1-bit images | 4× fewer |
+| add two 2-bit images | 1.14× fewer |
+| add two 3-bit images | 0.67×, so more |
+
+Neighbourhood operations sit lower than pointwise logic, because each word also needs shifts
+and carries from its neighbours. Where OpenCV's byte kernel is already well vectorized, the
+result can be a tie:
+
+<!-- figure-check values="x86-64|aarch64" source="@docs/reports/limits.md" -->
+| operation, 640×480 | x86-64 | aarch64 | why |
+|---|---|---|---|
+| `erode`, 3×3 rect | 1.05× | 1.02× | a dead heat against a mature vectorized kernel |
+| FAST, on bytes | 1.04× | 0.962× | parity; the bit-plane overload is where packing applies |
+| `countNonZero` | 1.62× | 2.66× | OpenCV is bandwidth-bound; binCV reads an eighth of the data |
+
+Ratios are OpenCV's time over binCV's, one thread each side; FAST is 752×480. The vector
+arms binCV does have are switchable at run time, so their worth is measured rather than
+assumed: the eight-keypoint AVX2 batch in the tracker is worth 1.84× on tracking on x86-64,
+bit-exact with the scalar path ([limits.md](../reports/limits.md#the-vector-arms-and-proving-they-are-on)).
+
+### When memory is the limit, speed follows the data
+
+Pointwise logic does almost no arithmetic per byte, so both sides wait on memory. On x86-64
+both run near the machine's copy bandwidth — binCV at 71–133 GB/s and OpenCV at 32–108 GB/s
+across AND, OR, XOR and NOT — and binCV finishes first because it moves an eighth of the
+data. That is the 9.97× for `bitwiseAnd` above
+([primitives.md](../reports/primitives.md#logic)).
+
+`countNonZero` shows the other side. OpenCV's count runs at 66.6 GB/s, which is memory
+bandwidth; binCV's reads an eighth of the bytes but at 13.5 GB/s, limited by its
+population-count loop rather than memory. The result is 1.62×, an eighth of the data at a
+fifth of the rate, and `uint64_t` words lift it to 2.55×.
+
+### When bits fit in cache and bytes do not, the gap widens
+
+A cache only helps the data that stays in it. The Pi's last level is one 1 MiB L2 shared by
+everything on the chip; the desktop has 32 MiB of L3:
+
+![Working sets of bitwiseAnd as bits and as bytes at three image sizes, on a log scale against
+the memory levels of a Raspberry Pi 4, an x86-64 desktop and a Cortex-M7](figures/architectures-cache.svg)
+
+<!-- figure-check values="bitwiseAnd, binCV ahead by" source="@docs/reports/primitives.md" -->
+| machine and image | binCV working set | OpenCV working set | bitwiseAnd, binCV ahead by |
+|---|---|---|---|
+| Pi 4, 640×480 | 115 KB | 921 KB | 26.7× |
+| Pi 4, 1024×1024 | 393 KB | 3.1 MB | 13.6× |
+| Pi 4, 8192×4096 | 12.6 MB | 101 MB | 8.07× |
+| x86-64, 640×480 | 115 KB | 921 KB | 9.97× |
+
+At 640×480 binCV's working set sits in the Pi's L2 and OpenCV's does not stay there: 921 KB
+is 88% of a cache shared with everything else, and the report finds the ratio includes that
+residency. As the image grows past the cache the ratio falls to the 8× data ratio, and at
+8192×4096, where neither fits, it reads 8.07×. The middle size does not follow the simple
+picture — binCV's 393 KB still fits, yet the ratio halves — and the report does not explain
+it. On the desktop, the L3 holds both sides at 640×480.
+
+On the Cortex-M7 the same working sets meet a harder wall. Its largest RAM bank is the
+512 KiB AXI SRAM, the only one big enough for even one 640×480 byte frame (307,200 B), so
+the three byte frames of `bitwiseAnd` cannot all be placed, while the three bit-planes take
+115 KB. Cache sizes for the microcontroller come from ST's STM32H753 datasheet (DS12117);
+`bitwiseAnd` was not timed on that board.
 
 ### Integer width: 64-bit words on 64-bit cores, 32-bit words elsewhere
 
@@ -167,64 +257,42 @@ tracking pipeline, which performs none.
 
 **On the GPU** `__popc` counts a 32-bit register, which is one format word.
 
-### SIMD extensions: bits against an already vectorized byte kernel
+That placement shows up in the results. A Hamming distance over a 256-bit descriptor is four
+population counts, and matching is the result that transfers worst from the desktop to the
+Pi: 4.70× faster than OpenCV on x86-64 but 1.95× on the Cortex-A72
+([features.md](../reports/features.md#descriptors-and-matching)).
 
-![To scale in bits: an AVX2 register of bytes holds 32 pixels, one uint32_t word of bits
-also holds 32, and an AVX2 register of bits holds 256](figures/architectures-register.svg)
+### The baseline is stronger on some machines
 
-A `uint32_t` word of bits holds 32 pixels, and so does a 256-bit AVX2 register of bytes.
-Packing alone therefore gains nothing against a vectorized byte kernel. The gain appears
-only when the bit logic also moves into vector registers, and where OpenCV's byte kernel is
-already well vectorized, binCV ties:
+The ratio has a denominator, and OpenCV's denominator is far better tuned on x86-64 than on
+the Pi. Moving from the desktop to the Pi, the same `pyrDown` call slows down about 10.8×
+for OpenCV but about 3.1× for binCV:
 
-<!-- figure-check values="x86-64|aarch64" source="@docs/reports/limits.md" -->
-| operation, 640×480 | x86-64 | aarch64 | why |
-|---|---|---|---|
-| `erode`, 3×3 rect | 1.05× | 1.02× | a dead heat against a mature vectorized kernel |
-| FAST, on bytes | 1.04× | 0.962× | parity; the bit-plane overload is where packing applies |
-| `countNonZero` | 1.62× | 2.66× | OpenCV is bandwidth-bound; binCV reads an eighth of the data |
+<!-- figure-check values="OpenCV, µs|binCV, µs" source="@docs/reports/limits.md" -->
+| `pyrDown`, 1 bit in → 3 bits out | OpenCV, µs | binCV, µs |
+|---|---|---|
+| x86-64 desktop | 47.70 | 30.70 |
+| Raspberry Pi 4 | 516.5 | 93.8 |
 
-Ratios are OpenCV's time over binCV's, one thread each side; FAST is 752×480. The vector
-arms binCV does have are switchable at run time, so their worth is measured rather than
-assumed: the eight-keypoint AVX2 batch in the tracker is worth 1.84× on tracking on x86-64,
-bit-exact with the scalar path ([limits.md](../reports/limits.md#the-vector-arms-and-proving-they-are-on)).
-
-#### The window, not the word, caps the gain
-
-Inside Lucas–Kanade the unit of work is one row of a 31-pixel window:
-
-![A 31-pixel window in a uint32_t word uses 31 of 32 bits; in a uint64_t, 31 of 64; OpenCV's
-CV_16S lanes in an AVX2 register process 16 pixels per operation](figures/architectures-window.svg)
-
-In a 32-bit word the row is 31 pixels per operation against OpenCV's 16 — a 1.94× packing
-advantage — and that is the ceiling at this window size. A wider word lowers the
-utilisation to 48% without processing any more of the window.
-
-### The bit-depth crossover moves with the machine
-
-Bit-slicing pays at low bit depth and loses at high bit depth, because the adder needs more
-planes as its input gets wider. Where it stops paying is not a property of the algorithm.
-The same box-filter downsample, against `cv::pyrDown` on each machine, at equal input and
-output widths:
+OpenCV's x86-64 build dispatches at run time up through AVX-512 code paths, and its pyramid
+is very good; its Arm pyramid is relatively weaker on the same task. The ratio therefore
+moves from 1.56× to 5.51× without any change in binCV. Across bit depths the same
+denominator decides where the crossover falls:
 
 ![binCV's box-filter downsample against cv::pyrDown from 1 to 8 bits per pixel: on the
 Cortex-A72 binCV leads through 4 bits and crosses between 4 and 5; on x86-64 it is behind at
 every equal width](figures/architectures-crossover.svg)
 
 On the Cortex-A72, binCV stays ahead through four bits per pixel. On x86-64 it is behind at
-every equal-width depth, and only the shipped shape — one bit in, three bits out — is ahead,
-at 1.56× there and 5.51× on the Cortex-A72 ([limits.md](../reports/limits.md)).
+every equal-width depth, and only the shipped shape — one bit in, three bits out — is ahead
+([limits.md](../reports/limits.md)). **A ratio measured on a desktop is not a ratio on a
+deployment part, in either direction.**
 
-The difference is the denominator. OpenCV's x86-64 build dispatches at run time up through
-AVX-512 code paths and its pyramid is very good; its aarch64 pyramid is relatively weaker on
-the same silicon. binCV's own times scale about as expected between the two machines;
-OpenCV's do not. **A ratio measured on a desktop is not a ratio on a deployment part, in
-either direction.**
+### Compute-bound kernels win by skipping work
 
-### Less data does not make a compute-bound kernel faster
-
-An eighth of the bytes decides what fits on a device. It does not by itself make a kernel
-faster. Lucas–Kanade at a fixed 140 points, with the frame grown 36-fold:
+An eighth of the bytes decides what fits on a device. It does not by itself make a
+compute-bound kernel faster. Lucas–Kanade at a fixed 140 points, with the frame grown
+36-fold:
 
 ![Lucas–Kanade cost per point relative to 320×240, across frame sizes from 9.4 to 337.5 KiB:
 no trend with frame size on either machine](figures/architectures-lk-frame-size.svg)
@@ -234,6 +302,23 @@ the Cortex-A72, and the points between show no trend with size. A 31×31 window 
 four cache lines at one bit per pixel, and it would be two to four as bytes too. The
 tracker is compute-bound, so its speed has to come from doing less work, and the footprint
 result stands independently of it.
+
+The tracker's lead therefore comes from work binCV never does. Per point and per pyramid
+level, OpenCV copies the 31×31 window — 961 pixels times three shorts — into its own buffers
+before it iterates; binCV reads the bit-planes in place and forms the gradient sums as
+population counts, with no multiplies. That is 7.19× on x86-64 and 8.27× on the Cortex-A72
+([features.md](../reports/features.md#optical-flow)).
+
+#### The window, not the word, caps the packing gain
+
+Inside Lucas–Kanade the unit of work is one row of a 31-pixel window:
+
+![A 31-pixel window in a uint32_t word uses 31 of 32 bits; in a uint64_t, 31 of 64; OpenCV's
+CV_16S lanes in an AVX2 register process 16 pixels per operation](figures/architectures-window.svg)
+
+In a 32-bit word the row is 31 pixels per operation against OpenCV's 16 — a 1.94× packing
+advantage — and that is the ceiling at this window size. A wider word lowers the
+utilisation to 48% without processing any more of the window.
 
 ### The microcontroller: no population count, no SIMD
 
@@ -258,7 +343,40 @@ What has **not** been measured there is as important: no comparison against Open
 pipeline or tracker timing, and nothing at the part's full 480 MHz clock. The disparity
 figure is a floor at an eighth of the clock, not the part's number.
 
-### The GPU: warp primitives that produce the format
+### On the GPU, the bottleneck sets the ratio
+
+Thousands of GPU threads speed up both sides, so parallelism cancels out of the ratio, just
+as SIMD width does. An eighth of the work per pixel stays an eighth, not an eighth divided by
+the thread count. What changes on a GPU is which bottleneck each kernel hits, and that moves
+the ratio in four ways:
+
+- **Waits on memory.** GPUs have far more compute than memory bandwidth, so many kernels
+  land here, and the ratio tends to the data ratio: 8× less data than bytes, 32× less than
+  32-bit census descriptors.
+- **Waits on the launch.** Every kernel launch costs about 6 µs before any work. When a
+  frame's work is tiny, both sides sit on that floor and the ratio collapses toward 1×.
+- **Kernel structure.** Fusing launches and synchronizing less are separate from the
+  representation, and multiply in on top of it.
+- **Occupancy, possibly.** Less data per thread can mean fewer registers and no shared
+  memory, so more warps fit at once. Nothing in the reports measures this.
+
+Measured against `cv::cuda` on an RTX 3070 Ti, one stream each side:
+
+<!-- figure-check values="time: binCV is|device memory: binCV is" source="@docs/reports/cuda.md" -->
+| operation | time: binCV is | device memory: binCV is | the speed comes from |
+|---|---|---|---|
+| dense stereo, from bits | 11.2× faster | 6.86× smaller | fewer bits per pixel |
+| dense stereo, through census | 1.50× faster | 0.681×, 1.47× larger | census descriptors are 32 bits per pixel |
+| edge threshold | 7.53× faster | 24.6× smaller | one launch instead of several |
+| tracking, 204 points | 2.01× faster | 3.14× smaller | one launch instead of four |
+| descriptor matching, 5000² | 9.51× faster | 22.3× smaller | fewer synchronization barriers |
+| `goodFeaturesToTrack` | 8.76× faster | 5.33× smaller | the selection stays on the GPU |
+| 3-level pyramid | 0.992×, a tie | 7.17× smaller | — |
+
+Only the first two rows' speed comes from the representation. The memory column is a separate
+saving, from bit-planes and from never storing an intermediate image.
+
+#### Fewer bits per pixel
 
 A CUDA core is a 32-bit integer machine, and the hardware's own primitives work on 32 bits,
 so the device word is `uint32_t` and nothing else. One of those primitives packs the format
@@ -268,33 +386,59 @@ directly:
 as one word in which lane i is bit i](figures/architectures-ballot.svg)
 
 Lane *i* sets bit *i*, which is where the format stores pixel *i*, so a warp produces a
-32-pixel word of the host's own layout in a single instruction. Device planes are
-byte-identical to host planes, and every device kernel is proven bit-exact against the host
-library. Against `cv::cuda` on the same GPU:
+32-pixel word of the host's own layout in a single instruction. In dense stereo one thread
+owns a 32-pixel word: one XOR gives all 32 match costs, and a bitsliced window sum keeps
+them 32 wide. The same search runs in 0.06400 ms on 1-bit input, 0.3900 ms on 32-bit census
+descriptors, and 0.7134 ms in `cv::cuda::StereoBM` on bytes.
 
-<!-- figure-check values="cv::cuda|binCV|ratio" source="@docs/reports/cuda.md" -->
-| operation, 752×480 | cv::cuda | binCV | ratio |
-|---|---|---|---|
-| dense disparity from bits, time (ms) | 0.7134 | 0.06400 | 11.2× |
-| dense disparity from bits, device memory (KiB) | 3072.0 | 448.0 | 6.86× |
-| dense disparity through census, time (ms) | 0.7101 | 0.4789 | 1.50× |
-| dense disparity through census, device memory (KiB) | 3072.0 | 4512.0 | 0.681× |
+The mechanism is the CPU's, but the ratio is not: dense stereo from bits is 1.22× faster than
+`cv::StereoBM` on x86-64 and 1.32× on the Pi ([stereo.md](../reports/stereo.md)). The
+baselines and the kernels differ between the two, and the reports do not isolate why the GPU
+gap is so much larger.
 
-The census row is the exception that shows the rule: census expands each 8-bit pixel into a
-32-bit descriptor word, so its input is wider than the image it came from, and binCV is
-larger there. On one-bit input the dense cost is one XOR per 32-pixel word, and binCV leads
-on both axes. The full set, including where binCV does not lead, is in
-[cuda.md](../reports/cuda.md).
+#### One launch instead of several
+
+binCV's edge threshold computes the derivative, applies the threshold and packs bits in one
+kernel; OpenCV composes a derivative filter, an absolute value and a threshold, several
+launches that each write an intermediate image to device memory. binCV takes 8.04 µs, most of it the
+6.12 µs launch floor, against OpenCV's 60.11 µs, and needs 24.6× less device memory because
+nothing intermediate is stored. Where neither side has work to save, the launch floor makes
+it a tie: a threshold at 752×480 reads 1.02×.
+
+Tracking shows the limit of the same win. binCV tracks in one launch against OpenCV's four, and at 204 points that makes it 2.01× faster. Its kernel is slower, though, so
+at 2048 points the saved launches no longer cover it and the ratio is 0.952×
+([cuda.md](../reports/cuda.md)).
+
+#### Kernel structure, not bits
+
+Two leads come from how the kernels are written, and another library could make the same
+choices:
+
+- **Matching.** OpenCV runs one generic kernel for float and binary descriptors, tiled
+  through shared memory like a matrix multiply, with a barrier before and after every
+  chunk of the descriptor ([bf_knnmatch.cu](https://github.com/opencv/opencv_contrib/blob/4.5.4/modules/cudafeatures2d/src/cuda/bf_knnmatch.cu#L327-L347)).
+  A 32-byte binary descriptor is too short for that tiling to pay; binCV's kernel
+  synchronizes twice per launch. Feeding the same bytes
+  through OpenCV's own kernel gives parity, so the bits are not the lead here.
+- **`goodFeaturesToTrack`.** Keeping corners apart is greedy: whether a corner is kept
+  depends on the stronger ones kept before it. OpenCV downloads every candidate, filters
+  them on the CPU and uploads the survivors
+  ([gftt.cpp](https://github.com/opencv/opencv_contrib/blob/4.5.4/modules/cudaimgproc/src/gftt.cpp#L146-L217));
+  binCV keeps the selection on the GPU. The 8.76× is wall clock, because the CPU step is work
+  a caller pays for.
 
 ### What holds on every machine
 
 - **Memory barely moves.** A plane's size is arithmetic on its geometry, so a footprint
   figure is identical on every CPU, and on the GPU differs only by the driver's allocation
   rounding. Speed is the axis that moves.
+- **Parallelism cancels; the bottleneck decides.** SIMD width and GPU thread count help both
+  sides alike. The ratio is set by what each kernel waits on: memory, the launch, arithmetic,
+  or the cache it fits in.
 - **Match the word to the register** for kernels whose cost is arithmetic. The default
   gives that up only for footprint.
 - **Count in bulk**, because on one of the four machines a per-word count is a round trip
   between register files.
-- **The byte alternative sets the bar**, and SIMD makes it stronger on some machines than
-  others. binCV's lead is largest where the data is genuinely narrow and the byte kernel is
-  weakest, and it disappears where the input is wide.
+- **The baseline sets the bar**, and it is stronger on some machines than others. binCV's
+  lead is largest where the data is genuinely narrow and the byte kernel is weakest, and it
+  disappears where the input is wide.
