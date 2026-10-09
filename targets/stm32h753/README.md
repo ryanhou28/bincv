@@ -429,7 +429,11 @@ measured there in its own right, not carried in with microcontroller work.
 table on M-profile (`BINCV_CORNER_ROOT_TABLE`, switchable with `SET rt`): a 3×3 window's
 counts are 0 to 9, so the discriminant has a hundred values, and the table holds their
 correctly rounded roots inside `minEigenValue`'s own double expression — the same float.
-It costs 2,984 bytes of flash, measured the same way. The scalar suppression compares the responses' bit patterns
+It costs 2,984 bytes of flash, measured the same way, and over the 60 frames above, whose
+one detection sweeps three times, it takes `detect` from 2,397,505 cycles a frame to
+1,632,790 — 1.47×, the frame 2.9%
+([off](../../docs/reports/logs/m7-track-rt0-cortex-m7.log),
+[on](../../docs/reports/logs/m7-track-rt1-cortex-m7.log)). The scalar suppression compares the responses' bit patterns
 rather than the floats, which order the same way because a response is never negative, and
 which a Cortex-M branches on without moving flags out of the FPU. And the pool orders its
 candidates by one 64-bit compare. Over the sequence `detect` went from 1,410,239 cycles a

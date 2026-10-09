@@ -203,7 +203,7 @@ the other targets' code is untouched:
 | | what it does | on the Cortex-M7 ([targets/stm32h753](targets/stm32h753/README.md)) |
 |---|---|---|
 | `BINCV_LK_WINDOW_COUNT` | Lucas–Kanade counts down the window in byte lanes | tracking 4.58× faster; 13,556 B of flash |
-| `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table | 2,984 B of flash |
+| `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table | detection 1.47× faster; 2,984 B of flash |
 
 Both have a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTableEnabled`)
 so one image can time both arms, and both give bit-identical output. They change inline

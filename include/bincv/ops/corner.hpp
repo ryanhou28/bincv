@@ -411,8 +411,8 @@
 // The 3x3 response's square root FROM A TABLE (`impl::minEigenValue3x3`): selected by
 // default on M-profile Arm, where a double-precision root is a long unpipelined
 // instruction or, without a double FPU, a library call -- and every pixel with a
-// gradient in its window pays one. On the Cortex-M7 the response rows of a detection
-// measured 1.66x faster for it. Compiled there, or where a translation unit asks;
+// gradient in its window pays one. On the Cortex-M7 detection measured 1.47x faster
+// for it, for 2,984 bytes of flash (targets/stm32h753/README.md). Compiled there, or where a translation unit asks;
 // the tests define it to hold the table to the root on any machine. It changes
 // inline bodies, so it must be the same in every translation unit of a program.
 #if defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
