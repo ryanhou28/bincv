@@ -2510,7 +2510,11 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     double prevDeltaY = 0.0;
     bool inRange = true;
     // The last counted sums and the integer displacement they were counted at, for
-    // the reuse inside the loop. Sums only: nothing after the loop reads them.
+    // the reuse inside the loop. Sums only: nothing after the loop reads them. The
+    // reuse belongs to the window-count arm -- it is where the counting is expensive
+    // enough to matter, and it is the only arm it has been measured on -- so it
+    // runs when that arm is selected and leaves every other path as it was.
+    const bool reuseSums = lkWindowCountEnabled();
     TapSums lastSumsX;
     TapSums lastSumsY;
     long long lastTapX = 0;
@@ -2579,7 +2583,8 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         // (tapX, tapY) and of nothing else -- the subpixel part enters only through
         // the four weights, after the counting. So an iteration whose displacement
         // floors to the previous one's has exactly the previous one's sums, and
-        // counting them again would recompute the same integers.
+        // counting them again would recompute the same integers. Under the
+        // window-count arm only (`reuseSums` above).
         TapSums sumsX;
         TapSums sumsY;
         // And the two `self` sums -- the previous frame against the gradient -- do
@@ -2600,11 +2605,13 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
                 sumsX.self = lastSumsX.self;
                 sumsY.self = lastSumsY.self;
             }
-            lastSumsX = sumsX;
-            lastSumsY = sumsY;
-            lastTapX = tapX;
-            lastTapY = tapY;
-            haveSums = true;
+            if (reuseSums) {
+                lastSumsX = sumsX;
+                lastSumsY = sumsY;
+                lastTapX = tapX;
+                lastTapY = tapY;
+                haveSums = true;
+            }
         }
 
         const double b1 = sumsX.combine(w00, w01, w10, w11);
