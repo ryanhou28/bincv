@@ -374,9 +374,10 @@ runs — the published tracking code — over the same 60 frames, both bit-ident
 | track, cycles per frame | 89,404,260 | 19,505,319 | 4.58× |
 | whole frame | 96,236,171 | 26,336,190 | 3.65× |
 
-Its price is flash: **13,556 bytes**, measured by building the same image without it.
-Whether that is worth it is the owner's call
-([#104](https://github.com/ryanhou28/bincv/issues/104)); it ships on by default meanwhile.
+Its price is flash: **13,556 bytes**, measured by building the same image without it —
+0.7% of this part's 2 MB, and no RAM: the arm adds no buffer, and the measured stack is
+smaller with it on (8,468 bytes against 8,636). It is on by default on every core whose
+population count is software ([#104](https://github.com/ryanhou28/bincv/issues/104)).
 
 What the arm does, against the per-row count's eighty libgcc calls per window row at two bits
 per pixel:
