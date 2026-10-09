@@ -210,9 +210,9 @@ one build of binCV against one build of OpenCV on one machine, on a single commi
 
 Nothing here is a claim about a target that has not been measured. 32-bit ARM Cortex-A and
 RISC-V are supported and appear nowhere in these reports because neither has been built and
-timed. Cortex-M has been built and partly measured on an STM32H753ZI —
-[targets/stm32h753/README.md](../../targets/stm32h753/README.md) says what that covers — but
-it produced no OpenCV comparison, so it is not here either.
+timed. Cortex-M is measured on an STM32H753ZI — the assembled tracker included,
+[targets/stm32h753/README.md](../../targets/stm32h753/README.md) — but there is no OpenCV
+comparison on that part yet, so it is not here either.
 
 ## The machines
 

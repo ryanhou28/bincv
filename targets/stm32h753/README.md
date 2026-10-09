@@ -1,8 +1,11 @@
 # binCV on Cortex-M7 — STM32H753ZI
 
-A bare-metal target for the NUCLEO-H753ZI. It exists to answer one question: **what does
-binCV cost where there is no hardware population count and no vector unit?** Everything in
-this directory is the harness; binCV itself is `bincv_core`, unchanged.
+A bare-metal target for the NUCLEO-H753ZI: binCV where there is no hardware population
+count and no vector unit, and 1 MB of RAM in five banks. Everything in this directory is the
+harness; binCV itself is `bincv_core`, the same headers every other target compiles.
+
+**The assembled feature tracker runs here at the reference sequence's full 752×480,
+bit-identical to the x86-64 host on every frame, in 684,664 bytes** — section 3.
 
 ## Build, flash, run
 
@@ -13,7 +16,7 @@ cmake -S . -B build-m7 \
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-cortex-m7.cmake \
       -DBINCV_BUILD_EMBEDDED=ON -DBINCV_BUILD_TESTS=OFF \
       -DBINCV_USE_OPENCV=OFF -DBINCV_BUILD_BENCHMARKS=OFF
-cmake --build build-m7          # one image per benchmark: bincv_m7_reduce, bincv_m7_dense
+cmake --build build-m7          # one image per benchmark, below
 ```
 
 **One image per benchmark**, each named after its own translation unit
@@ -21,6 +24,14 @@ cmake --build build-m7          # one image per benchmark: bincv_m7_reduce, binc
 benchmark: `scripts/check_figure_staleness.py` ages a figure when a file its image compiles
 changes, and one image compiling every kernel would age every figure on every edit.
 `m7_harness.cpp` is what they share — bring-up and the command loop.
+
+| image | command | what it measures |
+|---|---|---|
+| `bincv_m7_reduce` | `REDUCE` | population count without an instruction (section 1) |
+| `bincv_m7_dense` | `DENSE` | dense disparity at both word types (section 2) |
+| `bincv_m7_track` | `TRACK`, `SET lkwc` | the assembled feature tracker over a sequence (section 3) |
+| `bincv_m7_sensor` | `SENSOR` | the sensor stage by part, DSP arms on and off (section 4) |
+| `bincv_m7_lkstages` | `TRACK` | diagnostic only, never a published figure: `track` by stage |
 
 The images are driven from the host by **`scripts/m7_host.py`**:
 
@@ -59,10 +70,10 @@ flash at 4 wait states — the settings Zephyr uses for this board. I+D caches o
 A misconfigured PLL still runs everything, and every number it produces is then plausible and
 wrong, so the configured frequency is not trusted: the `CLOCK` command counts core cycles
 across one second of the board's 32.768 kHz LSE crystal, through LPTIM1, and every launch
-logs it. At 480 MHz the core read **480.22–480.64 MHz** across the twenty launches below:
-about 0.1% fast, wandering by up to 870 ppm. That wander is the ST-LINK's 8 MHz reference
-rather than the method — on the internal 64 MHz oscillator the same check read 64.236–64.253
-MHz over fourteen checks, a 270 ppm spread that includes the RC oscillator's own drift
+logs it. At 480 MHz the core read **480.28–480.64 MHz** across the launches below: about
+0.1% fast, wandering by up to 750 ppm. That wander is the ST-LINK's 8 MHz reference
+rather than the method — on the internal 64 MHz oscillator the same check read 64.246–64.269
+MHz over fourteen checks, a 350 ppm spread that includes the RC oscillator's own drift
 ([log](../../docs/reports/logs/m7-reduce-cortex-m7-resetclock-launches.log)). **Figures here
 are cycle counts, which none of this touches**; milliseconds are converted at 480 MHz and
 carry that 0.1%.
@@ -70,25 +81,24 @@ carry that 0.1%.
 The first figures on this board were taken on the 64 MHz reset clock, before this path was
 brought up and checked. `-DBINCV_M7_RESET_CLOCK=ON` still builds that configuration, and its
 logs sit beside the 480 MHz ones. **Its cycle counts do not transfer to 480 MHz**: the
-dense-disparity kernel takes 52,593,359 cycles there and 46,931,454 at 480 MHz
+dense-disparity kernel takes 52,595,561 cycles there and 46,934,832 at 480 MHz
 ([log](../../docs/reports/logs/m7-dense-cortex-m7-resetclock-launches.log)), while the
-population count goes the other way, 201,771 against 204,853. The two configurations differ
+population count goes the other way, 201,411 against 204,317. The two configurations differ
 in flash wait states (7 at reset), bus ratio and voltage scale, and which of those moves
 which count was not isolated.
 
 ## What was measured
 
-Two things, each with its rule written down before the board ran:
-
 1. **Population count without an instruction** — four ways to count the bits of a 32-bit
    word, timed inside the bulk reduction that calls them.
 2. **Dense disparity at 32-bit pointer width** — the binary dense kernel on an M-profile
    core, at `uint32` against `uint64`.
+3. **The assembled feature tracker** at 752×480, against the host frame by frame.
+4. **The sensor stage**, by part, with and without the DSP extension.
 
-Both are re-taken at 480 MHz, ten launches each, from the logs named under each table. Every
-launch returned the same cycle count to within 0.002%: this core has no frequency scaling,
-no other process and no OS, so the run-to-run scatter the host logs exist to measure is
-not there to measure.
+All at 480 MHz, from the logs named under each table. Every launch returned the same cycle
+count to within 0.02%: this core has no frequency scaling, no other process and no OS, so
+the run-to-run scatter the host logs exist to measure is not there to measure.
 
 ## 1. Population count
 
@@ -126,10 +136,10 @@ All four arms and `bincv::countNonZero` returned 180,378.
 
 | arm | cycles | vs A | `.text` |
 |---|---|---|---|
-| **A — shipped** (`__popcountsi2`) | 204,853 | 1.00× | 48 B |
-| B — portable (64-bit SWAR) | 377,148 | 1.84× slower | 180 B |
-| C — SWAR32 | 216,146 | 1.06× slower | 78 B |
-| D — SWAR32 + `USAD8` | 181,578 | 1.13× faster | 78 B |
+| **A — shipped** (`__popcountsi2`) | 204,317 | 1.00× | 48 B |
+| B — portable (64-bit SWAR) | 377,405 | 1.85× slower | 180 B |
+| C — SWAR32 | 216,525 | 1.06× slower | 78 B |
+| D — SWAR32 + `USAD8` | 181,546 | 1.13× faster | 78 B |
 
 **Decision at the time: not adopted; arm A stays.** D is the fastest, and the library kept
 the slower arm on two grounds: a 1.13× gain on a microbenchmark that counts bits and does
@@ -150,9 +160,9 @@ Three things it settled:
 - **B is 1.85× slower than what ships.** `popcountWordPortable` is not what this target
   compiles to (GCC calls libgcc's `__popcountsi2`), and `reduce.hpp` says so.
 
-For scale: 204,853 cycles is **0.43 ms** to count a 752×480 frame at 480 MHz. The first
+For scale: 204,317 cycles is **0.43 ms** to count a 752×480 frame at 480 MHz. The first
 bring-up expected the AXI SRAM, at half the core clock, to become the limit at 480 MHz; it
-did not — the count takes 1.5% more cycles than the 201,771 it takes at the reset clock,
+did not — the count takes 1.4% more cycles than the 201,411 it takes at the reset clock,
 because 46 KB in 0.2 million cycles is far below what the bus delivers.
 
 ### The loop, which is where the win was
@@ -175,7 +185,7 @@ none using an intrinsic or a target `#if`:
 | L3 | 0.44× | 0.11× | 0.96× |
 
 M7 figures are cycle ratios at 480 MHz, ten launches that agreed exactly
-([log](../../docs/reports/logs/m7-reduce-cortex-m7-launches.log); L0 is 205,591 cycles). Host
+([log](../../docs/reports/logs/m7-reduce-cortex-m7-launches.log); L0 is 206,169 cycles). Host
 figures are medians whose run-to-run spread was 49–107%, so only the order-of-magnitude
 differences there carry, which is all that is claimed from them.
 
@@ -243,8 +253,8 @@ Both word types exact on the supported region, and the two maps byte-identical.
 
 | word type | cycles | ms at 480 MHz | scratch |
 |---|---|---|---|
-| **`uint32`** | 46,931,454 | **97.8** | 6,480 B |
-| `uint64` | 62,589,097 | 130.4 | 6,480 B |
+| **`uint32`** | 46,934,832 | **97.8** | 6,480 B |
+| `uint64` | 62,584,544 | 130.4 | 6,480 B |
 
 **`uint64` is 1.33× slower: the 64-bit guidance inverts at 32-bit pointer width**, as a
 core synthesizing every 64-bit ripple from register pairs would suggest, and now as a
@@ -254,3 +264,155 @@ pack the same bytes.
 
 For scale only: a QVGA depth map on a microcontroller in 98 ms, in 6.5 KB of scratch. There
 is no comparison against anything else on this part here; this is the kernel's own cost.
+
+## 3. The feature tracker
+
+### What runs
+
+The assembled tracker of [feature-tracking.md](../../docs/reports/feature-tracking.md) —
+sensor stage, a 1/2/2/2 pyramid, derivatives, `goodFeaturesToTrack` whenever fewer than 60
+tracks survive, pyramidal Lucas–Kanade, the cull — over EuRoC `V1_02_medium` `cam0`, 1,709
+frame pairs at **752×480**: the reference sequence at its full resolution, with the reference
+pipeline's parameters.
+
+It is **one source on both sides**. `benchmark/frontend_pipeline.hpp` is the benchmark's binCV
+half written against views over memory the caller provides, since containers allocate and
+this part has a 4 KB heap; the host's `frontend_sequence` runs it and reproduces the
+published tracking statistics exactly (82 detections, 10,279 tracks, median lifetime 11
+frames, 96.4% survival), and `bincv_m7_track` runs the same source here.
+
+One thing differs in shape, and it is what makes the tracker fit: the sensor stage takes the
+frame **row by row** ([ops/medianEdgeStream.hpp](../../include/bincv/ops/medianEdgeStream.hpp)),
+as a camera delivers it, instead of as a whole 8-bit frame with an 8-bit median buffer beside
+it — 721,920 bytes at 752×480 that this part could not hold alongside the rest. The stream is
+bit-identical to the two whole-frame calls (`tests/test_median_edge_stream.cpp`). The board
+asks the host for rows and the host answers with them and their CRC-32; no transfer is
+inside a timed region.
+
+### Exact against the host, every frame
+
+The board digests every frame's integer outputs — the binary frame, the pyramid, the
+derivatives, the corners — and sends Lucas–Kanade's points back as exact float bits; the
+host compares both with the same source run on x86-64
+([log](../../docs/reports/logs/m7-track-cortex-m7.log)).
+
+| | result |
+|---|---|
+| integer digests equal | 1,709 of 1,709 frames |
+| points bit-identical | 1,709 of 1,709 frames: 0 of 158,839 points differ |
+| detections, tracks observed, median lifetime | 82, 10,279, 11 frames — the published figures |
+
+The integer digests are the guarantee: every integer stage is exact by construction. The
+float agreement is an observation about what the two compilers emitted for this source, not
+something either was configured to promise.
+
+### Memory
+
+Buffer geometry, so exact; the stack is measured by painting.
+
+| | bytes | bank |
+|---|---|---|
+| pyramids, two | 152,640 | AXI SRAM |
+| derivative ladders | 275,040 | AXI SRAM |
+| response ring | 9,024 | AXI SRAM |
+| sensor stream rows | 3,760 | D2 SRAM |
+| corner candidates (20,000) | 240,000 | D2 SRAM |
+| tracks | 4,200 | D2 SRAM |
+| **everything the pipeline holds** | **684,664** | |
+| stack, measured | 8,728 | DTCM |
+| flash, the whole image | 104,252 | |
+
+The first three rows are the 436,704 bytes the published footprint counts. The corner
+candidates are the largest thing left that it does not, and they exist only because the
+spacing filter runs after ranking.
+
+### Speed
+
+Mean cycles per frame over the sequence, at the real duty cycle (82 detections in 1,709
+frames):
+
+| stage | cycles per frame | ms at 480 MHz | share |
+|---|---|---|---|
+| sensor stage | 4,778,077 | 9.95 | 16.8% |
+| pyramid | 480,126 | 1.00 | 1.7% |
+| derivatives | 451,985 | 0.94 | 1.6% |
+| detect | 1,410,239 | 2.94 | 5.0% |
+| track | 21,267,343 | 44.31 | 74.9% |
+| **the frame** | **28,387,772** | **59.14** | |
+
+For scale only — there is nothing on this part to compare it with yet: a full-resolution
+frame through the whole tracker in 59 ms.
+
+### What moved it
+
+**One image, two arms.** Lucas–Kanade's window-count arm (`impl::lkWindowCountEnabled()`, on by
+default where a population count is software) against the per-row count, over the same 60
+frames, both bit-identical to the host
+([off](../../docs/reports/logs/m7-track-lkwc0-cortex-m7.log),
+[on](../../docs/reports/logs/m7-track-lkwc1-cortex-m7.log)):
+
+| | per-row count | window count | |
+|---|---|---|---|
+| track, cycles per frame | 71,570,108 | 33,157,760 | 2.16× |
+| whole frame | 78,391,636 | 39,979,493 | 1.96× |
+
+The arm keeps per-byte partial counts down the window and collapses them once, where the
+per-row count calls libgcc's SWAR sequence for every single-word count — eighty per window
+row at two bits per pixel — and folds each into a `long long`. When the window is staged it
+also runs the rows inside each term, so the partial counts stay in registers. Its code is
+9,822 bytes of the 104,252-byte image. Whether that is worth it is the owner's call
+([#104](https://github.com/ryanhou28/bincv/issues/104)); it ships on by default meanwhile.
+
+**The steps, in order**, each measured on the same 60 frames as it was made. The images
+they ran on no longer exist, so these are a record rather than figures to re-take; the A/B
+above is the committed measurement.
+
+| step | belongs to | track, cycles per frame |
+|---|---|---|
+| the published code | — | 89.75M |
+| the residual counted down the window | the arm | 47.82M |
+| the staged covariance counted down the window | the arm | 45.24M |
+| register-blocked when the window is staged | the arm | 41.48M |
+| an iteration that floors to the previous displacement reuses its sums | every target | 34.71M |
+| the previous frame's two sums carried across iterations | the arm | 33.16M |
+
+The sums reuse is the one that applies on every target: Lucas–Kanade's ten integers are a
+function of the window and the integer displacement only, and a converging iteration usually
+moves by less than a pixel.
+
+**Where `track` still goes** — the diagnostic image over the same 60 frames, never a
+figure: about 81% in the iterations (almost all of it the residual's counting), 11% the
+covariance, 7% staging the window. The sums reuse cut the residual calls that count from
+90,274 to 67,024.
+
+### What this does not claim
+
+**No comparison.** Nothing here is measured against OpenCV or any other library on this part
+([#108](https://github.com/ryanhou28/bincv/issues/108)).
+
+**One sequence**, at one resolution. At 376×240 the reference parameters break down —
+spacing 33 pixels apart leaves room for fewer tracks than the 60 the lifecycle demands, so
+the tracker re-detects on almost every frame — and a smaller frame needs its own parameters,
+not these.
+
+## 4. The sensor stage, with the DSP extension
+
+On a core with no vector unit the widest arithmetic is the ARMv7E-M DSP extension's four
+byte lanes in a general register. The median and the edge threshold each have an arm on it
+(`__ARM_FEATURE_SIMD32`, the compiler's own macro; switchable at run time like every vector
+arm): a byte min or max is `usub8` then `sel`, an absolute difference two `uqsub8`, and
+`usub8` against the threshold leaves each lane's answer in its GE flag, which one `sel` and
+one multiply gather into four bits.
+
+`bincv_m7_sensor` runs every row of both parts with the arms on and off and compares them
+before it times anything; 0 values differ
+([log](../../docs/reports/logs/m7-sensor-cortex-m7-launches.log)). Cycles for 480 rows of 752,
+median of 5:
+
+| | portable | DSP arm | |
+|---|---|---|---|
+| median rows | 4,334,864 | 1,211,331 | 3.58× |
+| edge rows | 8,592,403 | 2,268,840 | 3.79× |
+| the stream, both together | 13,349,559 | 4,084,439 | 3.27× |
+
+The tracker runs with them on, and its digests hold to the host's.

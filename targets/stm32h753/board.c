@@ -14,6 +14,7 @@
 #define RCC_PLL1DIVR REG(RCC_BASE + 0x030u)
 #define RCC_D2CCIP2R REG(RCC_BASE + 0x054u)
 #define RCC_BDCR REG(RCC_BASE + 0x070u)
+#define RCC_AHB2ENR REG(RCC_BASE + 0x0DCu)
 #define RCC_AHB4ENR REG(RCC_BASE + 0x0E0u)
 #define RCC_APB1LENR REG(RCC_BASE + 0x0E8u)
 #define RCC_APB4ENR REG(RCC_BASE + 0x0F4u)
@@ -373,6 +374,21 @@ size_t boardStackUsed(void) {
 
 size_t boardStackSize(void) {
     return (size_t)((const char*)&_stack_top - (const char*)&_stack_limit);
+}
+
+uint64_t boardCycles64(void) {
+    static uint32_t last = 0;
+    static uint64_t high = 0;
+    const uint32_t now = boardCycles();
+    if (now < last) high += (uint64_t)1 << 32;
+    last = now;
+    return high | now;
+}
+
+void boardEnableSram(void) {
+    RCC_AHB2ENR |= (1u << 29) | (1u << 30) | (1u << 31); /* SRAM1EN, SRAM2EN, SRAM3EN */
+    (void)RCC_AHB2ENR;
+    DSB();
 }
 
 void boardReset(void) {

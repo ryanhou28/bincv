@@ -891,7 +891,7 @@
 # WILL_FAIL targets no longer deletes the proof, and the in-process version does
 # have a floor: the row below.
 
-opencv	test_parallel	9	0
+opencv	test_parallel	14	0
 opencv	test_binMat	845	0
 opencv	test_quantMat	443	0
 opencv	test_storage	544	0
@@ -909,14 +909,15 @@ opencv	test_pyramid	262480	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
 opencv	test_corner	3717	0
-opencv	test_opticalflow	327	0
+opencv	test_opticalflow	344	0
 opencv	test_pack	72	0
 opencv	test_sequence	73	0
 opencv	test_edge	31	0
 opencv	test_median_wide	6	0
+opencv	test_median_edge_stream	391	0
 opencv	test_descriptor	116	0
 opencv	test_fast	39	0
-opencv	test_subpix	14	0
+opencv	test_subpix	15	0
 opencv	test_view_narrow	10	0
 opencv	test_occupancy	13697	0
 opencv	test_simd	10	0
@@ -930,7 +931,7 @@ opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0
 
-core	test_parallel	9	0
+core	test_parallel	14	0
 core	test_binMat	845	0
 core	test_quantMat	443	0
 core	test_storage	544	0
@@ -948,14 +949,15 @@ core	test_pyramid	236587	0
 core	test_derivative	47675	0
 core	test_covariance	17704	0
 core	test_corner	3717	0
-core	test_opticalflow	235	0
+core	test_opticalflow	252	0
 core	test_pack	72	0
 core	test_sequence	73	0
 core	test_edge	30	0
 core	test_median_wide	5	0
+core	test_median_edge_stream	391	0
 core	test_descriptor	114	0
 core	test_fast	8	0
-core	test_subpix	8	0
+core	test_subpix	9	0
 core	test_view_narrow	10	0
 core	test_occupancy	13697	0
 core	test_simd	10	0
@@ -967,7 +969,7 @@ core	test_census	102	0
 core	test_dense_disparity	24	0
 core	test_harness	8	0
 
-noexcept	test_parallel	9	0
+noexcept	test_parallel	14	0
 noexcept	test_binMat	801	44
 noexcept	test_quantMat	427	16
 noexcept	test_storage	544	0
@@ -985,14 +987,15 @@ noexcept	test_pyramid	236587	0
 noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
 noexcept	test_corner	3717	0
-noexcept	test_opticalflow	235	0
+noexcept	test_opticalflow	252	0
 noexcept	test_pack	72	0
 noexcept	test_sequence	73	0
 noexcept	test_edge	30	0
 noexcept	test_median_wide	5	0
+noexcept	test_median_edge_stream	391	0
 noexcept	test_descriptor	114	0
 noexcept	test_fast	8	0
-noexcept	test_subpix	8	0
+noexcept	test_subpix	9	0
 noexcept	test_view_narrow	10	0
 noexcept	test_occupancy	13697	0
 noexcept	test_simd	10	0
@@ -1004,7 +1007,7 @@ noexcept	test_census	102	0
 noexcept	test_dense_disparity	24	0
 noexcept	test_harness	8	0
 
-debug	test_parallel	9	0
+debug	test_parallel	14	0
 debug	test_binMat	845	0
 debug	test_quantMat	443	0
 debug	test_storage	544	0
@@ -1022,14 +1025,15 @@ debug	test_pyramid	236587	0
 debug	test_derivative	47675	0
 debug	test_covariance	17704	0
 debug	test_corner	3717	0
-debug	test_opticalflow	235	0
+debug	test_opticalflow	252	0
 debug	test_pack	72	0
 debug	test_sequence	73	0
 debug	test_edge	30	0
 debug	test_median_wide	5	0
+debug	test_median_edge_stream	391	0
 debug	test_descriptor	114	0
 debug	test_fast	8	0
-debug	test_subpix	8	0
+debug	test_subpix	9	0
 debug	test_view_narrow	10	0
 debug	test_occupancy	13697	0
 debug	test_simd	10	0

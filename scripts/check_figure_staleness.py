@@ -831,12 +831,28 @@ def main():
             fresh.append((name, verdict[1], len(verdict[2])))
 
     if args.update_baseline:
+        # The comment block at the top of the baseline is the record of WHY each
+        # batch of stale logs was accepted. It is kept, and a --note is appended to
+        # it rather than written in its place: rewriting the header here once
+        # erased every earlier reason in one call.
+        kept = []
+        if os.path.isfile(BASELINE):
+            for line in open(BASELINE, encoding='utf-8'):
+                if line.startswith('#') or not line.strip():
+                    kept.append(line.rstrip('\n'))
+                else:
+                    break
+        while kept and kept[-1].strip() in ('', '#'):
+            kept.pop()
         with open(BASELINE, 'w', encoding='utf-8') as fh:
-            fh.write('# Logs whose measured code has moved since they were taken.\n'
-                     '# Written by scripts/check_figure_staleness.py --update-baseline.\n'
-                     '# A log leaves this list by being RE-TAKEN, not by being edited.\n'
-                     '# Adding a line here is a decision to publish a figure that is known\n'
-                     '# not to describe the current code, and belongs in review.\n')
+            if kept:
+                fh.write('\n'.join(kept) + '\n')
+            else:
+                fh.write('# Logs whose measured code has moved since they were taken.\n'
+                         '# Written by scripts/check_figure_staleness.py --update-baseline.\n'
+                         '# A log leaves this list by being RE-TAKEN, not by being edited.\n'
+                         '# Adding a line here is a decision to publish a figure that is known\n'
+                         '# not to describe the current code, and belongs in review.\n')
             if args.note:
                 fh.write('#\n')
                 for chunk in args.note.split('|'):

@@ -150,6 +150,7 @@ void serve(const char* image, const Command* commands, size_t count) {
         }
     }
     boardSerialInit(BINCV_M7_BAUD);
+    boardEnableSram();
     boardEnableCaches();
     if (!counterOk) {
         boardPuts("\nFATAL: DWT cycle counter does not advance; no timing is possible.\n");

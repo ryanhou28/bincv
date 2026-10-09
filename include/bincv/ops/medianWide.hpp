@@ -57,6 +57,12 @@
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #define BINCV_MEDIAN_NEON 1
 #include <arm_neon.h>
+#elif defined(__ARM_FEATURE_SIMD32) && !defined(__CUDACC__)
+// The ARMv7E-M / ARMv8-M DSP extension: four byte lanes in a general register, which
+// on a core with no vector unit is the widest arithmetic there is.
+#define BINCV_MEDIAN_DSP 1
+#include <arm_acle.h>
+#include <cstring>
 #endif
 
 namespace bincv {
@@ -129,35 +135,179 @@ inline void med3Store(const uint8_t* a, const uint8_t* b, const uint8_t* c, uint
     const uint8x16_t hi = vmaxq_u8(va, vb);
     vst1q_u8(out, vmaxq_u8(lo, vminq_u8(hi, vc)));
 }
+#elif defined(BINCV_MEDIAN_DSP)
+inline bool& medianSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasMedianSimd() { return medianSimdEnabled(); }
+
+/// @brief Sixteen medians of three, four byte lanes at a time. `usub8` leaves each
+/// lane's `a >= b` in its GE flag and `sel` picks by it, so a byte min or max is two
+/// instructions; the median is three of them sharing one compare.
+inline void med3Store(const uint8_t* a, const uint8_t* b, const uint8_t* c, uint8_t* out) {
+    for (size_t o = 0; o < 16; o += 4) {
+        uint32_t va, vb, vc;
+        std::memcpy(&va, a + o, 4);
+        std::memcpy(&vb, b + o, 4);
+        std::memcpy(&vc, c + o, 4);
+        (void)__usub8(va, vb);  // GE[i]: a_i >= b_i
+        const uint32_t lo = __sel(vb, va);
+        const uint32_t hi = __sel(va, vb);
+        (void)__usub8(hi, vc);  // GE[i]: hi_i >= c_i
+        const uint32_t m = __sel(vc, hi);
+        (void)__usub8(lo, m);   // GE[i]: lo_i >= m_i
+        const uint32_t med = __sel(lo, m);
+        std::memcpy(out + o, &med, 4);
+    }
+}
 #endif
 
 /// @brief One pixel by the scalar rule, border included. **INTERNAL.**
 /// @note The vector sweep covers the interior and calls this for everything else, so
 /// the out-of-range-reads-as-zero rule stays written down exactly once.
-template <size_t K, typename SrcT>
-inline void med3Scalar(const SrcT* src, size_t width, size_t height, size_t srcStride,
-                       SrcT* dst, size_t dstStride, const MedianPattern<K>& pattern,
-                       size_t y, size_t x) {
-    SrcT v[K];
+/// @brief The pattern's horizontal reach: every `x` in `[lo, hi)` has all its samples
+/// inside a row of `width`. **INTERNAL.** Empty when the row is narrower than the
+/// pattern.
+template <size_t K>
+inline void medianInterior(const MedianPattern<K>& pattern, size_t width, size_t& lo,
+                           size_t& hi) {
+    int dxLo = 0, dxHi = 0;
     for (size_t k = 0; k < K; ++k) {
-        const long long sy = static_cast<long long>(y) + pattern.offset[k].dy;
-        const long long sx = static_cast<long long>(x) + pattern.offset[k].dx;
-        const bool inside = sy >= 0 && sx >= 0 && sy < static_cast<long long>(height) &&
-                            sx < static_cast<long long>(width);
-        v[k] = inside
-                   ? src[static_cast<size_t>(sy) * srcStride + static_cast<size_t>(sx)]
-                   : SrcT{0};
+        dxLo = pattern.offset[k].dx < dxLo ? pattern.offset[k].dx : dxLo;
+        dxHi = pattern.offset[k].dx > dxHi ? pattern.offset[k].dx : dxHi;
     }
-    for (size_t i = 1; i < K; ++i) {
-        SrcT key = v[i];
-        size_t j = i;
-        while (j > 0 && v[j - 1] > key) {
-            v[j] = v[j - 1];
-            --j;
+    lo = static_cast<size_t>(-dxLo);
+    const size_t reach = static_cast<size_t>(dxHi);
+    hi = width > reach ? width - reach : 0;
+    // A row narrower than the pattern's reach has no interior, and neither bound may
+    // pass the row's end: the border sweeps run [0, lo) and [hi, width).
+    if (lo > width) lo = width;
+    if (hi < lo) hi = lo;
+}
+
+/// @brief The median of K samples, in place: `v[K / 2]` after the call. **INTERNAL.**
+/// @note For three samples, `max(min(a, b), min(max(a, b), c))` -- the same function
+/// as the vector arm's, and as the insertion sort, with no branch. Every larger
+/// pattern sorts: `K` is 3 or 5 in every shipped pattern and odd by static_assert,
+/// so the sort is a handful of compares fully unrolled.
+template <size_t K, typename SrcT>
+inline SrcT medianOf(SrcT (&v)[K]) {
+    if constexpr (K == 3) {
+        const SrcT lo = v[0] < v[1] ? v[0] : v[1];
+        const SrcT hi = v[0] < v[1] ? v[1] : v[0];
+        const SrcT m = hi < v[2] ? hi : v[2];
+        return lo > m ? lo : m;
+    } else {
+        for (size_t i = 1; i < K; ++i) {
+            SrcT key = v[i];
+            size_t j = i;
+            while (j > 0 && v[j - 1] > key) {
+                v[j] = v[j - 1];
+                --j;
+            }
+            v[j] = key;
         }
-        v[j] = key;
+        return v[K / 2];
     }
-    dst[y * dstStride + x] = v[K / 2];
+}
+
+/// @brief One output row. **INTERNAL** -- the body every row of every entry point
+/// goes through, so the whole-frame call and the streaming one
+/// (ops/medianEdgeStream.hpp) cannot differ.
+/// @param rows `rows[k]` is the source row that `pattern.offset[k]` lands on, or
+/// null when that row is outside the image -- the vertical border is the caller's,
+/// and a null row reads as zero. The horizontal border is this function's, and
+/// reads as zero too.
+template <size_t K, typename SrcT>
+inline void medianRow(const SrcT* const (&rows)[K], size_t width, SrcT* out,
+                      const MedianPattern<K>& pattern) {
+    size_t lo = 0, hi = 0;
+    medianInterior(pattern, width, lo, hi);
+    bool allRows = true;
+    for (size_t k = 0; k < K; ++k) allRows = allRows && rows[k] != nullptr;
+    if (!allRows) lo = hi = width;  // no interior: every pixel takes the checked path
+
+    // The checked sample: the border rule, in one place.
+    const auto checked = [&](size_t x) {
+        SrcT v[K];
+        for (size_t k = 0; k < K; ++k) {
+            const long long sx = static_cast<long long>(x) + pattern.offset[k].dx;
+            v[k] = (rows[k] != nullptr && sx >= 0 && sx < static_cast<long long>(width))
+                       ? rows[k][static_cast<size_t>(sx)]
+                       : SrcT{0};
+        }
+        out[x] = medianOf<K, SrcT>(v);
+    };
+
+    for (size_t x = 0; x < lo; ++x) checked(x);
+
+    size_t x = lo;
+#if defined(BINCV_MEDIAN_AVX2) || defined(BINCV_MEDIAN_NEON) || defined(BINCV_MEDIAN_DSP)
+    // ==================================================================
+    // THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
+    //
+    // med3(a, b, c) = max(min(a, b), min(max(a, b), c))
+    //
+    // Five register operations for as many pixels as fit — thirty-two on AVX2, sixteen
+    // on NEON — against a scalar sorting network **and three bounds-checked gathers**
+    // per pixel. The first end-to-end profile put this kernel at **78% of the
+    // whole pipeline** the moment it was wired in, which is what made it worth
+    // writing.
+    //
+    // ONLY THE INTERIOR: every sample of every pixel it covers is inside its row.
+    if constexpr (K == 3 && sizeof(SrcT) == 1) {
+#if defined(BINCV_MEDIAN_AVX2)
+        constexpr size_t kStep = 32;
+#else
+        constexpr size_t kStep = 16;
+#endif
+        if (hasMedianSimd()) {
+            const ptrdiff_t d0 = pattern.offset[0].dx, d1 = pattern.offset[1].dx,
+                            d2 = pattern.offset[2].dx;
+            for (; x + kStep <= hi; x += kStep) {
+                const ptrdiff_t xi = static_cast<ptrdiff_t>(x);
+                med3Store(reinterpret_cast<const uint8_t*>(rows[0] + (xi + d0)),
+                          reinterpret_cast<const uint8_t*>(rows[1] + (xi + d1)),
+                          reinterpret_cast<const uint8_t*>(rows[2] + (xi + d2)),
+                          reinterpret_cast<uint8_t*>(out + x));
+            }
+        }
+    }
+#endif
+    // The interior, one pixel at a time: no bounds test, because [lo, hi) is where
+    // none is needed. The row pointers and column offsets are copied into locals
+    // first: `out` is a byte pointer, which may alias anything, so a sample spelled
+    // `rows[k][x + pattern.offset[k].dx]` would be reloaded after every store.
+    if (x < hi) {
+        const SrcT* r[K];
+        ptrdiff_t d[K];
+        for (size_t k = 0; k < K; ++k) {
+            r[k] = rows[k];
+            d[k] = pattern.offset[k].dx;
+        }
+        if constexpr (K == 3) {
+            const SrcT* const r0 = r[0];
+            const SrcT* const r1 = r[1];
+            const SrcT* const r2 = r[2];
+            const ptrdiff_t d0 = d[0], d1 = d[1], d2 = d[2];
+            for (; x < hi; ++x) {
+                const ptrdiff_t xi = static_cast<ptrdiff_t>(x);
+                SrcT v[3] = {r0[xi + d0], r1[xi + d1], r2[xi + d2]};
+                out[x] = medianOf<3, SrcT>(v);
+            }
+        } else {
+            for (; x < hi; ++x) {
+                const ptrdiff_t xi = static_cast<ptrdiff_t>(x);
+                SrcT v[K];
+                for (size_t k = 0; k < K; ++k) v[k] = r[k][xi + d[k]];
+                out[x] = medianOf<K, SrcT>(v);
+            }
+        }
+    }
+
+    for (; x < width; ++x) checked(x);
 }
 
 }  // namespace impl
@@ -176,123 +326,17 @@ inline void medianWide(const SrcT* src, size_t width, size_t height, size_t srcS
     BINCV_ASSERT(src != nullptr && dst != nullptr,
                  "medianWide: a non-empty image needs non-null pointers");
 
-    // ==================================================================
-    // THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
-    //
-    // med3(a, b, c) = max(min(a, b), min(max(a, b), c))
-    //
-    // Five register operations for as many pixels as fit — thirty-two on AVX2, sixteen
-    // on NEON — against a scalar sorting network **and three bounds-checked gathers**
-    // per pixel. The first end-to-end profile put this kernel at **78% of the
-    // whole pipeline** the moment it was wired in, which is what made it worth
-    // writing.
-    //
-    // ONLY THE INTERIOR. A row or column where any offset leaves the image keeps the
-    // scalar body below, which is also the oracle: `tests/test_median_wide.cpp` compares
-    // them, and the border rule (out-of-range reads as ZERO) lives in one place still.
-#if defined(BINCV_MEDIAN_AVX2) || defined(BINCV_MEDIAN_NEON)
-    if constexpr (K == 3 && sizeof(SrcT) == 1) {
-#if defined(BINCV_MEDIAN_AVX2)
-        constexpr size_t kStep = 32;
-        const bool haveSimd = impl::hasMedianSimd();
-#else
-        constexpr size_t kStep = 16;
-        const bool haveSimd = impl::hasMedianSimd();
-#endif
-        // The interior in y and x: every offset must land inside the image.
-        long long dyLo = 0, dyHi = 0, dxLo = 0, dxHi = 0;
-        for (size_t k = 0; k < 3; ++k) {
-            dyLo = pattern.offset[k].dy < dyLo ? pattern.offset[k].dy : dyLo;
-            dyHi = pattern.offset[k].dy > dyHi ? pattern.offset[k].dy : dyHi;
-            dxLo = pattern.offset[k].dx < dxLo ? pattern.offset[k].dx : dxLo;
-            dxHi = pattern.offset[k].dx > dxHi ? pattern.offset[k].dx : dxHi;
-        }
-        const size_t y0 = static_cast<size_t>(-dyLo);
-        const size_t x0 = static_cast<size_t>(-dxLo);
-        const long long yEnd = static_cast<long long>(height) - dyHi;
-        const long long xEnd = static_cast<long long>(width) - dxHi;
-        if (haveSimd && yEnd > static_cast<long long>(y0) &&
-            xEnd > static_cast<long long>(x0)) {
-            const size_t xStop = static_cast<size_t>(xEnd);
-            for (size_t y = y0; y < static_cast<size_t>(yEnd); ++y) {
-                size_t x = x0;
-                for (; x + kStep <= xStop; x += kStep) {
-                    const SrcT* p0 = src + (static_cast<long long>(y) + pattern.offset[0].dy) *
-                                               static_cast<long long>(srcStride) +
-                                     static_cast<long long>(x) + pattern.offset[0].dx;
-                    const SrcT* p1 = src + (static_cast<long long>(y) + pattern.offset[1].dy) *
-                                               static_cast<long long>(srcStride) +
-                                     static_cast<long long>(x) + pattern.offset[1].dx;
-                    const SrcT* p2 = src + (static_cast<long long>(y) + pattern.offset[2].dy) *
-                                               static_cast<long long>(srcStride) +
-                                     static_cast<long long>(x) + pattern.offset[2].dx;
-                    impl::med3Store(reinterpret_cast<const uint8_t*>(p0),
-                                    reinterpret_cast<const uint8_t*>(p1),
-                                    reinterpret_cast<const uint8_t*>(p2),
-                                    reinterpret_cast<uint8_t*>(dst + y * dstStride + x));
-                }
-                // The row's tail, and then the next row; the border rows and columns
-                // fall through to the scalar sweep below.
-                for (; x < xStop; ++x) {
-                    SrcT v[3];
-                    for (size_t k = 0; k < 3; ++k) {
-                        v[k] = src[(static_cast<long long>(y) + pattern.offset[k].dy) *
-                                       static_cast<long long>(srcStride) +
-                                   static_cast<long long>(x) + pattern.offset[k].dx];
-                    }
-                    const SrcT lo = v[0] < v[1] ? v[0] : v[1];
-                    const SrcT hi = v[0] < v[1] ? v[1] : v[0];
-                    const SrcT m = hi < v[2] ? hi : v[2];
-                    dst[y * dstStride + x] = lo > m ? lo : m;
-                }
-            }
-            // The border, VISITED RATHER THAN SKIPPED. Walking the whole image and
-            // `continue`-ing over the interior is 360 000 branch-only iterations a
-            // frame -- measured at ~0.4 ms, against a border of about 2 000 pixels.
-            const auto scalarRow = [&](size_t yy, size_t xa, size_t xb) {
-                for (size_t xx = xa; xx < xb; ++xx) {
-                    impl::med3Scalar<K, SrcT>(src, width, height, srcStride, dst, dstStride,
-                                              pattern, yy, xx);
-                }
-            };
-            for (size_t y = 0; y < y0; ++y) scalarRow(y, 0, width);
-            for (size_t y = static_cast<size_t>(yEnd); y < height; ++y) scalarRow(y, 0, width);
-            for (size_t y = y0; y < static_cast<size_t>(yEnd); ++y) {
-                scalarRow(y, 0, x0);
-                scalarRow(y, xStop, width);
-            }
-            return;
-        }
-    }
-#endif
-
+    // Row by row through the one body every entry point shares. The vertical border
+    // is applied here: a sample row outside the image is handed over as null.
     for (size_t y = 0; y < height; ++y) {
-        for (size_t x = 0; x < width; ++x) {
-            SrcT v[K];
-            for (size_t k = 0; k < K; ++k) {
-                const long long sy = static_cast<long long>(y) + pattern.offset[k].dy;
-                const long long sx = static_cast<long long>(x) + pattern.offset[k].dx;
-                const bool inside = sy >= 0 && sx >= 0 &&
-                                    sy < static_cast<long long>(height) &&
-                                    sx < static_cast<long long>(width);
-                v[k] = inside ? src[static_cast<size_t>(sy) * srcStride +
-                                    static_cast<size_t>(sx)]
-                              : SrcT{0};
-            }
-            // Insertion sort. `K` is 3 or 5 in every shipped pattern and odd by
-            // static_assert, so this is a handful of compares fully unrolled -- a
-            // sorting network would be the same instructions with more source.
-            for (size_t i = 1; i < K; ++i) {
-                SrcT key = v[i];
-                size_t j = i;
-                while (j > 0 && v[j - 1] > key) {
-                    v[j] = v[j - 1];
-                    --j;
-                }
-                v[j] = key;
-            }
-            dst[y * dstStride + x] = v[K / 2];
+        const SrcT* rows[K];
+        for (size_t k = 0; k < K; ++k) {
+            const long long sy = static_cast<long long>(y) + pattern.offset[k].dy;
+            rows[k] = (sy >= 0 && sy < static_cast<long long>(height))
+                          ? src + static_cast<size_t>(sy) * srcStride
+                          : nullptr;
         }
+        impl::medianRow<K, SrcT>(rows, width, dst + y * dstStride, pattern);
     }
 }
 

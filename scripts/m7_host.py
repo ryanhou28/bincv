@@ -21,9 +21,16 @@ USAGE
     scripts/m7_host.py run    CMD [CMD ...]          one session, print replies
     scripts/m7_host.py link   [--bytes N] [--repeats R]   link integrity + rate
     scripts/m7_host.py launches -n N -o LOG --image IMAGE [--build DIR] CMD [CMD ...]
+    scripts/m7_host.py track --blob BSQ --reference REF -o LOG [--frames N]
 
 There is one firmware image per benchmark (targets/stm32h753/CMakeLists.txt says
-why). `launches` is run_launches.sh for the board: it builds IMAGE from the
+why). `track` runs the feature tracker image (bincv_m7_track) over a BSQ1 blob, serving
+the rows it asks for, and holds its per-frame output to REF -- what
+benchmark/frontend_sequence --out wrote for the same blob on the host: every
+frame's integer digest exactly, and Lucas–Kanade's points bit for bit, with the
+largest difference reported where they are not.
+
+`launches` is run_launches.sh for the board: it builds IMAGE from the
 current tree, flashes it, then takes N launches -- each one a system reset, so
 caches, stack and every static start cold -- and runs the commands in each.
 The log carries the same header contract (`# benchmark`, `# commit`,
@@ -373,6 +380,148 @@ def cmd_launches(args):
     return failed
 
 
+def read_frame_lines(path):
+    """F and P lines by frame number, from a reference or a board run."""
+    f_lines, p_lines = {}, {}
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith('F '):
+                f_lines[int(line.split()[1])] = line.strip()
+            elif line.startswith('P '):
+                p_lines[int(line.split()[1])] = line.strip()
+    return f_lines, p_lines
+
+
+def decode_points(p_line):
+    import struct as st
+    out = []
+    for tok in p_line.split()[2:]:
+        x = st.unpack('<f', bytes.fromhex(tok[0:8])[::-1])[0]
+        y = st.unpack('<f', bytes.fromhex(tok[8:16])[::-1])[0]
+        out.append((x, y, tok[16] == '1'))
+    return out
+
+
+def compare_runs(board_path, ref_path):
+    """What the board did against what the host reference did, frame by frame."""
+    bf, bp = read_frame_lines(board_path)
+    rf, rp = read_frame_lines(ref_path)
+    frames = sorted(bf)
+    f_match = sum(1 for f in frames if rf.get(f) == bf[f])
+    p_exact = sum(1 for f in frames if rp.get(f) == bp.get(f))
+    pts = differ = status_differ = 0
+    max_d = 0.0
+    for f in frames:
+        if rp.get(f) == bp.get(f) or f not in rp or f not in bp:
+            if f in bp:
+                pts += len(bp[f].split()) - 2
+            continue
+        a, b = decode_points(bp[f]), decode_points(rp[f])
+        for (x0, y0, s0), (x1, y1, s1) in zip(a, b):
+            pts += 1
+            if s0 != s1:
+                status_differ += 1
+            if (x0, y0) != (x1, y1):
+                differ += 1
+                max_d = max(max_d, ((x0 - x1) ** 2 + (y0 - y1) ** 2) ** 0.5)
+    first_bad = next((f for f in frames if rf.get(f) != bf[f]), None)
+    return {
+        'frames': len(frames), 'f_match': f_match, 'p_exact': p_exact, 'points': pts,
+        'points_differ': differ, 'status_differ': status_differ, 'max_diff_px': max_d,
+        'first_digest_mismatch': first_bad,
+    }
+
+
+def cmd_track(args):
+    import struct as st
+    build = os.path.abspath(args.build)
+    image_name = 'bincv_m7_track'
+    r = subprocess.run(['cmake', '--build', build, '--target', image_name],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stdout[-4000:], r.stderr[-4000:], file=sys.stderr)
+        die('the image did not build', 1)
+    image = os.path.join(build, image_rel(image_name))
+    if not args.no_flash:
+        flash(image)
+    image_hash = hashlib.sha256(open(image, 'rb').read()).hexdigest()[:12]
+
+    blob = open(args.blob, 'rb')
+    magic, mode, w, h, count = st.unpack('<4sIIII', blob.read(20))
+    if magic != b'BSQ1' or mode != 0:
+        die(f'{args.blob} is not an 8-bit BSQ1 blob')
+    frames = min(count, args.frames) if args.frames else count
+    side = args.frames_out or (args.output + '.frames')
+
+    with Session(args.port, args.baud) as s, open(args.output, 'w') as log, \
+            open(side, 'w') as per_frame:
+        hello = s.sync()
+        clock = s.command('CLOCK', timeout=15)
+        settings = []
+        for kv in args.set:
+            reply = s.command('SET ' + kv.replace('=', ' '), timeout=10)
+            if reply[-1].startswith('ERR'):
+                die(f'the board refused SET {kv}: {reply[-1]}', 1)
+            settings.append(reply[0])
+        log.write('# feature tracker on the board -- one run of a firmware image over a sequence\n')
+        log.write(f'# benchmark: {image_name} TRACK {frames} {w} {h}\n')
+        log.write('# launches: 1\n')
+        log.write('# arch:     cortex-m7\n')
+        log.write('# host:     NUCLEO-H753ZI (STM32H753ZI)\n')
+        log.write(f'# compiler: {compiler_line(build)}\n')
+        log.write(f'# commit:   {git_commit()}\n')
+        log.write(f'# sources:  {sources_line(image_name)}\n')
+        log.write(f'# image:    {image_rel(image_name)} sha256 {image_hash}\n')
+        log.write(f'# board:    {hello}\n')
+        log.write(f'# clock:    {clock[0]}\n')
+        log.write(f'# sequence: {os.path.basename(args.blob)}, {frames} frames of {w}x{h}\n')
+        log.write(f'# reference: {os.path.basename(args.reference)}\n')
+        log.write(f'# settings: {" ".join(settings) if settings else "(image defaults)"}\n')
+        log.write(f'# date:     {datetime.datetime.now().astimezone().isoformat(timespec="seconds")}\n')
+        log.write(f'# per-frame F/P/T lines: {os.path.basename(side)} (not committed: ~3 KB a frame)\n\n')
+        log.flush()
+
+        t_start = time.monotonic()
+        s.write_line(f'TRACK {frames} {w} {h}')
+        while True:
+            line = s.read_line(timeout=300)
+            if line.startswith('NEED '):
+                _, f, row, n = line.split()
+                f, row, n = int(f), int(row), int(n)
+                blob.seek(32 + f * w * h + row * w)
+                data = blob.read(n * w)
+                s.write(data + zlib.crc32(data).to_bytes(4, 'little'))
+                if row == 0 and f % 50 == 0:
+                    print(f'\r  frame {f}/{frames}', end='', file=sys.stderr)
+            elif line[:2] in ('F ', 'P ', 'T '):
+                per_frame.write(line + '\n')
+            else:
+                log.write(line + '\n')
+                if line.startswith('OK') or line.startswith('ERR'):
+                    break
+        print(file=sys.stderr)
+        per_frame.flush()
+        took = time.monotonic() - t_start
+
+        c = compare_runs(side, args.reference)
+        log.write('\n-- against the host reference --\n')
+        log.write(f"frames compared          : {c['frames']}\n")
+        log.write(f"integer digests equal    : {c['f_match']} of {c['frames']}\n")
+        log.write(f"points bit-identical     : {c['p_exact']} of {c['frames']} frames\n")
+        log.write(f"points that differ       : {c['points_differ']} of {c['points']}, "
+                  f"largest {c['max_diff_px']:.3g} px, status differs on {c['status_differ']}\n")
+        if c['first_digest_mismatch'] is not None:
+            log.write(f"first digest mismatch    : frame {c['first_digest_mismatch']}\n")
+        log.write(f'\n# wall time {took:.0f} s, mostly the link\n# done\n')
+    text = open(args.output).read()
+    if '-- per frame' in text:
+        print('-- per frame' + text.split('-- per frame', 1)[1], file=sys.stderr)
+    ok = c['f_match'] == c['frames']
+    print(f'wrote {args.output}; digests equal on {c["f_match"]} of {c["frames"]} frames',
+          file=sys.stderr)
+    return 0 if ok else 1
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--port', default=DEFAULT_PORT)
@@ -402,7 +551,22 @@ def main():
     n.add_argument('--timeout', type=float, default=600.0)
     n.add_argument('commands', nargs='+')
 
+    t = sub.add_parser('track')
+    t.add_argument('--blob', required=True)
+    t.add_argument('--reference', required=True,
+                   help='benchmark/frontend_sequence --out over the same blob and frames')
+    t.add_argument('-o', '--output', required=True)
+    t.add_argument('--frames', type=int, default=0)
+    t.add_argument('--set', action='append', default=[], metavar='NAME=VALUE',
+                   help='a board setting before the run, e.g. lkwc=0')
+    t.add_argument('--frames-out', default='',
+                   help="where the per-frame lines go (default: beside the log)")
+    t.add_argument('--build', default=DEFAULT_BUILD)
+    t.add_argument('--no-flash', action='store_true')
+
     args = p.parse_args()
+    if args.sub == 'track':
+        return cmd_track(args)
     if args.sub == 'flash':
         path = args.image if args.image.endswith('.bin') else \
             os.path.join(args.build, image_rel(args.image))

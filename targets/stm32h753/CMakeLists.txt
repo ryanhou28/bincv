@@ -68,3 +68,16 @@ bincv_m7_image(bincv_m7_reduce)
 
 add_executable(bincv_m7_dense startup.c board.c syscalls.c m7_harness.cpp bincv_m7_dense.cpp)
 bincv_m7_image(bincv_m7_dense)
+
+add_executable(bincv_m7_track startup.c board.c syscalls.c m7_harness.cpp bincv_m7_track.cpp)
+bincv_m7_image(bincv_m7_track)
+
+# DIAGNOSTIC, never a published figure: the tracker with opticalFlow.hpp's stage
+# timers on, reading the board's cycle counter. It answers where `track` goes.
+add_executable(bincv_m7_lkstages startup.c board.c syscalls.c m7_harness.cpp bincv_m7_track.cpp)
+bincv_m7_image(bincv_m7_lkstages)
+target_compile_definitions(bincv_m7_lkstages PRIVATE BINCV_LK_STAGE_TIMING
+                                                     "BINCV_LK_STAGE_CLOCK=boardCycles64()")
+
+add_executable(bincv_m7_sensor startup.c board.c syscalls.c m7_harness.cpp bincv_m7_sensor.cpp)
+bincv_m7_image(bincv_m7_sensor)

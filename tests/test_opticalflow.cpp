@@ -4212,3 +4212,64 @@ BINCV_TEST(Flow, CovarianceNeonArmIsBitExact_uint32_t) {
     BINCV_CHECK(statusDiff == 0);
     BINCV_CHECK(errDiff == 0);
 }
+
+// ---------------------------------------------------------------------------
+// The residual's window-count arm (`impl::lkWindowCountEnabled()`) and the arm a
+// hardware count takes are two spellings of the same integers: the first carries
+// per-byte partial counts down the window and weights them once, the second counts
+// and weights every row. On by default only where a population count is software,
+// so on this machine the switch is what puts it under test at all. Same frames,
+// same points, every ladder depth the tracker runs; nothing may differ.
+// ---------------------------------------------------------------------------
+template <size_t... LevelBits>
+void windowCountArmIsBitExact(const char* label) {
+    const int width = kW, height = kH;
+    BinMat<uint32_t> prevSrc(width, height), nextSrc(width, height);
+    renderWarped(prevSrc, Warp{});
+    renderWarped(nextSrc, translation(1.3, -0.7));
+
+    LadderPipeline<uint32_t, LevelBits...> fe(width, height);
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+
+    std::vector<Point2f> pts;
+    for (int y = 1; y < height - 1; y += 5) {
+        for (int x = 1; x < width - 1; x += 7) {
+            pts.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+        }
+    }
+    const size_t n = pts.size();
+    std::vector<Point2f> outA(n), outB(n);
+    std::vector<uint8_t> stA(n), stB(n);
+    std::vector<float> errA(n), errB(n);
+    LKParams params;
+
+    bool& sw = bincv::impl::lkWindowCountEnabled();
+    const bool saved = sw;
+    sw = true;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outA.data(), stA.data(), errA.data(), n, params);
+    sw = false;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outB.data(), stB.data(), errB.data(), n, params);
+    sw = saved;
+
+    size_t posDiff = 0, statusDiff = 0, errDiff = 0, tracked = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (stA[i] != stB[i]) ++statusDiff;
+        if (stA[i]) ++tracked;
+        if (std::memcmp(&outA[i], &outB[i], sizeof(Point2f)) != 0) ++posDiff;
+        if (std::memcmp(&errA[i], &errB[i], sizeof(float)) != 0) ++errDiff;
+    }
+    std::printf(" %-10s %zu points, %zu tracked; window count vs per-row count: %zu positions,"
+                " %zu status, %zu err differ\n",
+                label, n, tracked, posDiff, statusDiff, errDiff);
+    BINCV_CHECK(tracked > 20);
+    BINCV_CHECK(posDiff == 0);
+    BINCV_CHECK(statusDiff == 0);
+    BINCV_CHECK(errDiff == 0);
+}
+
+BINCV_TEST(Flow, WindowCountArmIsBitExact) {
+    windowCountArmIsBitExact<1, 2, 2, 2>("1/2/2/2");
+    windowCountArmIsBitExact<1, 1, 1, 1>("1/1/1/1");
+    windowCountArmIsBitExact<2, 3, 3>("2/3/3");
+}

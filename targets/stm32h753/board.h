@@ -81,6 +81,11 @@ int boardCycleCounterInit(void);
 
 static inline uint32_t boardCycles(void) { return *(volatile uint32_t*)0xE0001004u; }
 
+/* The DWT counter widened to 64 bits. The 32-bit counter wraps every 8.9 s at
+ * 480 MHz; this is right as long as it is read at least that often, which every
+ * caller here does many times a frame. */
+uint64_t boardCycles64(void);
+
 /* Caches are ON for every measurement, and the firmware says so in its banner: an
  * H7 running from flash with the I-cache off is a different machine, and a number
  * taken there does not describe the part anyone ships.
@@ -94,6 +99,10 @@ void boardEnableCaches(void);
 void boardStackPaint(void);
 size_t boardStackUsed(void);
 size_t boardStackSize(void);
+
+/* Clocks for the D2 SRAM banks, which are off out of reset; a section placed there
+ * reads and writes nothing until this has run. */
+void boardEnableSram(void);
 
 /* System reset through the core's AIRCR, so a host can start a fresh launch without
  * re-flashing. */

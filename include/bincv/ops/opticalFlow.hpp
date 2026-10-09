@@ -269,12 +269,26 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
-#ifdef BINCV_LK_STAGE_TIMING
+#if defined(BINCV_LK_STAGE_TIMING) && !defined(BINCV_LK_STAGE_CLOCK)
 #include <chrono>
 #endif
 
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
+#endif
+
+// WHERE A POPULATION COUNT IS SOFTWARE. M-profile has no count instruction (`CNT` is
+// NEON's), and on RISC-V `cpop` is the optional Zbb extension; on both,
+// `__builtin_popcount` is a call into libgcc's SWAR sequence. The residual's
+// window-count arm (`alignedResidualSumsWindowCount`) is the shape for that, and
+// this selects it by default there -- from the compiler's own macros. It compiles on
+// every target, so the tests hold it to the arm a hardware count takes.
+#if defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
+#define BINCV_LK_WINDOW_COUNT_DEFAULT 1
+#elif defined(__riscv) && !defined(__riscv_zbb)
+#define BINCV_LK_WINDOW_COUNT_DEFAULT 1
+#else
+#define BINCV_LK_WINDOW_COUNT_DEFAULT 0
 #endif
 
 #include "../core/error.hpp"
@@ -538,11 +552,18 @@ inline StageTiming& stageTiming() {
     static StageTiming t;
     return t;
 }
+/// @note `BINCV_LK_STAGE_CLOCK`, when defined, is an expression that reads the
+/// caller's clock -- a cycle counter on a bare-metal target, which has no
+/// `std::chrono` -- and the stages are then in its units.
 inline unsigned long long stageNow() {
+#ifdef BINCV_LK_STAGE_CLOCK
+    return static_cast<unsigned long long>(BINCV_LK_STAGE_CLOCK);
+#else
     return static_cast<unsigned long long>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
             .count());
+#endif
 }
 #define BINCV_STAGE_MARK() unsigned long long bincvStageMark = impl::stageNow()
 #define BINCV_STAGE_LAP(field)                                  \
@@ -896,7 +917,7 @@ template <typename WordType>
 inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType>& r,
                          long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY,
                          const StagedWindow<1, WordType>* = nullptr,
-                         TapCache<1, WordType>* = nullptr) {
+                         TapCache<1, WordType>* = nullptr, bool = false) {
     for (size_t y = r.y0; y < r.y1; ++y) {
         const WordType* mx = lv.dxMag.row(y);
         const WordType* sx = lv.dxSign.row(y);
@@ -1089,6 +1110,75 @@ inline bool& lkCovarianceNeonEnabled() {
     return on;
 }
 
+/// @brief Select the window-count arms -- the residual's and the staged covariance's.
+/// **INTERNAL, and not a tuning knob.**
+/// On by default where a population count is software (BINCV_LK_WINDOW_COUNT_DEFAULT);
+/// the tests flip it to hold the two arms to identical output on any machine. A
+/// plain `bool`, so not thread-safe to flip while tracking -- tests flip it between
+/// calls.
+inline bool& lkWindowCountEnabled() {
+    static bool on = BINCV_LK_WINDOW_COUNT_DEFAULT != 0;
+    return on;
+}
+
+/// @brief Each byte of `v` replaced by its own population count, 0 to 8. **INTERNAL.**
+inline uint32_t byteCounts32(uint32_t v) {
+    v = v - ((v >> 1) & 0x55555555u);
+    v = (v & 0x33333333u) + ((v >> 2) & 0x33333333u);
+    return (v + (v >> 4)) & 0x0F0F0F0Fu;
+}
+
+/// @brief The four byte lanes of `lanes`, summed. **INTERNAL.**
+inline uint32_t collapseByteCounts(uint32_t lanes) {
+    lanes = (lanes & 0x00FF00FFu) + ((lanes >> 8) & 0x00FF00FFu);
+    return (lanes & 0xFFFFu) + (lanes >> 16);
+}
+
+/// @brief `stagedCovariance`'s counts, carried down the window. **INTERNAL.**
+/// The fourteen single-word counts a row makes at N = 2 become fourteen words of
+/// per-byte partial counts, folded every 31 rows and once at the end -- the same
+/// integers, in the shape `alignedResidualSumsWindowCount` explains.
+template <size_t N, typename WordType>
+inline GradientCovariance stagedCovarianceWindowCount(const StagedWindow<N, WordType>& s,
+                                                      size_t rows) {
+    static_assert(sizeof(WordType) == 4, "the byte-lane count is written for 32-bit words");
+    BitSlicedPairCounts<N> total;
+    uint32_t xx[N][N] = {}, yy[N][N] = {}, xyT[N][N] = {}, xyS[N][N] = {};
+    const auto fold = [&]() {
+        for (size_t a = 0; a < N; ++a)
+            for (size_t b = 0; b < N; ++b) {
+                total.xx[a][b] += collapseByteCounts(xx[a][b]);
+                total.yy[a][b] += collapseByteCounts(yy[a][b]);
+                total.xyTotal[a][b] += collapseByteCounts(xyT[a][b]);
+                total.xySet[a][b] += collapseByteCounts(xyS[a][b]);
+                xx[a][b] = yy[a][b] = xyT[a][b] = xyS[a][b] = 0;
+            }
+    };
+    size_t inLanes = 0;
+    for (size_t i = 0; i < rows; ++i) {
+        const uint32_t selector = static_cast<uint32_t>(s.signX[i] ^ s.signY[i]);
+        for (size_t a = 0; a < N; ++a) {
+            const uint32_t xa = static_cast<uint32_t>(s.magX[i][a]);
+            const uint32_t ya = static_cast<uint32_t>(s.magY[i][a]);
+            for (size_t b = a; b < N; ++b) {
+                xx[a][b] += byteCounts32(xa & static_cast<uint32_t>(s.magX[i][b]));
+                yy[a][b] += byteCounts32(ya & static_cast<uint32_t>(s.magY[i][b]));
+            }
+            for (size_t b = 0; b < N; ++b) {
+                const uint32_t both = xa & static_cast<uint32_t>(s.magY[i][b]);
+                xyT[a][b] += byteCounts32(both);
+                xyS[a][b] += byteCounts32(both & selector);
+            }
+        }
+        if (++inLanes == 31) {
+            fold();
+            inLanes = 0;
+        }
+    }
+    fold();
+    return combineBitSlicedPairs<N>(total);
+}
+
 /// @brief The 2x2 covariance from the ALREADY-STAGED window. **INTERNAL**.
 ///
 /// **`levelCovariance` WALKS THE SAME WINDOW `stageWindow` HAS JUST FINISHED WALKING.**
@@ -1170,6 +1260,9 @@ inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, s
         }
     }
 #endif
+    if constexpr (sizeof(WordType) == 4) {
+        if (lkWindowCountEnabled()) return stagedCovarianceWindowCount<N, WordType>(s, rows);
+    }
     for (size_t i = 0; i < rows; ++i) {
         const WordType selector = static_cast<WordType>(s.signX[i] ^ s.signY[i]);
         for (size_t a = 0; a < N; ++a) {
@@ -1661,6 +1754,194 @@ inline void alignedResidualSums(const LKLevelN<N, WordType>& lv, const RegionWor
     }
 }
 
+/// @brief `alignedResidualSumsImpl`'s sums, counting where a population count is
+/// software. **INTERNAL.**
+///
+/// **THE SAME INTEGERS, COUNTED DOWN THE WINDOW INSTEAD OF ACROSS EACH ROW.** The
+/// portable path calls `slicedSignedSum` ten times a row, and each call makes 2N^2
+/// single-word counts and folds them into a `long long` with its weight: at N = 2
+/// that is eighty counts a row, and on a core without a count instruction each is a
+/// call into libgcc's SWAR sequence, which spends a third of its work collapsing
+/// four byte lanes into one number. Here the SWAR runs inline and STOPS at the byte
+/// lanes: each of the 20N^2 terms keeps a 32-bit word of per-byte partial counts that
+/// rows are added into, and the collapse, the subtraction and the weights are paid
+/// once per window. A byte lane gains at most 8 a row, so 31 rows -- the reference
+/// window's height -- fit before the lanes are folded into 32-bit totals.
+///
+/// `total - 2 * opposing` is spelled `positive - negative` here (`v & mag & ~sign`
+/// against `v & mag & sign`), which is the same number. NEON's N = 2 kernel carries
+/// a window accumulator for the same reason; this is the shape without a vector unit.
+///
+/// `skipSelf` leaves the two `self` sums uncounted and untouched: they are the previous
+/// frame's, independent of the displacement, so a caller that has them from an
+/// earlier call at the same window need not pay for them again.
+template <size_t N, typename WordType, bool Staged>
+inline void alignedResidualSumsWindowCount(const LKLevelN<N, WordType>& lv,
+                                           const RegionWords<WordType>& r, long long tapX,
+                                           long long tapY, TapSums& sumsX, TapSums& sumsY,
+                                           const StagedWindow<N, WordType>* staged,
+                                           TapCache<N, WordType>* taps, bool skipSelf) {
+    static_assert(sizeof(WordType) == 4, "the byte-lane count is written for 32-bit words");
+    constexpr size_t kTerms = 5;            // the four taps, then the previous frame
+    constexpr size_t kRowsPerFold = 31;     // 31 * 8 = 248, the most a byte lane holds
+
+    // REGISTER-BLOCKED, WHEN THE WINDOW IS STAGED. The operands of every row then sit
+    // in the staged window and the tap cache for the whole call, so the loop can run
+    // the rows INSIDE each (axis, term) pair: its 2N^2 partial-count words stay in
+    // registers instead of being loaded, added to and stored back once per row, as the
+    // 20N^2 of them must be when the rows run outermost. N <= 2 is where that many
+    // words fit a 32-bit core's registers. Same integers either way.
+    if constexpr (Staged && N <= 2) {
+        {
+            // Every row's taps into the cache first -- the reader extracts the ones
+            // the displacement has made stale, exactly as the row-outermost loop does.
+            RowReader<N, WordType, true> rd(lv, r, tapX, tapY, staged, taps);
+            RowOperands<N, WordType> o;
+            for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) rd.load(y, i, o);
+        }
+        const size_t rows = r.y1 - r.y0;
+        long long sum[2][kTerms] = {};
+        for (size_t a = 0; a < 2; ++a) {
+            const WordType (*mag)[N] = a == 0 ? staged->magX : staged->magY;
+            const WordType* sgn = a == 0 ? staged->signX : staged->signY;
+            for (size_t t = 0; t < kTerms; ++t) {
+                // A constant trip count, so the five terms stay unrolled and each is
+                // specialized; the skip is a branch on a flag fixed for the call.
+                if (t == kTerms - 1 && skipSelf) continue;
+                uint32_t total[N][N][2] = {};
+                uint32_t lane[N][N][2] = {};
+                size_t inLanes = 0;
+                const auto foldTerm = [&]() {
+                    for (size_t k = 0; k < N; ++k)
+                        for (size_t j = 0; j < N; ++j)
+                            for (size_t q = 0; q < 2; ++q) {
+                                total[k][j][q] += collapseByteCounts(lane[k][j][q]);
+                                lane[k][j][q] = 0;
+                            }
+                };
+                for (size_t i = 0; i < rows; ++i) {
+                    const uint32_t sg = static_cast<uint32_t>(sgn[i]);
+                    uint32_t pos[N], neg[N], v[N];
+                    for (size_t j = 0; j < N; ++j) {
+                        const uint32_t m = static_cast<uint32_t>(mag[i][j]);
+                        pos[j] = m & ~sg;
+                        neg[j] = m & sg;
+                    }
+                    for (size_t k = 0; k < N; ++k) {
+                        v[k] = static_cast<uint32_t>(t < 4 ? taps->taps[i][k][t]
+                                                           : staged->self[i][k]);
+                    }
+                    for (size_t k = 0; k < N; ++k)
+                        for (size_t j = 0; j < N; ++j) {
+                            lane[k][j][0] += byteCounts32(v[k] & pos[j]);
+                            lane[k][j][1] += byteCounts32(v[k] & neg[j]);
+                        }
+                    if (++inLanes == kRowsPerFold) {
+                        foldTerm();
+                        inLanes = 0;
+                    }
+                }
+                foldTerm();
+                int32_t acc = 0;
+                for (size_t k = 0; k < N; ++k)
+                    for (size_t j = 0; j < N; ++j) {
+                        const int32_t d = static_cast<int32_t>(total[k][j][0]) -
+                                          static_cast<int32_t>(total[k][j][1]);
+                        acc += d * (int32_t{1} << (k + j));
+                    }
+                sum[a][t] = acc;
+            }
+        }
+        sumsX.t00 += sum[0][0];
+        sumsX.t01 += sum[0][1];
+        sumsX.t10 += sum[0][2];
+        sumsX.t11 += sum[0][3];
+        sumsY.t00 += sum[1][0];
+        sumsY.t01 += sum[1][1];
+        sumsY.t10 += sum[1][2];
+        sumsY.t11 += sum[1][3];
+        if (!skipSelf) {
+            sumsX.self += sum[0][4];
+            sumsY.self += sum[1][4];
+        }
+        return;
+    }
+    (void)skipSelf;  // the row-outermost form below counts every term
+
+    uint32_t lanes[2][kTerms][N][N][2] = {};
+    uint32_t totals[2][kTerms][N][N][2] = {};
+    const auto fold = [&]() {
+        for (size_t a = 0; a < 2; ++a)
+            for (size_t t = 0; t < kTerms; ++t)
+                for (size_t k = 0; k < N; ++k)
+                    for (size_t j = 0; j < N; ++j)
+                        for (size_t s = 0; s < 2; ++s) {
+                            totals[a][t][k][j][s] += collapseByteCounts(lanes[a][t][k][j][s]);
+                            lanes[a][t][k][j][s] = 0;
+                        }
+    };
+
+    RowReader<N, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
+    RowOperands<N, WordType> o;
+    size_t rowsInLanes = 0;
+    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
+        rd.load(y, i, o);
+        uint32_t pos[2][N], neg[2][N];
+        for (size_t j = 0; j < N; ++j) {
+            const uint32_t mx = static_cast<uint32_t>(o.magX[j]);
+            const uint32_t my = static_cast<uint32_t>(o.magY[j]);
+            const uint32_t sx = static_cast<uint32_t>(o.signX);
+            const uint32_t sy = static_cast<uint32_t>(o.signY);
+            pos[0][j] = mx & ~sx;
+            neg[0][j] = mx & sx;
+            pos[1][j] = my & ~sy;
+            neg[1][j] = my & sy;
+        }
+        for (size_t t = 0; t < kTerms; ++t) {
+            for (size_t k = 0; k < N; ++k) {
+                const uint32_t v = static_cast<uint32_t>(t < 4 ? o.taps[k][t] : o.self[k]);
+                for (size_t a = 0; a < 2; ++a) {
+                    for (size_t j = 0; j < N; ++j) {
+                        lanes[a][t][k][j][0] += byteCounts32(v & pos[a][j]);
+                        lanes[a][t][k][j][1] += byteCounts32(v & neg[a][j]);
+                    }
+                }
+            }
+        }
+        if (++rowsInLanes == kRowsPerFold) {
+            fold();
+            rowsInLanes = 0;
+        }
+    }
+    fold();
+
+    // Weighted once: 2^(k+j) for value plane k against magnitude plane j, as
+    // `slicedSignedSum` weights them. A window of at most 64 rows of 32 pixels holds
+    // at most 2048 set bits per term, so every partial below fits 32 bits.
+    long long sum[2][kTerms] = {};
+    for (size_t a = 0; a < 2; ++a)
+        for (size_t t = 0; t < kTerms; ++t) {
+            int32_t acc = 0;
+            for (size_t k = 0; k < N; ++k)
+                for (size_t j = 0; j < N; ++j) {
+                    const int32_t d = static_cast<int32_t>(totals[a][t][k][j][0]) -
+                                      static_cast<int32_t>(totals[a][t][k][j][1]);
+                    acc += d * (int32_t{1} << (k + j));
+                }
+            sum[a][t] = acc;
+        }
+    sumsX.t00 += sum[0][0];
+    sumsX.t01 += sum[0][1];
+    sumsX.t10 += sum[0][2];
+    sumsX.t11 += sum[0][3];
+    sumsX.self += sum[0][4];
+    sumsY.t00 += sum[1][0];
+    sumsY.t01 += sum[1][1];
+    sumsY.t10 += sum[1][2];
+    sumsY.t11 += sum[1][3];
+    sumsY.self += sum[1][4];
+}
+
 /// @brief `b = sum(diff * grad)` at **N bits per pixel**, as ten exact integers.
 /// **INTERNAL, and the generic-N form of the function above.**
 ///
@@ -1692,7 +1973,7 @@ template <size_t N, typename WordType, bool UseNeon = true>
 inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                          long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY,
                          const StagedWindow<N, WordType>* staged = nullptr,
-                         TapCache<N, WordType>* taps = nullptr) {
+                         TapCache<N, WordType>* taps = nullptr, bool skipSelf = false) {
     // ===================================================================
     // THE ALIGNED FAST PATH. A 31-pixel window at an arbitrary offset
     // spans 1.94 `uint32_t` words on average -- it fits in one only when
@@ -1714,6 +1995,19 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
     // and at 31x31 (the reference pipeline's window) it fits at every word type binCV supports.
     // ===================================================================
     if (r.x1 - r.x0 <= bitsPerWord<WordType>()) {
+        if constexpr (sizeof(WordType) == 4) {
+            if (lkWindowCountEnabled() && r.x1 > r.x0) {
+                if (staged != nullptr) {
+                    alignedResidualSumsWindowCount<N, WordType, true>(lv, r, tapX, tapY, sumsX,
+                                                                      sumsY, staged, taps,
+                                                                      skipSelf);
+                } else {
+                    alignedResidualSumsWindowCount<N, WordType, false>(
+                        lv, r, tapX, tapY, sumsX, sumsY, nullptr, nullptr, skipSelf);
+                }
+                return;
+            }
+        }
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
         // N == 1 is level 0 of every ladder and got NOTHING from the plane-pair
         // batching, because at N == 1 there is one pair. Batching across the four
@@ -2215,6 +2509,13 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     double prevDeltaX = 0.0;
     double prevDeltaY = 0.0;
     bool inRange = true;
+    // The last counted sums and the integer displacement they were counted at, for
+    // the reuse inside the loop. Sums only: nothing after the loop reads them.
+    TapSums lastSumsX;
+    TapSums lastSumsY;
+    long long lastTapX = 0;
+    long long lastTapY = 0;
+    bool haveSums = false;
 
     // The tap offset and the four weights live INSIDE the loop, and
     // deliberately do not survive it. Declared out here, they would let the
@@ -2273,13 +2574,38 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         // reading the previous frame's eight words from `staged` when this
         // window could be staged. Bit-exact either way; the staged
         // path differs only in where the words come from.
+        // THE SUMS ARE COUNTED AT AN INTEGER DISPLACEMENT, AND MOST ITERATIONS DO NOT MOVE
+        // IT. The ten integers are a function of the level, the window and
+        // (tapX, tapY) and of nothing else -- the subpixel part enters only through
+        // the four weights, after the counting. So an iteration whose displacement
+        // floors to the previous one's has exactly the previous one's sums, and
+        // counting them again would recompute the same integers.
         TapSums sumsX;
         TapSums sumsY;
+        // And the two `self` sums -- the previous frame against the gradient -- do
+        // not depend on the displacement at all, so after the first count they are
+        // carried rather than counted (where the counting path can skip them; one
+        // that cannot counts them again and gets the same two integers).
+        if (haveSums && tapX == lastTapX && tapY == lastTapY) {
+            sumsX = lastSumsX;
+            sumsY = lastSumsY;
+        } else {
 #ifdef BINCV_LK_STAGE_TIMING
-        ++impl::stageTiming().iterations;
+            ++impl::stageTiming().iterations;
 #endif
-        residualSums(lv, region, tapX, tapY, sumsX, sumsY,
-                     staged ? &stagedWindow : nullptr, staged ? &tapCache : nullptr);
+            residualSums(lv, region, tapX, tapY, sumsX, sumsY,
+                         staged ? &stagedWindow : nullptr, staged ? &tapCache : nullptr,
+                         haveSums);
+            if (haveSums) {
+                sumsX.self = lastSumsX.self;
+                sumsY.self = lastSumsY.self;
+            }
+            lastSumsX = sumsX;
+            lastSumsY = sumsY;
+            lastTapX = tapX;
+            lastTapY = tapY;
+            haveSums = true;
+        }
 
         const double b1 = sumsX.combine(w00, w01, w10, w11);
         const double b2 = sumsY.combine(w00, w01, w10, w11);

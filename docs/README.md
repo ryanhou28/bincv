@@ -64,13 +64,14 @@ The status column is what has actually been done, not what is supported in princ
 |---|---|---|
 | **x86-64** — desktops, servers | AVX2, selected at run time; `POPCNT` on for every published figure (the software fallback builds and runs, slower) | measured — Ryzen 5 5600X |
 | **aarch64** (64-bit Arm Cortex-A) — phones, SBCs, embedded Linux | NEON | measured — Raspberry Pi 4 at a pinned clock, the reference device |
-| **Arm Cortex-M**, bare metal — microcontrollers, no OS | none: no NEON, no popcount instruction | built and run on an STM32H753ZI (Cortex-M7); bit-exact against the host. No OpenCV on that part, so no comparison — see below |
+| **Arm Cortex-M**, bare metal — microcontrollers, no OS | the DSP extension's four byte lanes, where the core has it; no NEON, no popcount instruction | built and run on an STM32H753ZI (Cortex-M7); bit-exact against the host. No OpenCV on that part, so no comparison — see below |
 | **armv7-a** (32-bit Arm Cortex-A) — older phones, SBCs | 32-bit NEON | **not built.** No toolchain here and no measurement. A different target from Cortex-M above |
 | **RISC-V** | none | **not built.** No measurement |
 | **CUDA** — NVIDIA GPUs | [a separate backend](../backends/cuda/), device-typed, never a drop-in dispatch target | measured — RTX 3070 Ti, against `cv::cuda` ([reports/cuda.md](reports/cuda.md)) |
 
-On the Cortex-M7: a 752×480 frame is 46,080 bytes, and a 320×240 dense-disparity map runs
-in 6.5 KB of scratch — 97.8 ms at the part's full 480 MHz.
+On the Cortex-M7: the assembled feature tracker runs at 752×480, bit-identical to the x86-64
+run, in 684,664 bytes; a 320×240 dense-disparity map takes 97.8 ms at the part's full
+480 MHz in 6.5 KB of scratch.
 
 A 64-bit OS is a requirement for the measured Cortex-A results rather than a preference: on
 32-bit Arm every `uint64_t` operation is synthesised from 32-bit pairs, which would measure

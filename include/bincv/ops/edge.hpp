@@ -68,7 +68,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>   // the two border columns and rows, as braced lists
+#include <initializer_list>   // the two border columns, as a braced list
+#include <type_traits>
 
 #include "../binMat.hpp"
 #include "../impl/kernel_util.hpp"
@@ -81,6 +82,12 @@
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #define BINCV_EDGE_NEON 1
 #include <arm_neon.h>
+#elif defined(__ARM_FEATURE_SIMD32) && !defined(__CUDACC__)
+// The ARMv7E-M / ARMv8-M DSP extension: four byte lanes in a general register, which
+// on a core with no vector unit is the widest arithmetic there is.
+#define BINCV_EDGE_DSP 1
+#include <arm_acle.h>
+#include <cstring>
 #endif
 
 namespace bincv {
@@ -122,56 +129,99 @@ BINCV_HOST_DEVICE inline size_t reflect101Edge(long long i, size_t n) {
     return static_cast<size_t>(i);
 }
 
-/// @brief One axis' absolute difference at `(y, x)`. **INTERNAL.**
-/// @tparam Horizontal True for the x axis, false for the y axis.
-template <EdgeSpatial S, bool Horizontal, typename SrcT>
-inline long long axisDiff(const SrcT* src, size_t width, size_t height, size_t stride,
-                          size_t y, size_t x) {
-    long long aI, bI;   // the two indices along the axis, before reflection
-    const long long here = static_cast<long long>(Horizontal ? x : y);
-    if constexpr (S == EdgeSpatial::Wide) {
-        aI = here + 1;
-        bI = here - 1;
-    } else if constexpr (S == EdgeSpatial::Forward) {
-        aI = here + 1;
-        bI = here;
-    } else {
-        aI = here;
-        bI = here - 1;
-    }
-    const size_t n = Horizontal ? width : height;
-    const size_t a = reflect101Edge(aI, n);
-    const size_t b = reflect101Edge(bI, n);
-    const long long va =
-        static_cast<long long>(Horizontal ? src[y * stride + a] : src[a * stride + x]);
-    const long long vb =
-        static_cast<long long>(Horizontal ? src[y * stride + b] : src[b * stride + x]);
-    const long long d = va - vb;
-    return d < 0 ? -d : d;
-}
+/// @brief The difference type for a source type: `int` where it holds every
+/// difference of two samples exactly, `long long` otherwise. **INTERNAL.**
+/// @note On a 32-bit core every `long long` is a register pair, and the 8- and
+/// 16-bit sources the sensor stage takes never need one.
+template <typename SrcT>
+using EdgeDiff = typename std::conditional<(sizeof(SrcT) < sizeof(int)), int, long long>::type;
 
-template <EdgeRelation R>
-inline bool passesEdge(long long d, long long t) {
+template <EdgeRelation R, typename D>
+inline bool passesEdge(D d, D t) {
     if constexpr (R == EdgeRelation::Ge) return d >= t;
     return d > t;
 }
 
-/// @brief Is `(y, x)` an edge? **INTERNAL** -- the whole predicate, in one place.
+/// @brief The edge predicate at column `x` of one row. **INTERNAL.**
+/// @param up,mid,dn The rows above, at and below the output row, **with the
+/// vertical border already applied** -- the caller passes the reflected row --
+/// so only the horizontal border is this function's. `S` picks which of the
+/// three the vertical difference reads.
 template <EdgeCombine C, EdgeRelation R, EdgeSpatial S, typename SrcT>
-inline bool isEdge(const SrcT* src, size_t width, size_t height, size_t stride, size_t y,
-                   size_t x, long long t) {
-    const bool px =
-        passesEdge<R>(axisDiff<S, true, SrcT>(src, width, height, stride, y, x), t);
+inline bool edgeAt(const SrcT* up, const SrcT* mid, const SrcT* dn, size_t width, size_t x,
+                   EdgeDiff<SrcT> t) {
+    using D = EdgeDiff<SrcT>;
+    constexpr size_t offA = (S == EdgeSpatial::Backward) ? 0 : 1;  // the `+` sample
+    constexpr size_t offB = (S == EdgeSpatial::Forward) ? 0 : 1;   // the `-` sample
+    size_t a = x + offA, b = x - offB;
+    if (x < offB || x + offA >= width) {
+        a = reflect101Edge(static_cast<long long>(x) + static_cast<long long>(offA), width);
+        b = reflect101Edge(static_cast<long long>(x) - static_cast<long long>(offB), width);
+    }
+    const D dh = static_cast<D>(mid[a]) - static_cast<D>(mid[b]);
+    const bool ph = passesEdge<R, D>(dh < 0 ? -dh : dh, t);
     // SHORT-CIRCUITING IS CORRECT AND WORTH HAVING: on a sparse edge map most pixels
     // fail both tests, so `And` skips the vertical difference for nearly all of them.
     if constexpr (C == EdgeCombine::Or) {
-        if (px) return true;
+        if (ph) return true;
     } else {
-        if (!px) return false;
+        if (!ph) return false;
     }
-    return passesEdge<R>(axisDiff<S, false, SrcT>(src, width, height, stride, y, x), t);
+    const SrcT* va = (S == EdgeSpatial::Backward) ? mid : dn;
+    const SrcT* vb = (S == EdgeSpatial::Forward) ? mid : up;
+    const D dv = static_cast<D>(va[x]) - static_cast<D>(vb[x]);
+    return passesEdge<R, D>(dv < 0 ? -dv : dv, t);
 }
 
+/// @brief The predicate at a column whose horizontal neighbours are inside the row.
+/// **INTERNAL.** Branch-free: both axes are tested and combined bitwise, where
+/// `edgeAt` short-circuits -- on a core without a vector unit this IS the inner
+/// loop, and the short circuit is a data-dependent branch that mispredicts on
+/// every edge pixel. Same function, so the same bit.
+template <EdgeCombine C, EdgeRelation R, EdgeSpatial S, typename SrcT>
+inline bool edgeInteriorAt(const SrcT* up, const SrcT* mid, const SrcT* dn, size_t x,
+                           EdgeDiff<SrcT> t) {
+    using D = EdgeDiff<SrcT>;
+    constexpr size_t offA = (S == EdgeSpatial::Backward) ? 0 : 1;
+    constexpr size_t offB = (S == EdgeSpatial::Forward) ? 0 : 1;
+    const SrcT* va = (S == EdgeSpatial::Backward) ? mid : dn;
+    const SrcT* vb = (S == EdgeSpatial::Forward) ? mid : up;
+    const D dh = static_cast<D>(mid[x + offA]) - static_cast<D>(mid[x - offB]);
+    const D dv = static_cast<D>(va[x]) - static_cast<D>(vb[x]);
+    const bool ph = passesEdge<R, D>(dh < 0 ? -dh : dh, t);
+    const bool pv = passesEdge<R, D>(dv < 0 ? -dv : dv, t);
+    return (C == EdgeCombine::Or) ? (ph | pv) : (ph & pv);
+}
+
+/// @brief One output row, one pixel at a time. **INTERNAL** -- the scalar body:
+/// the border rule, the general `SrcT`, the general `EdgeSpatial`, and the
+/// oracle `tests/test_edge.cpp` holds the vector arm to.
+/// @note The output word is built in a register and STORED, not OR-ed: the bits
+/// past `width` are never set, which is the padding invariant with no mask.
+/// @note The two columns whose neighbour is outside the row take `edgeAt`, which
+/// reflects; every other column takes the branch-free interior form.
+template <EdgeCombine C, EdgeRelation R, EdgeSpatial S, typename SrcT, typename WordType>
+inline void edgeRowScalar(const SrcT* up, const SrcT* mid, const SrcT* dn, size_t width,
+                          WordType* out, EdgeDiff<SrcT> t) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    constexpr size_t offA = (S == EdgeSpatial::Backward) ? 0 : 1;
+    constexpr size_t offB = (S == EdgeSpatial::Forward) ? 0 : 1;
+    // Columns [lo, hi) have both horizontal neighbours inside the row.
+    const size_t lo = offB < width ? offB : width;
+    const size_t hi = width > offA ? width - offA : 0;
+    for (size_t x = 0; x < width; x += kBits) {
+        const size_t n = (width - x < kBits) ? (width - x) : kBits;
+        WordType acc = 0;
+        for (size_t i = 0; i < n; ++i) {
+            const size_t xi = x + i;
+            const bool on = (xi >= lo && xi < hi)
+                                ? edgeInteriorAt<C, R, S, SrcT>(up, mid, dn, xi, t)
+                                : edgeAt<C, R, S, SrcT>(up, mid, dn, width, xi, t);
+            acc = static_cast<WordType>(acc | (static_cast<WordType>(on) << i));
+        }
+        out[x / kBits] = acc;
+    }
+}
 
 // ==================================================================
 // THE EDGE PREDICATE, THIRTY-TWO PIXELS AT A TIME.
@@ -268,7 +318,124 @@ inline uint32_t edgeMask32(const uint8_t* rowUp, const uint8_t* row, const uint8
     }
     return out;
 }
+#elif defined(BINCV_EDGE_DSP)
+/// @brief Force the portable arm, for the board's arm comparison and the tests.
+/// **INTERNAL.**
+inline bool& edgeSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasEdgeSimd() { return edgeSimdEnabled(); }
+
+inline uint32_t loadBytes4(const uint8_t* p) {
+    uint32_t v;
+    std::memcpy(&v, p, sizeof v);  // one unaligned LDR on ARMv7-M
+    return v;
+}
+
+/// @brief Thirty-two pixels of the edge predicate as thirty-two bits, four byte lanes
+/// at a time. **INTERNAL.**
+/// @note `|a - b|` is `uqsub8(a, b) | uqsub8(b, a)`, as on the vector arms. The two
+/// axes are combined by a byte max (`Or`) or min (`And`) -- `usub8` then `sel` -- and
+/// `usub8` against the threshold leaves each lane's `>= t` in its GE flag, which
+/// `sel` turns into a byte mask and one multiply gathers into four bits.
+template <EdgeCombine C>
+inline uint32_t edgeMask32(const uint8_t* rowUp, const uint8_t* row, const uint8_t* rowDn,
+                           const uint8_t* colA, const uint8_t* colB, int tp) {
+    (void)row;
+    const uint32_t t4 = 0x01010101u * static_cast<uint32_t>(tp);
+    uint32_t out = 0;
+    for (size_t g = 0; g < 8; ++g) {
+        const size_t o = g * 4;
+        const uint32_t a = loadBytes4(colA + o), b = loadBytes4(colB + o);
+        const uint32_t u = loadBytes4(rowUp + o), d = loadBytes4(rowDn + o);
+        const uint32_t dh = __uqsub8(a, b) | __uqsub8(b, a);
+        const uint32_t dv = __uqsub8(d, u) | __uqsub8(u, d);
+        (void)__usub8(dh, dv);  // GE[i]: dh_i >= dv_i
+        const uint32_t m = (C == EdgeCombine::Or) ? __sel(dh, dv) : __sel(dv, dh);
+        (void)__usub8(m, t4);   // GE[i]: m_i >= t
+        const uint32_t mask = __sel(0x01010101u, 0u);
+        out |= ((mask * 0x01020408u) >> 24) << o;
+    }
+    return out;
+}
 #endif
+
+#if defined(BINCV_EDGE_AVX2) || defined(BINCV_EDGE_NEON) || defined(BINCV_EDGE_DSP)
+/// @brief Whether the vector row serves this call. **INTERNAL.** Only the shipped
+/// shape -- 8-bit source, 32-bit words, the WIDE central difference -- because that is
+/// what the sensor stage runs; every other combination keeps the scalar body.
+template <EdgeSpatial S, typename SrcT, typename WordType>
+inline constexpr bool kEdgeVectorShape =
+    S == EdgeSpatial::Wide && sizeof(SrcT) == 1 && sizeof(WordType) == 4;
+
+/// @brief One output row, thirty-two pixels at a time. **INTERNAL.**
+/// @param tp The threshold ALREADY adjusted for the relation, as `edgeMask32` takes it.
+/// @pre `width >= 34`, and the shape is `kEdgeVectorShape`.
+///
+/// **NOTHING OUTSIDE THE THREE ROWS IS READ**, so the rows may be anywhere -- three
+/// rows of a frame, or three slots of a ring that holds nothing else. A word's mask
+/// reads columns `x - 1` through `x + 32`, so two words are taken from a shifted
+/// anchor instead: the first from column 1, shifted up one, and any word too close
+/// to the right edge from column `width - 33`, shifted down into place. The two
+/// columns whose horizontal neighbour is outside the row -- 0 and `width - 1` --
+/// are then set from the scalar predicate, two pixels a row against the sixty-four
+/// that falling back for whole words would cost.
+template <EdgeCombine C, EdgeRelation R, typename SrcT, typename WordType>
+inline void edgeRowVector(const SrcT* up, const SrcT* mid, const SrcT* dn, size_t width,
+                          WordType* out, EdgeDiff<SrcT> t, int tp) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    const uint8_t* u = reinterpret_cast<const uint8_t*>(up);
+    const uint8_t* m = reinterpret_cast<const uint8_t*>(mid);
+    const uint8_t* d = reinterpret_cast<const uint8_t*>(dn);
+    const auto mask32 = [&](size_t xs) {
+        return edgeMask32<C>(u + xs, m + xs, d + xs, m + xs + 1, m + xs - 1, tp);
+    };
+    const size_t words = (width + kBits - 1) / kBits;
+    out[0] = static_cast<WordType>(mask32(1) << 1);
+    const size_t tailAnchor = width - (kBits + 1);
+    for (size_t w = 1; w < words; ++w) {
+        const size_t x = w * kBits;
+        if (x + kBits + 1 <= width) {
+            out[w] = static_cast<WordType>(mask32(x));
+        } else {
+            // The padding bits shift in as zero, which is the invariant that would
+            // otherwise need a mask.
+            const size_t shift = x - tailAnchor;
+            out[w] = shift >= kBits ? WordType{0}
+                                    : static_cast<WordType>(mask32(tailAnchor) >> shift);
+        }
+    }
+    for (const size_t bx : {size_t{0}, width - 1}) {
+        const bool on = edgeAt<C, R, EdgeSpatial::Wide, SrcT>(up, mid, dn, width, bx, t);
+        WordType& wd = out[bx / kBits];
+        const WordType bit = static_cast<WordType>(WordType{1} << (bx % kBits));
+        wd = on ? static_cast<WordType>(wd | bit) : static_cast<WordType>(wd & ~bit);
+    }
+}
+#endif
+
+/// @brief One output row of `edgeThreshold`, from the three source rows it reads.
+/// **INTERNAL** -- the body every row of every entry point goes through, so the
+/// whole-frame call and the streaming one (ops/medianEdgeStream.hpp) cannot differ.
+/// @param up,mid,dn With the vertical border already applied: for `BORDER_REFLECT_101`
+/// the row above row 0 is row 1, and the row below the last is the one before it.
+template <EdgeCombine C, EdgeRelation R, EdgeSpatial S, typename SrcT, typename WordType>
+inline void edgeRow(const SrcT* up, const SrcT* mid, const SrcT* dn, size_t width,
+                    WordType* out, SrcT threshold) {
+    const EdgeDiff<SrcT> t = static_cast<EdgeDiff<SrcT>>(threshold);
+#if defined(BINCV_EDGE_AVX2) || defined(BINCV_EDGE_NEON) || defined(BINCV_EDGE_DSP)
+    if constexpr (kEdgeVectorShape<S, SrcT, WordType>) {
+        const int tp = static_cast<int>(t) + (R == EdgeRelation::Ge ? 0 : 1);
+        if (hasEdgeSimd() && width >= bitsPerWord<WordType>() + 2 && tp <= 255) {
+            edgeRowVector<C, R, SrcT, WordType>(up, mid, dn, width, out, t, tp);
+            return;
+        }
+    }
+#endif
+    edgeRowScalar<C, R, S, SrcT, WordType>(up, mid, dn, width, out, t);
+}
 
 } // namespace impl
 
@@ -298,94 +465,15 @@ inline void edgeThreshold(const SrcT* src, size_t width, size_t height, size_t s
     BINCV_ASSERT(src != nullptr && dst.ptr != nullptr,
                  "edgeThreshold: a non-empty image needs non-null pointers");
 
-    constexpr size_t kBits = impl::bitsPerWord<WordType>();
-    const long long tt = static_cast<long long>(t);
-
-#if defined(BINCV_EDGE_AVX2) || defined(BINCV_EDGE_NEON)
-    // The vector interior. Only the shipped shape — 8-bit source, 32-bit
-    // words, the WIDE central difference — because that is what the sensor stage runs
-    // and every other combination still has the scalar body, which is also the oracle.
-    //
-    // A word is taken whole or not at all: the mask covers pixels [32w, 32w+32), so the
-    // block qualifies only when all of them, AND their +/-1 neighbours, are interior.
-    // At 752 pixels that is 22 of 24 words; the other two and the first and last rows
-    // take the scalar path below.
-    if constexpr (S == EdgeSpatial::Wide && sizeof(SrcT) == 1 && sizeof(WordType) == 4) {
-        const long long tp = (R == EdgeRelation::Ge) ? tt : tt + 1;
-        if (impl::hasEdgeSimd() && height >= 3 && width >= kBits + 1 && tp <= 255) {
-            const uint8_t* s8 = reinterpret_cast<const uint8_t*>(src);
-            const size_t words = (width + kBits - 1) / kBits;
-            const auto mask32 = [&](size_t y, size_t xs) {
-                return impl::edgeMask32<C>(s8 + (y - 1) * srcStride + xs,
-                                           s8 + y * srcStride + xs,
-                                           s8 + (y + 1) * srcStride + xs,
-                                           s8 + y * srcStride + xs + 1,
-                                           s8 + y * srcStride + xs - 1,
-                                           static_cast<int>(tp));
-            };
-            for (size_t y = 1; y + 1 < height; ++y) {
-                WordType* row = dst.row(y);
-                for (size_t w = 0; w < words; ++w) {
-                    const size_t x = w * kBits;
-                    if (x + kBits <= width) {
-                        // Reads `x - 1` through `x + 32`. At `x == 0` the low read lands
-                        // on the previous row's last byte -- in bounds because this
-                        // sweep skips row 0 -- and produces a wrong bit 0, fixed below.
-                        row[w] = static_cast<WordType>(mask32(y, x));
-                    } else {
-                        // THE TAIL WORD, BY AN OVERLAPPING WINDOW rather than by falling
-                        // back to the scalar predicate for sixteen pixels a row. Anchor
-                        // the vector at `width - 32`, which is fully in bounds, and shift
-                        // the bits into place; the padding bits shift in as zero, which
-                        // is the invariant that would otherwise need a mask.
-                        const size_t xs = width - kBits;
-                        row[w] = static_cast<WordType>(mask32(y, xs) >> (x - xs));
-                    }
-                }
-                // The two columns whose neighbour is outside the image. Two pixels a
-                // row, against the sixty-four that skipping whole words would cost.
-                for (const size_t bx : {size_t{0}, width - 1}) {
-                    const bool on =
-                        impl::isEdge<C, R, S, SrcT>(src, width, height, srcStride, y, bx, tt);
-                    WordType& wd = row[bx / kBits];
-                    const WordType bit = static_cast<WordType>(WordType{1} << (bx % kBits));
-                    wd = on ? static_cast<WordType>(wd | bit)
-                            : static_cast<WordType>(wd & ~bit);
-                }
-            }
-            // The first and last rows, whose vertical neighbour is outside.
-            for (const size_t by : {size_t{0}, height - 1}) {
-                WordType* row = dst.row(by);
-                for (size_t x = 0; x < width; x += kBits) {
-                    const size_t n = (width - x < kBits) ? (width - x) : kBits;
-                    WordType acc = 0;
-                    for (size_t i = 0; i < n; ++i) {
-                        if (impl::isEdge<C, R, S, SrcT>(src, width, height, srcStride, by,
-                                                        x + i, tt)) {
-                            acc = static_cast<WordType>(acc | (WordType{1} << i));
-                        }
-                    }
-                    row[x / kBits] = acc;
-                }
-            }
-            return;
-        }
-    }
-#endif
-
+    // Row by row through the one body every entry point shares. The vertical border
+    // is applied here, by which rows are handed over; the horizontal one is the row
+    // body's.
     for (size_t y = 0; y < height; ++y) {
-        WordType* row = dst.row(y);
-        for (size_t x = 0; x < width; x += kBits) {
-            const size_t n = (width - x < kBits) ? (width - x) : kBits;
-            WordType acc = 0;
-            for (size_t i = 0; i < n; ++i) {
-                if (impl::isEdge<C, R, S, SrcT>(src, width, height, srcStride, y, x + i, tt))
-                    acc = static_cast<WordType>(acc | (WordType{1} << i));
-            }
-            // STORED, not OR-ed: the bits past `width` are never set, which is the
-            // padding invariant with no mask needed.
-            row[x / kBits] = acc;
-        }
+        const long long yy = static_cast<long long>(y);
+        const SrcT* up = src + impl::reflect101Edge(yy - 1, height) * srcStride;
+        const SrcT* dn = src + impl::reflect101Edge(yy + 1, height) * srcStride;
+        impl::edgeRow<C, R, S, SrcT, WordType>(up, src + y * srcStride, dn, width, dst.row(y),
+                                               t);
     }
 }
 

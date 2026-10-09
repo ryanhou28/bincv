@@ -203,13 +203,14 @@ Read that line before trusting any number you take from these benchmarks on your
 **32-bit ARM Cortex-A and RISC-V are supported targets that have not been built or timed.**
 Nothing in these reports says anything about them.
 
-**Cortex-M has been built and partly measured, and none of it is in these reports.** binCV
-runs on an STM32H753ZI (Cortex-M7): the reductions are bit-exact against the library's own
-entry point, a 752×480 frame occupies 46,080 bytes where a `CV_8U` one would occupy 360,960,
-and the tracker's staging buffers measure 4,120 bytes at the shipped pyramid depth of 2 bits
-per pixel against that board's 16 KiB stack — so the constraint this section expected to
-bite did not. What does **not** exist for that part is any OpenCV comparison or any pipeline or
-tracker timing; the operations timed there run at the part's full 480 MHz. `stagingStackBytes<N, W>()` gives the exact stack figure for a
+**Cortex-M is measured, and none of it is in these reports.** binCV runs on an STM32H753ZI
+(Cortex-M7), including the assembled feature tracker at 752×480, bit-identical to the x86-64
+run on every frame, in 684,664 bytes
+([targets/stm32h753/README.md](../../targets/stm32h753/README.md)). A 752×480 frame occupies
+46,080 bytes where a `CV_8U` one would occupy 360,960, and the tracker's staging buffers
+measure 4,120 bytes at the shipped pyramid depth of 2 bits per pixel against that board's
+16 KiB stack — so the constraint this section expected to bite did not. What does **not**
+exist for that part is any OpenCV comparison, which is why none of it is here. `stagingStackBytes<N, W>()` gives the exact stack figure for a
 configuration, and the build-time budget fails compilation rather than overflowing at run
 time.
 
