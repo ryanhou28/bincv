@@ -261,6 +261,9 @@ endforeach()
 # Flow.WindowCountArmIsBitExact holds it to the other arm on whatever runs the tests.
 # Switched off by default here as anywhere else, so every other case is unchanged.
 target_compile_definitions(test_opticalflow PRIVATE BINCV_LK_WINDOW_COUNT=1)
+# The same for goodFeaturesToTrack's square-root table, compiled by default only on
+# M-profile: Corner.RootTable_EveryWindowCount holds it to the root everywhere.
+target_compile_definitions(test_corner PRIVATE BINCV_CORNER_ROOT_TABLE=1)
 
 # ---------------------------------------------------------------------------
 # A translation unit that MUST NOT COMPILE
