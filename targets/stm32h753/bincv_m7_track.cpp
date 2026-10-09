@@ -6,6 +6,8 @@
 ///   SET lkwc <0|1>     Lucas–Kanade's window-count arm off or on (on by default on
 ///                      this core): one image times both, so an A/B never compares
 ///                      two builds
+///   SET rt <0|1>       goodFeaturesToTrack's square-root table off or on (on by
+///                      default on this core), for the same reason
 ///
 /// For each frame the board asks for rows -- `NEED <frame> <row> <count>` -- and the
 /// host answers with exactly those bytes and their CRC-32, so nothing arrives while
@@ -17,8 +19,8 @@
 /// totals per stage, the tracking statistics and the memory the pipeline held.
 ///
 /// Placement: pyramids, derivatives and the response ring in the AXI SRAM (436,704
-/// bytes at 752x480); the corner candidates, tracks, sensor rows and the receive
-/// buffer in the D2 SRAM. Nothing here allocates.
+/// bytes at 752x480); the corner pool, tracks, sensor rows and the receive buffer in
+/// the D2 SRAM. Nothing here allocates.
 
 #include <cstddef>
 #include <cstdint>
@@ -33,7 +35,11 @@ namespace {
 using W = uint32_t;
 
 constexpr size_t kMaxW = 752, kMaxH = 480;
-constexpr size_t kCornerCapacity = 20000;
+/// Candidate pool entries, 8 bytes each. The pool's size is a cost in response
+/// sweeps, never a difference in the corners (goodFeaturesToTrackStreaming's
+/// bounded-pool form); on the reference sequence 8,192 sweeps once for most
+/// detections and at most three times.
+constexpr size_t kPoolCapacity = 8192;
 constexpr size_t kMaxTracks = 200;
 /// Rows per request: large enough that the round trip is amortized, small enough that
 /// the buffer fits what the D2 SRAM has left.
@@ -42,7 +48,7 @@ constexpr size_t kChunkRows = 40;
 /// frames, so nothing reaches it.
 constexpr size_t kMaxAge = 2048;
 
-constexpr frontend::Layout<W> kMax(kMaxW, kMaxH, kCornerCapacity, kMaxTracks);
+constexpr frontend::Layout<W> kMax(kMaxW, kMaxH, kPoolCapacity, kMaxTracks);
 
 // AXI SRAM: the buffers the published figure counts.
 __attribute__((section(".frames"), aligned(32))) W g_pyrA[kMax.pyramidWords()];
@@ -51,7 +57,8 @@ __attribute__((section(".frames"), aligned(32))) W g_deriv[kMax.derivativeWords(
 __attribute__((section(".frames"), aligned(32))) float g_ring[kMax.ringFloats()];
 
 // D2 SRAM: what the published figure leaves out, and the harness's own.
-__attribute__((section(".sram2"), aligned(32))) bincv::Corner g_corners[kCornerCapacity];
+__attribute__((section(".sram2"), aligned(32))) bincv::CornerCandidate g_pool[kPoolCapacity];
+__attribute__((section(".sram2"), aligned(32))) bincv::Corner g_corners[kMaxTracks];
 __attribute__((section(".sram2"), aligned(32))) uint8_t g_sensor[kMax.sensorScratchBytes()];
 __attribute__((section(".sram2"), aligned(32))) bincv::Point2f g_points[kMaxTracks];
 __attribute__((section(".sram2"), aligned(32))) bincv::Point2f g_tracked[kMaxTracks];
@@ -138,13 +145,14 @@ void cmdTrack(const char* args) {
         boardPuts("ERR TRACK <frames >= 2> <width <= 752> <height <= 480>\n");
         return;
     }
-    const frontend::Layout<W> L(w, h, kCornerCapacity, kMaxTracks);
+    const frontend::Layout<W> L(w, h, kPoolCapacity, kMaxTracks);
     frontend::Memory<W> mem;
     mem.sensor = g_sensor;
     mem.pyramidA = g_pyrA;
     mem.pyramidB = g_pyrB;
     mem.derivatives = g_deriv;
     mem.ring = g_ring;
+    mem.pool = g_pool;
     mem.corners = g_corners;
     mem.points = g_points;
     mem.tracked = g_tracked;
@@ -158,7 +166,7 @@ void cmdTrack(const char* args) {
 
     const bincv::GoodFeaturesParams gftt;
     const bincv::LKParams lk;
-    size_t truncated = 0;
+    size_t truncated = 0, multiPass = 0, maxPasses = 0;
     for (size_t f = 0; f < frames; ++f) {
         const frontend::StageTimes before = tr.times();
         tr.beginFrame();
@@ -176,6 +184,8 @@ void cmdTrack(const char* args) {
         }
         const frontend::FrameResult r = tr.step(gftt, lk);
         if (r.truncated) ++truncated;
+        if (r.detected && r.passes > 1) ++multiPass;
+        if (r.detected && r.passes > maxPasses) maxPasses = r.passes;
 
         boardPuts("F ");
         boardPutU32(static_cast<uint32_t>(f));
@@ -233,7 +243,11 @@ void cmdTrack(const char* args) {
     boardPutU32(static_cast<uint32_t>(tr.detections()));
     boardPuts(" (");
     boardPutU32(static_cast<uint32_t>(truncated));
-    boardPuts(" truncated)\ntracks observed          : ");
+    boardPuts(" truncated, ");
+    boardPutU32(static_cast<uint32_t>(multiPass));
+    boardPuts(" took more than one sweep, at most ");
+    boardPutU32(static_cast<uint32_t>(maxPasses));
+    boardPuts(")\ntracks observed          : ");
     boardPutU32(static_cast<uint32_t>(observed));
     boardPuts("\nmedian track lifetime    : ");
     boardPutU32(static_cast<uint32_t>(median));
@@ -247,7 +261,7 @@ void cmdTrack(const char* args) {
     putBytes("response ring            : ", L.ringBytes());
     putBytes("  = the published figure : ", L.publishedBytes());
     putBytes("sensor stream rows       : ", L.sensorScratchBytes());
-    putBytes("corner candidates        : ", L.cornerBytes());
+    putBytes("corner pool + kept       : ", L.cornerBytes());
     putBytes("tracks                   : ", L.trackBytes());
     putBytes("  = everything held      : ", L.bytes());
     putBytes("receive buffer (harness) : ", sizeof g_rx);
@@ -267,16 +281,33 @@ void cmdTrack(const char* args) {
     boardPuts("OK\n");
 }
 
+struct Setting {
+    const char* name;
+    bool& (*arm)();
+};
+
+const Setting kSettings[] = {
+    {"lkwc", &bincv::impl::lkWindowCountEnabled},
+    {"rt", &bincv::impl::cornerRootTableEnabled},
+};
+
 void cmdSet(const char* args) {
-    if (std::strncmp(args, "lkwc", 4) == 0) {
-        const char* v = args + 4;
+    for (const Setting& setting : kSettings) {
+        const size_t n = std::strlen(setting.name);
+        if (std::strncmp(args, setting.name, n) != 0 || (args[n] != ' ' && args[n] != '\0'))
+            continue;
         uint32_t on = 0;
+        const char* v = args + n;
         if (!m7::parseU32(v, on) || on > 1) {
-            boardPuts("ERR SET lkwc <0|1>\n");
+            boardPuts("ERR SET ");
+            boardPuts(setting.name);
+            boardPuts(" <0|1>\n");
             return;
         }
-        bincv::impl::lkWindowCountEnabled() = on != 0;
-        boardPuts("SET lkwc=");
+        setting.arm() = on != 0;
+        boardPuts("SET ");
+        boardPuts(setting.name);
+        boardPutc('=');
         boardPutc(on ? '1' : '0');
         boardPuts("\nOK\n");
         return;

@@ -42,8 +42,9 @@ function(bincv_m7_image target)
     target_link_options(${target} PRIVATE
         -T${BINCV_M7_LDSCRIPT}
         # newlib-nano: snprintf, which core/simd.hpp uses for its status line,
-        # otherwise brings in full newlib stdio. Nothing binCV itself needs is
-        # affected -- no kernel allocates, throws, or does I/O.
+        # otherwise brings in full newlib stdio. No kernel allocates, throws, or does
+        # I/O; but nano's memcpy, memmove and memset are byte loops, and kernels do
+        # call those, so string.c replaces them with word-wide ones.
         --specs=nano.specs
         -nostartfiles
         -Wl,--gc-sections
@@ -63,21 +64,21 @@ function(bincv_m7_image target)
         COMMENT "${target}.bin + size")
 endfunction()
 
-add_executable(bincv_m7_reduce startup.c board.c syscalls.c m7_harness.cpp bincv_m7_reduce.cpp)
+add_executable(bincv_m7_reduce startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_reduce.cpp)
 bincv_m7_image(bincv_m7_reduce)
 
-add_executable(bincv_m7_dense startup.c board.c syscalls.c m7_harness.cpp bincv_m7_dense.cpp)
+add_executable(bincv_m7_dense startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_dense.cpp)
 bincv_m7_image(bincv_m7_dense)
 
-add_executable(bincv_m7_track startup.c board.c syscalls.c m7_harness.cpp bincv_m7_track.cpp)
+add_executable(bincv_m7_track startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_track.cpp)
 bincv_m7_image(bincv_m7_track)
 
 # DIAGNOSTIC, never a published figure: the tracker with opticalFlow.hpp's stage
 # timers on, reading the board's cycle counter. It answers where `track` goes.
-add_executable(bincv_m7_lkstages startup.c board.c syscalls.c m7_harness.cpp bincv_m7_track.cpp)
+add_executable(bincv_m7_lkstages startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_track.cpp)
 bincv_m7_image(bincv_m7_lkstages)
 target_compile_definitions(bincv_m7_lkstages PRIVATE BINCV_LK_STAGE_TIMING
                                                      "BINCV_LK_STAGE_CLOCK=boardCycles64()")
 
-add_executable(bincv_m7_sensor startup.c board.c syscalls.c m7_harness.cpp bincv_m7_sensor.cpp)
+add_executable(bincv_m7_sensor startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_sensor.cpp)
 bincv_m7_image(bincv_m7_sensor)

@@ -52,11 +52,11 @@ struct Layout {
 
     size_t w = 0, h = 0;
     size_t lw[kLevels] = {}, lh[kLevels] = {}, stride[kLevels] = {};
-    size_t cornerCapacity = 0;
+    size_t poolCapacity = 0;   ///< candidate pool entries (8 bytes each)
     size_t maxTracks = 0;
 
-    constexpr Layout(size_t width, size_t height, size_t corners, size_t tracks)
-        : w(width), h(height), cornerCapacity(corners), maxTracks(tracks) {
+    constexpr Layout(size_t width, size_t height, size_t pool, size_t tracks)
+        : w(width), h(height), poolCapacity(pool), maxTracks(tracks) {
         size_t cw = width, ch = height;
         for (size_t l = 0; l < kLevels; ++l) {
             lw[l] = cw;
@@ -90,7 +90,11 @@ struct Layout {
     constexpr size_t pyramidBytes() const { return 2 * pyramidWords() * sizeof(W); }
     constexpr size_t derivativeBytes() const { return derivativeWords() * sizeof(W); }
     constexpr size_t ringBytes() const { return ringFloats() * sizeof(float); }
-    constexpr size_t cornerBytes() const { return cornerCapacity * sizeof(bincv::Corner); }
+    /// The candidate pool plus the kept corners: the bounded-pool selection takes the
+    /// pool's size as a cost in sweeps, never in the answer.
+    constexpr size_t cornerBytes() const {
+        return poolCapacity * sizeof(bincv::CornerCandidate) + maxTracks * sizeof(bincv::Corner);
+    }
     constexpr size_t trackBytes() const {
         return maxTracks * (2 * sizeof(bincv::Point2f) + sizeof(uint8_t) + sizeof(int));
     }
@@ -114,7 +118,8 @@ struct Memory {
     W* pyramidB = nullptr;          ///< Layout::pyramidWords()
     W* derivatives = nullptr;       ///< Layout::derivativeWords()
     float* ring = nullptr;          ///< Layout::ringFloats()
-    bincv::Corner* corners = nullptr;    ///< Layout::cornerCapacity
+    bincv::CornerCandidate* pool = nullptr;  ///< Layout::poolCapacity
+    bincv::Corner* corners = nullptr;        ///< Layout::maxTracks: the kept corners
     bincv::Point2f* points = nullptr;    ///< Layout::maxTracks: live tracks
     bincv::Point2f* tracked = nullptr;   ///< Layout::maxTracks: LK's output
     uint8_t* status = nullptr;           ///< Layout::maxTracks
@@ -133,6 +138,7 @@ struct FrameResult {
     bool detected = false;
     bool truncated = false;    ///< the corner array could not hold every NMS survivor
     size_t corners = 0;        ///< corners detected this frame, when `detected`
+    size_t passes = 0;         ///< response sweeps the detection took, when `detected`
     size_t tracked = 0;        ///< points Lucas–Kanade was given
     size_t alive = 0;          ///< points that survived the cull
     uint32_t digest = 0;       ///< FNV-1a over the binary frame, pyramid, derivatives, corners
@@ -222,7 +228,7 @@ public:
             bincv::ResponseMap ring{m_.ring, L_.w, bincv::kResponseRingRows, L_.w};
             const bincv::CornerResult cr = bincv::goodFeaturesToTrackStreaming<W>(
                 derivMag(0, 0, 0), derivMag(1, 0, 0), derivSign(0, 0), derivSign(1, 0), gftt,
-                ring, m_.corners, L_.cornerCapacity);
+                ring, m_.pool, L_.poolCapacity, m_.corners, L_.maxTracks);
             for (size_t i = 0; i < count_; ++i) record(m_.age[i]);  // discarded, not immortal
             count_ = cr.count < L_.maxTracks ? cr.count : L_.maxTracks;
             for (size_t i = 0; i < count_; ++i) {
@@ -233,6 +239,7 @@ public:
             r.detected = true;
             r.truncated = cr.candidatesTruncated;
             r.corners = cr.count;
+            r.passes = cr.passes;
             ++detections_;
         }
         times_.detect += clock_() - t0;
@@ -388,7 +395,7 @@ private:
         h = fnv1a(h, next_, L_.pyramidWords() * sizeof(W));
         h = fnv1a(h, m_.derivatives, L_.derivativeWords() * sizeof(W));
         if (r.detected) {
-            for (size_t i = 0; i < r.corners && i < L_.cornerCapacity; ++i) {
+            for (size_t i = 0; i < r.corners && i < L_.maxTracks; ++i) {
                 const int32_t xy[2] = {m_.corners[i].x, m_.corners[i].y};
                 h = fnv1a(h, xy, sizeof xy);
             }

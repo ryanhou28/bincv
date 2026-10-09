@@ -558,7 +558,7 @@ def main():
     t.add_argument('-o', '--output', required=True)
     t.add_argument('--frames', type=int, default=0)
     t.add_argument('--set', action='append', default=[], metavar='NAME=VALUE',
-                   help='a board setting before the run, e.g. lkwc=0')
+                   help="a board setting before the run, e.g. lkwc=0 or rt=0")
     t.add_argument('--frames-out', default='',
                    help="where the per-frame lines go (default: beside the log)")
     t.add_argument('--build', default=DEFAULT_BUILD)

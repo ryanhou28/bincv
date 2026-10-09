@@ -346,20 +346,22 @@ frame through the whole tracker in 59 ms.
 ### What moved it
 
 **One image, two arms.** Lucas–Kanade's window-count arm (`impl::lkWindowCountEnabled()`, on by
-default where a population count is software) against the per-row count, over the same 60
-frames, both bit-identical to the host
+default where a population count is software) against the per-row count every other target
+runs — the published tracking code — over the same 60 frames, both bit-identical to the host
 ([off](../../docs/reports/logs/m7-track-lkwc0-cortex-m7.log),
 [on](../../docs/reports/logs/m7-track-lkwc1-cortex-m7.log)):
 
 | | per-row count | window count | |
 |---|---|---|---|
-| track, cycles per frame | 71,570,108 | 33,157,760 | 2.16× |
-| whole frame | 78,391,636 | 39,979,493 | 1.96× |
+| track, cycles per frame | 87,968,397 | 33,407,993 | 2.63× |
+| whole frame | 94,786,325 | 40,225,885 | 2.36× |
 
 The arm keeps per-byte partial counts down the window and collapses them once, where the
 per-row count calls libgcc's SWAR sequence for every single-word count — eighty per window
 row at two bits per pixel — and folds each into a `long long`. When the window is staged it
-also runs the rows inside each term, so the partial counts stay in registers. Its code is
+also runs the rows inside each term, so the partial counts stay in registers; and an
+iteration whose displacement floors to the previous one's reuses its sums, since they depend
+on nothing else, with the previous frame's two carried across every iteration. Its code is
 9,822 bytes of the 104,252-byte image. Whether that is worth it is the owner's call
 ([#104](https://github.com/ryanhou28/bincv/issues/104)); it ships on by default meanwhile.
 
@@ -373,12 +375,13 @@ above is the committed measurement.
 | the residual counted down the window | the arm | 47.82M |
 | the staged covariance counted down the window | the arm | 45.24M |
 | register-blocked when the window is staged | the arm | 41.48M |
-| an iteration that floors to the previous displacement reuses its sums | every target | 34.71M |
+| an iteration that floors to the previous displacement reuses its sums | the arm | 34.71M |
 | the previous frame's two sums carried across iterations | the arm | 33.16M |
 
-The sums reuse is the one that applies on every target: Lucas–Kanade's ten integers are a
-function of the window and the integer displacement only, and a converging iteration usually
-moves by less than a pixel.
+The sums reuse would apply on any target — Lucas–Kanade's ten integers are a function of
+the window and the integer displacement only, and a converging iteration usually moves by
+less than a pixel — but it runs only under this arm: a change that would move the x86-64 or
+Pi figures is measured there in its own right, not carried in with microcontroller work.
 
 **Where `track` still goes** — the diagnostic image over the same 60 frames, never a
 figure: about 81% in the iterations (almost all of it the residual's counting), 11% the

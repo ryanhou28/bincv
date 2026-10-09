@@ -25,7 +25,7 @@
 // No OpenCV: frames come from a BSQ1 blob (io/sequence.hpp), which
 // scripts/make_sequence_blob.py writes.
 //
-//   ./frontend_sequence <blob.bsq> [frames] [--corners N] [--out FILE]
+//   ./frontend_sequence <blob.bsq> [frames] [--pool N] [--out FILE]
 
 #include <algorithm>
 #include <chrono>
@@ -73,14 +73,15 @@ void writePoints(std::FILE* f, size_t frame, const bincv::Point2f* pts, const ui
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::printf("usage: frontend_sequence <blob.bsq> [frames] [--corners N] [--out FILE]\n");
+        std::printf("usage: frontend_sequence <blob.bsq> [frames] [--pool N] [--out FILE]\n");
         return 2;
     }
-    size_t maxFrames = 0, cornerCap = 20000;
+    // The corner pool, in 8-byte entries: a cost in sweeps, never in the corners.
+    size_t maxFrames = 0, poolCap = 8192;
     const char* outPath = nullptr;
     for (int i = 2; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--corners") == 0 && i + 1 < argc) {
-            cornerCap = static_cast<size_t>(std::atol(argv[++i]));
+        if (std::strcmp(argv[i], "--pool") == 0 && i + 1 < argc) {
+            poolCap = static_cast<size_t>(std::atol(argv[++i]));
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
             outPath = argv[++i];
         } else {
@@ -106,12 +107,13 @@ int main(int argc, char** argv) {
     size_t frames = sh.frameCount;
     if (maxFrames && maxFrames < frames) frames = maxFrames;
 
-    const frontend::Layout<W> L(sh.width, sh.height, cornerCap,
+    const frontend::Layout<W> L(sh.width, sh.height, poolCap,
                                 static_cast<size_t>(bincv::GoodFeaturesParams{}.maxCorners));
     std::vector<uint8_t> frame(L.w * L.h), sensor(L.sensorScratchBytes());
     std::vector<W> pyrA(L.pyramidWords()), pyrB(L.pyramidWords()), deriv(L.derivativeWords());
     std::vector<float> ring(L.ringFloats());
-    std::vector<bincv::Corner> corners(L.cornerCapacity);
+    std::vector<bincv::CornerCandidate> pool(L.poolCapacity);
+    std::vector<bincv::Corner> corners(L.maxTracks);
     std::vector<bincv::Point2f> points(L.maxTracks), tracked(L.maxTracks);
     std::vector<uint8_t> status(L.maxTracks);
     std::vector<int> age(L.maxTracks);
@@ -121,6 +123,7 @@ int main(int argc, char** argv) {
     mem.pyramidB = pyrB.data();
     mem.derivatives = deriv.data();
     mem.ring = ring.data();
+    mem.pool = pool.data();
     mem.corners = corners.data();
     mem.points = points.data();
     mem.tracked = tracked.data();
@@ -139,12 +142,12 @@ int main(int argc, char** argv) {
 
     std::printf("%s\n", bincv::simdStatusString());
     std::printf("LK residual kernel: %s\n", bincv::lkPathName<bincv::LKLevelN<2, W>>());
-    std::printf("=== the frontend over %zu frames, %zux%zu, corner capacity %zu ===\n\n", frames,
-                sh.width, sh.height, L.cornerCapacity);
+    std::printf("=== the frontend over %zu frames, %zux%zu, corner pool %zu ===\n\n", frames,
+                sh.width, sh.height, L.poolCapacity);
 
     const bincv::GoodFeaturesParams gftt;
     const bincv::LKParams lk;
-    size_t truncated = 0;
+    size_t truncated = 0, multiPass = 0, maxPasses = 0;
     for (size_t f = 0; f < frames; ++f) {
         if (std::fread(frame.data(), 1, frame.size(), in) != frame.size()) {
             std::printf("short read at frame %zu\n", f);
@@ -158,6 +161,8 @@ int main(int argc, char** argv) {
         }
         const frontend::FrameResult r = tr.step(gftt, lk);
         if (r.truncated) ++truncated;
+        if (r.detected && r.passes > 1) ++multiPass;
+        if (r.detected && r.passes > maxPasses) maxPasses = r.passes;
         if (out) {
             std::fprintf(out, "F %zu det=%d corners=%zu trunc=%d tracked=%zu alive=%zu digest=%08x\n",
                          f, r.detected ? 1 : 0, r.corners, r.truncated ? 1 : 0, r.tracked, r.alive,
@@ -183,7 +188,9 @@ int main(int argc, char** argv) {
     std::vector<int> sorted = lifetimes;
     std::sort(sorted.begin(), sorted.end());
     std::printf("--- tracking ---\n");
-    std::printf("detections               : %zu (%zu truncated)\n", tr.detections(), truncated);
+    std::printf("detections               : %zu (%zu truncated, %zu took more than one sweep, "
+                "at most %zu)\n",
+                tr.detections(), truncated, multiPass, maxPasses);
     std::printf("tracks observed          : %zu\n", lifetimes.size());
     std::printf("median track lifetime    : %d frames\n",
                 sorted.empty() ? 0 : sorted[sorted.size() / 2]);
@@ -198,8 +205,8 @@ int main(int argc, char** argv) {
     std::printf("response ring            : %zu\n", L.ringBytes());
     std::printf("  = the published figure : %zu\n", L.publishedBytes());
     std::printf("sensor stream rows       : %zu\n", L.sensorScratchBytes());
-    std::printf("corner candidates        : %zu (%zu x %zu B)\n", L.cornerBytes(), L.cornerCapacity,
-                sizeof(bincv::Corner));
+    std::printf("corner pool + kept       : %zu (%zu x %zu B + %zu x %zu B)\n", L.cornerBytes(),
+                L.poolCapacity, sizeof(bincv::CornerCandidate), L.maxTracks, sizeof(bincv::Corner));
     std::printf("tracks                   : %zu\n", L.trackBytes());
     std::printf("  = everything held      : %zu\n", L.bytes());
     return 0;
