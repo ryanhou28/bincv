@@ -189,6 +189,32 @@ parameters you provide. Container constructors and `wrap` validate their geometr
 not (`-fno-exceptions`, or `BINCV_NO_EXCEPTIONS`), so a core-only build has no exception
 path at all.
 
+**Check your C library's `memcpy` and `memset`.** Kernels call them on whole rows, and the
+compiler turns a kernel's own zero-filling loop into a `memset` call. newlib-nano
+(`--specs=nano.specs`) builds all three of `memcpy`, `memmove` and `memset` as byte loops;
+on the Cortex-M7 they made the streaming sensor stage 13% slower and dense disparity 14%.
+Link word-wide ones — full newlib's, your vendor's, or
+[targets/stm32h753/string.c](targets/stm32h753/string.c).
+
+**A part without a population-count instruction gets arms of its own**, chosen from the
+compiler's macros — M-profile Arm, and RISC-V without Zbb — and compiled nowhere else, so
+the other targets' code is untouched:
+
+| | what it does | on the Cortex-M7 ([targets/stm32h753](targets/stm32h753/README.md)) |
+|---|---|---|
+| `BINCV_LK_WINDOW_COUNT` | Lucas–Kanade counts down the window in byte lanes | tracking 4.58× faster; 13,556 B of flash |
+| `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table | 2,984 B of flash |
+
+Both have a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTableEnabled`)
+so one image can time both arms, and both give bit-identical output. They change inline
+bodies, so like `BINCV_NO_NEON` a define must be the same in every translation unit.
+
+**Two entry points exist for a frame that does not fit.** `MedianEdgeStream`
+(`ops/medianEdgeStream.hpp`) runs the sensor stage on rows as a camera delivers them, in
+a few rows of scratch instead of two whole 8-bit frames. `goodFeaturesToTrackStreaming`
+takes a candidate pool of the size you choose and returns the same corners an
+unbounded one would, sweeping again when the pool is outrun.
+
 ### Building for Cortex-M7
 
 The bare-metal target under `targets/stm32h753/` (NUCLEO-H753ZI) builds with an

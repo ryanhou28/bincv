@@ -70,7 +70,7 @@ The status column is what has actually been done, not what is supported in princ
 | **CUDA** — NVIDIA GPUs | [a separate backend](../backends/cuda/), device-typed, never a drop-in dispatch target | measured — RTX 3070 Ti, against `cv::cuda` ([reports/cuda.md](reports/cuda.md)) |
 
 On the Cortex-M7: the assembled feature tracker runs at 752×480, bit-identical to the x86-64
-run, in 684,664 bytes; a 320×240 dense-disparity map takes 97.8 ms at the part's full
+run, in 512,600 bytes; a 320×240 dense-disparity map takes 83.7 ms at the part's full
 480 MHz in 6.5 KB of scratch.
 
 A 64-bit OS is a requirement for the measured Cortex-A results rather than a preference: on

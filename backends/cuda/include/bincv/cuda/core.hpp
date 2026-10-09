@@ -22,7 +22,7 @@
 /// THE DEVICE WORD TYPE IS uint32_t, ONLY. A CUDA core is a 32-bit machine:
 /// there is no 64-bit integer datapath, so a uint64 op is two uint32 ops and a
 /// register pair -- the same shape as a 32-bit Cortex-M7, where the host
-/// library measured uint64 words 1.30x SLOWER than uint32. The 32-bit granule
+/// library measured uint64 words 1.41x SLOWER than uint32. The 32-bit granule
 /// is also what the hardware primitives speak:
 /// `__popc` counts a 32-bit register and `__ballot_sync` packs one bit per
 /// lane of a 32-lane warp -- a packed pixel word in one instruction. Wider

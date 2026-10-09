@@ -50,7 +50,7 @@
 /// for the same reason it is the recommended type there. **The guidance is for
 /// 64-bit cores and INVERTS at 32-bit pointer width**: on a Cortex-M7, where
 /// every uint64 operation is synthesized from register pairs, uint64 measured
-/// 1.33× SLOWER than uint32 on this kernel (an STM32H753 at 480 MHz, targets/stm32h753). Callers on
+/// 1.41× SLOWER than uint32 on this kernel (an STM32H753 at 480 MHz, targets/stm32h753). Callers on
 /// 64-bit cores should instantiate at uint64, and at the native word size
 /// elsewhere, unless they have measured a reason otherwise.
 ///

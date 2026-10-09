@@ -4,17 +4,17 @@
 # arch:     cortex-m7
 # host:     NUCLEO-H753ZI (STM32H753ZI)
 # compiler: arm-none-eabi-g++ (Arm GNU Toolchain 14.2.Rel1 (Build arm-14.52)) 14.2.1 20241119
-# commit:   2ee1b85 (dirty)
-# sources:  benchmark/reduce_loop_arms.hpp=ee64ce4d40e8 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/reduce.hpp=728d865db387 targets/stm32h753/bincv_m7_reduce.cpp=378b9640c36d targets/stm32h753/board.c=ab5621aa2813 targets/stm32h753/board.h=3967e62ac995 targets/stm32h753/m7_harness.cpp=a308cda46d25 targets/stm32h753/m7_harness.hpp=4ae6cf7e2678 targets/stm32h753/popcount_arms.hpp=717892952947 targets/stm32h753/startup.c=db5771d4d7f2 targets/stm32h753/syscalls.c=cc70640148f0
-# image:    targets/stm32h753/bincv_m7_reduce.bin sha256 130a2cbb79cb
+# commit:   0a28578 (dirty)
+# sources:  benchmark/reduce_loop_arms.hpp=ee64ce4d40e8 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/reduce.hpp=728d865db387 targets/stm32h753/bincv_m7_reduce.cpp=378b9640c36d targets/stm32h753/board.c=ab5621aa2813 targets/stm32h753/board.h=3967e62ac995 targets/stm32h753/m7_harness.cpp=a308cda46d25 targets/stm32h753/m7_harness.hpp=4ae6cf7e2678 targets/stm32h753/popcount_arms.hpp=717892952947 targets/stm32h753/startup.c=db5771d4d7f2 targets/stm32h753/string.c=85ca2e9bf016 targets/stm32h753/syscalls.c=cc70640148f0
+# image:    targets/stm32h753/bincv_m7_reduce.bin sha256 6fc606592e37
 # board:    HELLO bincv-m7 image=reduce proto=1 clock_hz=480000000 baud=4000000 stack_bytes=16384 caches=ID
-# clock:    CLOCK configured_hz=480000000 measured_hz=480458305
-# date:     2026-10-08T20:35:39-07:00
+# clock:    CLOCK configured_hz=480000000 measured_hz=480100205
+# date:     2026-10-09T05:50:19-07:00
 # Each launch is a system reset: caches, stack and statics start cold.
 # NO launch is discarded.
 
 ### run 1
-CLOCK configured_hz=480000000 measured_hz=480594697
+CLOCK configured_hz=480000000 measured_hz=479910033
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -27,24 +27,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 2
-CLOCK configured_hz=480000000 measured_hz=480502105
+CLOCK configured_hz=480000000 measured_hz=480107869
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -57,24 +57,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 3
-CLOCK configured_hz=480000000 measured_hz=480377785
+CLOCK configured_hz=480000000 measured_hz=479986457
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -87,24 +87,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 4
-CLOCK configured_hz=480000000 measured_hz=480357385
+CLOCK configured_hz=480000000 measured_hz=480152889
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -117,24 +117,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 5
-CLOCK configured_hz=480000000 measured_hz=480520841
+CLOCK configured_hz=480000000 measured_hz=480299001
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -147,24 +147,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 6
-CLOCK configured_hz=480000000 measured_hz=480466141
+CLOCK configured_hz=480000000 measured_hz=480281677
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -177,24 +177,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 7
-CLOCK configured_hz=480000000 measured_hz=480601317
+CLOCK configured_hz=480000000 measured_hz=480183797
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -207,24 +207,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 8
-CLOCK configured_hz=480000000 measured_hz=480347525
+CLOCK configured_hz=480000000 measured_hz=480075425
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -237,24 +237,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 9
-CLOCK configured_hz=480000000 measured_hz=480462581
+CLOCK configured_hz=480000000 measured_hz=479992421
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -267,24 +267,24 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 ### run 10
-CLOCK configured_hz=480000000 measured_hz=480465533
+CLOCK configured_hz=480000000 measured_hz=479930585
 OK
 frame      : 752x480 @ 1bpp = 46080 bytes
 
@@ -297,22 +297,22 @@ frame      : 752x480 @ 1bpp = 46080 bytes
   all agree
 
 -- cycles over 11520 words, median of 7 --
-  A shipped  (__builtin_popcountll)  204317 cyc  1.00x A
-  B portable (64-bit SWAR)           377405 cyc  1.84x A
-  C SWAR32                           216525 cyc  1.05x A
-  D SWAR32 + USAD8 (DSP)             181546 cyc  0.88x A
+  A shipped  (__builtin_popcountll)  204590 cyc  1.00x A
+  B portable (64-bit SWAR)           377909 cyc  1.84x A
+  C SWAR32                           216032 cyc  1.05x A
+  D SWAR32 + USAD8 (DSP)             182058 cyc  0.88x A
 
   (checksum 5050584)
 
 -- loop shapes, same 11520 words --
-  L0 shipped (1 acc, call/word)  206169 cyc  1.00x L0
-  L1 four accumulators           242742 cyc  1.17x L0
-  L2 grouped collapse            86124 cyc  0.41x L0
-  L3 grouped + pair merge        90657 cyc  0.43x L0
+  L0 shipped (1 acc, call/word)  205904 cyc  1.00x L0
+  L1 four accumulators           240486 cyc  1.16x L0
+  L2 grouped collapse            87462 cyc  0.42x L0
+  L3 grouped + pair merge        89206 cyc  0.43x L0
   (checksum 5050584)
 OK
-STACK used_bytes=608 of 16384
+STACK used_bytes=600 of 16384
 OK
 
-# date:     2026-10-08T20:35:51-07:00
+# date:     2026-10-09T05:50:32-07:00
 # done

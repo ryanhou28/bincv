@@ -51,7 +51,7 @@ pipeline.
 
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| the assembled pipeline, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.65 | 4.434 | 5.34× [5.32, 5.35] |
+| the assembled pipeline, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.64 | 4.383 | 5.39× [5.38, 5.40] |
 
 Each ratio is the ratio of the two medians, with a percentile bootstrap over the same
 launches; the per-launch ratio is above 1.00 in 30 of 30 launches on x86-64 and 10 of 10 on
@@ -80,17 +80,17 @@ total:
 
 | stage | time, x86-64 (ms/frame) | share of the x86-64 pipeline | time, aarch64 (ms/frame) | share of the aarch64 pipeline |
 |---|---|---|---|---|
-| track (Lucas–Kanade) | 0.7365 | 73.0% | 3.287 | 74.1% |
-| build (pyramid + derivatives) | 0.1995 | 19.8% | 0.8480 | 19.1% |
-| — sensor stage | 0.098 | 9.7% | 0.503 | 11.3% |
+| track (Lucas–Kanade) | 0.7365 | 73.0% | 3.287 | 75.0% |
+| build (pyramid + derivatives) | 0.1995 | 19.8% | 0.7945 | 18.1% |
+| — sensor stage | 0.098 | 9.7% | 0.452 | 10.3% |
 | — `pyrDown` | 0.059 | 5.8% | 0.190 | 4.3% |
-| — derivatives | 0.042 | 4.2% | 0.153 | 3.5% |
-| detect | 0.073 | 7.2% | 0.298 | 6.7% |
+| — derivatives | 0.042 | 4.2% | 0.152 | 3.5% |
+| detect | 0.073 | 7.2% | 0.298 | 6.8% |
 
 Tracking dominates on both, so the operations that move this number are the ones inside the
 Lucas–Kanade loop rather than the ones with the largest per-operation ratios: `pyrDown` is
 5.8% of the x86-64 pipeline and 4.3% of the device's, so an infinite speedup on it would be
-worth 1.06× on the desktop and 1.04× on the device. Detection is 7.2% and 6.7%, so another
+worth 1.06× on the desktop and 1.04× on the device. Detection is 7.2% and 6.8%, so another
 halving of `goodFeaturesToTrack` would be worth about 1.04× end to end. On every stage the
 two architectures spend their time within five points of each other, so nothing here is
 bottlenecked on anything architecture-specific.
@@ -219,3 +219,4 @@ the figure stands.
 | 2026-09-21 | 120-frame device check | 4.76× | superseded by the full-sequence sweeps | a 120-frame check with its own warm-up cannot resolve a 1.02× move |
 | 2026-09-22 | both columns | 3.658× x86-64, 4.62× aarch64 | 3.97× [3.94, 4.00], 5.32× [5.31, 5.34] at `880704b` | `goodFeaturesToTrack`'s selection optimization (device detect 0.457 → 0.298 ms/frame); the track stage read 3.279 ms/frame, within 1% of the first sweep |
 | 2026-09-29 | aarch64 column | 23.61 / 4.435 ms, 5.32× [5.31, 5.34]; track 3.279 | 23.65 / 4.434 ms, 5.34× [5.32, 5.35]; track 3.287 | re-taken at `4c4b3bf` after the NEON covariance off-switch; every cell inside the previous interval |
+| 2026-10-09 | aarch64 column | 23.65 / 4.434 ms, 5.34× [5.32, 5.35]; sensor stage 0.503 | 23.64 / 4.383 ms, 5.39× [5.38, 5.40]; sensor stage 0.452 | re-taken at `0a28578` after the sensor stage became one row body per operation, which the stream and the whole-frame calls share: the portable median now auto-vectorizes. Track (3.287) and detect (0.298) are where they were |

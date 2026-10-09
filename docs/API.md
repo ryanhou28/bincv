@@ -22,7 +22,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/bitslice.hpp`](#opsbitslicehpp) — 5 entries
 - [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 4 entries
 - [`ops/census.hpp`](#opscensushpp) — 5 entries
-- [`ops/corner.hpp`](#opscornerhpp) — 11 entries
+- [`ops/corner.hpp`](#opscornerhpp) — 12 entries
 - [`ops/covariance.hpp`](#opscovariancehpp) — 2 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 1 entries
 - [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 7 entries
@@ -32,6 +32,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 2 entries
 - [`ops/logic.hpp`](#opslogichpp) — 4 entries
+- [`ops/medianEdgeStream.hpp`](#opsmedianEdgeStreamhpp) — 5 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 3 entries
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 17 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
@@ -181,6 +182,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `Corner` *(struct)* | 2 | One detected corner: integer pixel coordinates and its response |
 | `GoodFeaturesParams` *(struct)* | 2 | The four parameters `goodFeaturesToTrack` takes, defaulted to the values the reference pipeline actually runs |
 | `CornerResult` *(struct)* | 3 | What `goodFeaturesToTrack` / `selectGoodFeatures` report back |
+| `CornerCandidate` *(struct)* | 3 | A candidate in the bounded-pool form's pool: eight bytes, where a `Corner` is twelve |
 | `cornerMinEigenVal` | 2 | The minimum-eigenvalue corner response at every pixel, from binarized ternary derivatives |
 | `selectGoodFeatures` | 2 | The quality threshold, 3x3 non-maximum suppression and minimum-distance spacing filter `cv::goodFeaturesToTrack` performs, over an existing response map |
 | `goodFeaturesToTrack` | 2 | `goodFeaturesToTrack` over a binarized ternary derivative pair: the response map, then the selection |
@@ -295,6 +297,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `bitwiseOr` | 1 | dst = a | b, pixel for pixel |
 | `bitwiseXor` | 1 | dst = a ^ b, pixel for pixel |
 | `bitwiseNot` | 1 | dst = ~src, pixel for pixel |
+
+## `ops/medianEdgeStream.hpp`
+
+[`include/bincv/ops/medianEdgeStream.hpp`](../include/bincv/ops/medianEdgeStream.hpp)
+
+| | tier | |
+|---|---|---|
+| `MedianEdgeStream` *(class)* | 3 | `medianWide` then `edgeThreshold`, row by row |
+| `scratchElements` | — | Scratch elements (of `SrcT`) a stream of this width and pattern needs |
+| `reset` | — | Starts a new frame; `dst` is written again from row 0 |
+| `push` | — | Feeds the next `count` input rows, `srcStride` elements apart, and writes every edge row they complete |
+| `rowsDone` | — | Edge rows of `dst` written so far, from row 0 |
 
 ## `ops/medianWide.hpp`
 

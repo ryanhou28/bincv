@@ -5,15 +5,15 @@
 # host:     Raspberry Pi 4 Model B Rev 1.5
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
-# commit:   4c4b3bf
-# sources:  benchmark/lk_memorybound.cpp=50e1fe36ea9f benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=36791a71f6a2 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=5bc9214bf036 include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=53b5f5b990b6 include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/opticalFlow.hpp=591d93a693a5 include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6
-# governor: performance (restored to performance on exit)
+# commit:   0a28578 (dirty)
+# sources:  benchmark/lk_memorybound.cpp=50e1fe36ea9f benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=36791a71f6a2 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=5bc9214bf036 include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=9b3f14a4cb40 include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/opticalFlow.hpp=8a5615c33c3a include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6
+# governor: performance
 # throttled before: throttled=0x80000
-# temp before: temp=57.9'C
+# temp before: temp=62.8'C
 # pinning:  taskset -c 3
 # sleep between launches: 0s
-# date:     2026-09-29T16:50:17-07:00
-# loadavg at start: 0.74 0.26 0.21 1/317 4024208
+# date:     2026-10-09T06:02:46-07:00
+# loadavg at start: 1.07 1.02 0.66 1/310 73983
 # NO launch is discarded -- a cold start is part of what varies between
 # launches, and trimming it would trim the tail this sweep measures.
 
@@ -22,19 +22,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8497        24.2765
-       80       1.7802        22.2529
-      140       3.2528        23.2344
-      300       7.2875        24.2917
-      560      13.7253        24.5095
-     1160      29.4824        25.4158
+       35       0.8599        24.5692
+       80       1.7856        22.3205
+      140       3.2654        23.3242
+      300       7.3106        24.3687
+      560      13.7531        24.5591
+     1160      29.6286        25.5419
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5913        25.6522
-      640x480       37.5       3.2475        23.1967
-     1280x960      150.0       3.8091        27.2082
-    1920x1440      337.5       3.8223        27.3022
+      320x240        9.4       3.5804        25.5740
+      640x480       37.5       3.2560        23.2571
+     1280x960      150.0       3.7944        27.1028
+    1920x1440      337.5       3.8338        27.3842
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -43,19 +43,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8498        24.2792
-       80       1.7851        22.3136
-      140       3.2565        23.2605
-      300       7.3206        24.4021
-      560      13.7557        24.5638
-     1160      29.6440        25.5552
+       35       0.8578        24.5077
+       80       1.7940        22.4249
+      140       3.2630        23.3073
+      300       7.3370        24.4565
+      560      13.7923        24.6292
+     1160      29.6671        25.5751
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5828        25.5912
-      640x480       37.5       3.2571        23.2652
-     1280x960      150.0       3.7963        27.1165
-    1920x1440      337.5       3.7535        26.8105
+      320x240        9.4       3.6314        25.9387
+      640x480       37.5       3.2631        23.3079
+     1280x960      150.0       3.7603        26.8590
+    1920x1440      337.5       3.8952        27.8230
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -64,19 +64,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8529        24.3693
-       80       1.7760        22.2004
-      140       3.2391        23.1361
-      300       7.2738        24.2460
-      560      13.6557        24.3852
-     1160      29.4002        25.3450
+       35       0.8520        24.3419
+       80       1.7868        22.3345
+      140       3.2553        23.2521
+      300       7.2920        24.3067
+      560      13.7409        24.5373
+     1160      29.5774        25.4977
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5850        25.6075
-      640x480       37.5       3.2401        23.1437
-     1280x960      150.0       3.7434        26.7386
-    1920x1440      337.5       3.7921        27.0866
+      320x240        9.4       3.6001        25.7153
+      640x480       37.5       3.2555        23.2535
+     1280x960      150.0       3.7777        26.9833
+    1920x1440      337.5       3.8715        27.6538
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -85,19 +85,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8584        24.5261
-       80       1.7860        22.3244
-      140       3.2502        23.2156
-      300       7.2833        24.2777
-      560      13.6712        24.4129
-     1160      29.4110        25.3543
+       35       0.8481        24.2303
+       80       1.7675        22.0939
+      140       3.2142        22.9587
+      300       7.2121        24.0404
+      560      13.5542        24.2038
+     1160      29.1707        25.1471
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5896        25.6400
-      640x480       37.5       3.2515        23.2252
-     1280x960      150.0       3.7939        27.0996
-    1920x1440      337.5       3.8044        27.1741
+      320x240        9.4       3.6128        25.8054
+      640x480       37.5       3.2146        22.9615
+     1280x960      150.0       3.7882        27.0588
+    1920x1440      337.5       3.8334        27.3816
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -106,19 +106,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8516        24.3319
-       80       1.8075        22.5939
-      140       3.2710        23.3645
-      300       7.3674        24.5580
-      560      13.8693        24.7666
-     1160      29.8487        25.7316
+       35       0.8566        24.4732
+       80       1.7844        22.3045
+      140       3.2447        23.1764
+      300       7.2817        24.2724
+      560      13.7131        24.4877
+     1160      29.4987        25.4299
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.6211        25.8651
-      640x480       37.5       3.2711        23.3653
-     1280x960      150.0       3.7835        27.0247
-    1920x1440      337.5       3.8005        27.1467
+      320x240        9.4       3.6062        25.7584
+      640x480       37.5       3.2438        23.1699
+     1280x960      150.0       3.7751        26.9649
+    1920x1440      337.5       3.8141        27.2434
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -127,19 +127,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8578        24.5074
-       80       1.7942        22.4269
-      140       3.2826        23.4474
-      300       7.3395        24.4649
-      560      13.8185        24.6758
-     1160      29.6995        25.6030
+       35       0.8461        24.1731
+       80       1.7694        22.1180
+      140       3.2227        23.0192
+      300       7.2460        24.1535
+      560      13.6079        24.2998
+     1160      29.3178        25.2740
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5902        25.6441
-      640x480       37.5       3.2837        23.4550
-     1280x960      150.0       3.7979        27.1281
-    1920x1440      337.5       3.7826        27.0185
+      320x240        9.4       3.6122        25.8012
+      640x480       37.5       3.2256        23.0402
+     1280x960      150.0       3.7684        26.9168
+    1920x1440      337.5       3.8306        27.3616
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -148,19 +148,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8523        24.3526
-       80       1.7925        22.4062
-      140       3.2565        23.2610
-      300       7.3204        24.4015
-      560      13.7606        24.5724
-     1160      29.6406        25.5522
+       35       0.8581        24.5172
+       80       1.8238        22.7979
+      140       3.3187        23.7049
+      300       7.4368        24.7894
+      560      13.9939        24.9891
+     1160      30.1344        25.9780
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5932        25.6658
-      640x480       37.5       3.2614        23.2956
-     1280x960      150.0       3.7992        27.1368
-    1920x1440      337.5       3.8045        27.1751
+      320x240        9.4       3.5850        25.6069
+      640x480       37.5       3.3189        23.7064
+     1280x960      150.0       3.7737        26.9547
+    1920x1440      337.5       3.8353        27.3953
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -169,19 +169,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8557        24.4482
-       80       1.7934        22.4178
-      140       3.2525        23.2321
-      300       7.3109        24.3698
-      560      13.7125        24.4867
-     1160      29.5583        25.4813
+       35       0.8632        24.6620
+       80       1.7949        22.4365
+      140       3.2700        23.3572
+      300       7.3287        24.4292
+      560      13.8219        24.6820
+     1160      29.7085        25.6108
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5913        25.6519
-      640x480       37.5       3.2541        23.2437
-     1280x960      150.0       3.7489        26.7777
-    1920x1440      337.5       3.7919        27.0851
+      320x240        9.4       3.6030        25.7360
+      640x480       37.5       3.2687        23.3476
+     1280x960      150.0       3.7935        27.0962
+    1920x1440      337.5       3.7750        26.9645
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -190,19 +190,19 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8505        24.2989
-       80       1.7767        22.2084
-      140       3.2404        23.1454
-      300       7.2824        24.2746
-      560      13.7179        24.4962
-     1160      29.5143        25.4433
+       35       0.8469        24.1980
+       80       1.7707        22.1337
+      140       3.2333        23.0949
+      300       7.2451        24.1504
+      560      13.6222        24.3254
+     1160      29.3246        25.2798
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5876        25.6256
-      640x480       37.5       3.2366        23.1186
-     1280x960      150.0       3.7511        26.7932
-    1920x1440      337.5       3.8096        27.2116
+      320x240        9.4       3.5771        25.5510
+      640x480       37.5       3.2334        23.0955
+     1280x960      150.0       3.7751        26.9652
+    1920x1440      337.5       3.7686        26.9186
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
@@ -211,55 +211,25 @@
 
  (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
    points           ms   us per point
-       35       0.8588        24.5373
-       80       1.7857        22.3214
-      140       3.2522        23.2302
-      300       7.3013        24.3377
-      560      13.7062        24.4753
-     1160      29.5498        25.4739
+       35       0.8459        24.1699
+       80       1.7791        22.2390
+      140       3.2391        23.1363
+      300       7.2713        24.2376
+      560      13.6918        24.4496
+     1160      29.4727        25.4075
 
  (b) frame size at 140 points (same compute, wider spread)
         frame   KB @1bit           ms   us per point
-      320x240        9.4       3.5831        25.5935
-      640x480       37.5       3.2521        23.2295
-     1280x960      150.0       3.7614        26.8668
-    1920x1440      337.5       3.7626        26.8755
+      320x240        9.4       3.6167        25.8332
+      640x480       37.5       3.2379        23.1278
+     1280x960      150.0       3.7759        26.9704
+    1920x1440      337.5       3.8236        27.3116
 
  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
  RISING => memory-bound, and it should.
 
-# loadavg at end: 0.88 0.36 0.25 1/315 4024831
+# loadavg at end: 1.03 1.02 0.68 1/310 74480
 # throttled after: throttled=0x80000
-# temp after: temp=60.3'C
-# date:     2026-09-29T16:51:04-07:00
+# temp after: temp=62.8'C
+# date:     2026-10-09T06:03:33-07:00
 # done
-
-# ---- aggregate (scripts/aggregate_launches.py ) ----
-# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
-# 
-# row              n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
-# t1 / 1160       10    29.5541    29.4002    29.8487  1.015     1.5%      --  [ 29.4627,  29.6700]   0.35%   1.004x
-# t1 / 140        10     3.2527     3.2391     3.2826  1.013     1.3%      --  [  3.2463,   3.2637]   0.27%   1.003x
-# t1 / 300        10     7.3061     7.2738     7.3674  1.013     1.3%      --  [  7.2833,   7.3300]   0.32%   1.003x
-# t1 / 35         10     0.8526     0.8497     0.8588  1.011     1.1%      --  [  0.8505,   0.8578]   0.43%   1.006x
-# t1 / 560        10    13.7216    13.6557    13.8693  1.016     1.6%      --  [ 13.6919,  13.7871]   0.35%   1.005x
-# t1 / 80         10     1.7858     1.7760     1.8075  1.018     1.8%      --  [  1.7802,   1.7934]   0.37%   1.004x
-# t2 / 1280x960   10     3.7887     3.7434     3.8091  1.018     1.7%      --  [  3.7511,   3.7979]   0.62%   1.010x
-# t2 / 1920x1440  10     3.7963     3.7535     3.8223  1.018     1.8%      --  [  3.7772,   3.8070]   0.39%   1.005x
-# t2 / 320x240    10     3.5899     3.5828     3.6211  1.011     1.1%      --  [  3.5850,   3.5922]   0.10%   1.001x
-# t2 / 640x480    10     3.2531     3.2366     3.2837  1.015     1.4%      --  [  3.2458,   3.2641]   0.28%   1.003x
-# 
-#   median   median of the per-launch medians -- the value to quote.
-#   r2r      run-to-run scatter as a factor, max/min of those medians.
-#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
-#            arithmetic, so it reads directly against the next column.
-#   within   median of the per-launch spread column -- what one launch
-#            reports about itself, and all it can report.
-#   minres   smallest difference these launches resolve on this row,
-#            max(hi/median, median/lo). Derived from the row's scatter;
-#            whether it is small ENOUGH is a per-case call, so state the
-#            difference with --resolve rather than reading a bar into it.
-# 
-#   tables in a launch, in order:
-#     t1       (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit) | points  ms  us per point
-#     t2       (b) frame size at 140 points (same compute, wider spread) | frame  KB @1bit  ms  us per point

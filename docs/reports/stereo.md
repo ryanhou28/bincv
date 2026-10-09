@@ -78,8 +78,8 @@ arms are in one binary.
 
 The same kernel, unchanged, executes on a Cortex-M7 (STM32H753, no vector unit, no hardware
 popcount): a 320×240, 32-disparity map in 6,480 B of scratch, bit-exact against the host —
-97.8 ms at `uint32` at the part's 480 MHz. The word-type guidance inverts at 32-bit pointer
-width (`uint64` is 1.33× slower there), and the header carries the width-qualified
+83.7 ms at `uint32` at the part's 480 MHz. The word-type guidance inverts at 32-bit pointer
+width (`uint64` is 1.41× slower there), and the header carries the width-qualified
 guidance. Details: [targets/stm32h753/README.md](../../targets/stm32h753/README.md).
 
 ## Memory

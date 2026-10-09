@@ -5,7 +5,7 @@ count and no vector unit, and 1 MB of RAM in five banks. Everything in this dire
 harness; binCV itself is `bincv_core`, the same headers every other target compiles.
 
 **The assembled feature tracker runs here at the reference sequence's full 752×480,
-bit-identical to the x86-64 host on every frame, in 684,664 bytes** — section 3.
+bit-identical to the x86-64 host on every frame, in 512,600 bytes** — section 3.
 
 ## Build, flash, run
 
@@ -29,7 +29,7 @@ changes, and one image compiling every kernel would age every figure on every ed
 |---|---|---|
 | `bincv_m7_reduce` | `REDUCE` | population count without an instruction (section 1) |
 | `bincv_m7_dense` | `DENSE` | dense disparity at both word types (section 2) |
-| `bincv_m7_track` | `TRACK`, `SET lkwc` | the assembled feature tracker over a sequence (section 3) |
+| `bincv_m7_track` | `TRACK`, `SET lkwc`, `SET rt` | the assembled feature tracker over a sequence (section 3) |
 | `bincv_m7_sensor` | `SENSOR` | the sensor stage by part, DSP arms on and off (section 4) |
 | `bincv_m7_lkstages` | `TRACK` | diagnostic only, never a published figure: `track` by stage |
 
@@ -56,6 +56,13 @@ without a CRC failure. Under WSL2 the COM port stays on the Windows side and
 drive is flashed by ejecting it first, because Windows otherwise reports the copy as
 corrupted.
 
+**The images replace newlib-nano's `memcpy`, `memmove` and `memset`** with word-wide ones
+([string.c](string.c)). Nano builds all three as byte loops, and binCV's kernels call them: the
+sensor stream copies each row it is given, and GCC compiles a kernel's own zero-filling loop
+into a `memset` call — thirty-two of them in the tracker image. Against nano's, the sensor
+stream is 13% faster (section 4) and dense disparity 14% (section 2): the logs before and
+after are in the repository's history. A build on nano pays that, whatever it runs.
+
 The tests do not build for this target as a whole (`threads/pool.hpp` needs `<thread>`,
 which newlib does not supply), which is why `BINCV_BUILD_TESTS=OFF` above.
 `scripts/verify_cortex_m.sh` is the compile gate: it builds the 37 suites that can be built
@@ -80,12 +87,14 @@ carry that 0.1%.
 
 The first figures on this board were taken on the 64 MHz reset clock, before this path was
 brought up and checked. `-DBINCV_M7_RESET_CLOCK=ON` still builds that configuration, and its
-logs sit beside the 480 MHz ones. **Its cycle counts do not transfer to 480 MHz**: the
-dense-disparity kernel takes 52,595,561 cycles there and 46,934,832 at 480 MHz
-([log](../../docs/reports/logs/m7-dense-cortex-m7-resetclock-launches.log)), while the
-population count goes the other way, 201,411 against 204,317. The two configurations differ
-in flash wait states (7 at reset), bus ratio and voltage scale, and which of those moves
-which count was not isolated.
+logs sit beside the 480 MHz ones. The two configurations differ in flash wait states (7
+at reset), bus ratio and voltage scale, and their cycle counts are close but not equal: the
+dense-disparity kernel takes 40,160,476 cycles there and 40,177,240 at 480 MHz
+([log](../../docs/reports/logs/m7-dense-cortex-m7-resetclock-launches.log)), and the
+population count 201,321 against 204,590. Which setting moves which count was not
+isolated. (With newlib-nano's byte-loop `memset`, before `string.c`, the dense counts were
+52,595,561 and 46,934,832 — 12% apart — so a figure that leans on the C library inherits
+its sensitivity to the bus.)
 
 ## What was measured
 
@@ -136,13 +145,13 @@ All four arms and `bincv::countNonZero` returned 180,378.
 
 | arm | cycles | vs A | `.text` |
 |---|---|---|---|
-| **A — shipped** (`__popcountsi2`) | 204,317 | 1.00× | 48 B |
-| B — portable (64-bit SWAR) | 377,405 | 1.85× slower | 180 B |
-| C — SWAR32 | 216,525 | 1.06× slower | 78 B |
-| D — SWAR32 + `USAD8` | 181,546 | 1.13× faster | 78 B |
+| **A — shipped** (`__popcountsi2`) | 204,590 | 1.00× | 48 B |
+| B — portable (64-bit SWAR) | 377,909 | 1.85× slower | 180 B |
+| C — SWAR32 | 216,032 | 1.06× slower | 78 B |
+| D — SWAR32 + `USAD8` | 182,058 | 1.12× faster | 78 B |
 
 **Decision at the time: not adopted; arm A stays.** D is the fastest, and the library kept
-the slower arm on two grounds: a 1.13× gain on a microbenchmark that counts bits and does
+the slower arm on two grounds: a 1.12× gain on a microbenchmark that counts bits and does
 nothing else, and a chip-specific path that must stay bit-exact with the portable one on
 every future change with nothing in CI executing it. **The second ground no longer
 stands** — an M-profile arm is now judged on its measurement, with its correctness proven
@@ -152,7 +161,7 @@ single words, rather than with this loop.
 
 Three things it settled:
 
-- **The call was not the cost.** C removes A's per-word call and is slower by 5%: the M7
+- **The call was not the cost.** C removes A's per-word call and is slower by 6%: the M7
   predicts the call perfectly and dual-issues around it, while the inlined SWAR adds
   register pressure the call did not.
 - **`USAD8` is the only thing that helped**, and only by removing two shift-adds from the
@@ -160,9 +169,9 @@ Three things it settled:
 - **B is 1.85× slower than what ships.** `popcountWordPortable` is not what this target
   compiles to (GCC calls libgcc's `__popcountsi2`), and `reduce.hpp` says so.
 
-For scale: 204,317 cycles is **0.43 ms** to count a 752×480 frame at 480 MHz. The first
+For scale: 204,590 cycles is **0.43 ms** to count a 752×480 frame at 480 MHz. The first
 bring-up expected the AXI SRAM, at half the core clock, to become the limit at 480 MHz; it
-did not — the count takes 1.4% more cycles than the 201,411 it takes at the reset clock,
+did not — the count takes 1.6% more cycles than the 201,321 it takes at the reset clock,
 because 46 KB in 0.2 million cycles is far below what the bus delivers.
 
 ### The loop, which is where the win was
@@ -180,12 +189,12 @@ none using an intrinsic or a target `#if`:
 | | M7 (no popcount) | x86, no POPCNT | x86, POPCNT |
 |---|---|---|---|
 | L0 | 1.00× | 1.00× | 1.00× |
-| L1 | 1.18× slower | 0.93× | 0.60× |
+| L1 | 1.17× slower | 0.93× | 0.60× |
 | **L2** | **0.42×** | **0.12×** | 1.06× |
-| L3 | 0.44× | 0.11× | 0.96× |
+| L3 | 0.43× | 0.11× | 0.96× |
 
 M7 figures are cycle ratios at 480 MHz, ten launches that agreed exactly
-([log](../../docs/reports/logs/m7-reduce-cortex-m7-launches.log); L0 is 206,169 cycles). Host
+([log](../../docs/reports/logs/m7-reduce-cortex-m7-launches.log); L0 is 205,904 cycles). Host
 figures are medians whose run-to-run spread was 49–107%, so only the order-of-magnitude
 differences there carry, which is all that is claimed from them.
 
@@ -194,7 +203,7 @@ target compiles. The split is by family, not by part: L2 wins wherever the count
 software SWAR and is neutral-to-slightly-worse where the hardware has an instruction, so
 gating it on "no hardware population count" leaves x86-with-POPCNT and aarch64 on exactly
 the code they have today. L3 does not beat L2, so what remained was never in the body of
-the count. L1 is target-dependent (1.67× faster on x86 with POPCNT, 18% slower on the M7)
+the count. L1 is target-dependent (1.67× faster on x86 with POPCNT, 17% slower on the M7)
 and not a candidate. aarch64 was not measured; it has `cnt`, so L2 is predicted neutral or
 slightly worse there, and the gate keeps it on its current path either way.
 
@@ -248,21 +257,21 @@ decision: both word types ship and the caller chooses; the header carries the re
 ### Result
 
 Each launch is the median of 3 interleaved repeats; the cycles are the median over ten
-launches, which agreed to 0.002% ([log](../../docs/reports/logs/m7-dense-cortex-m7-launches.log)).
+launches, which agreed to within two cycles ([log](../../docs/reports/logs/m7-dense-cortex-m7-launches.log)).
 Both word types exact on the supported region, and the two maps byte-identical.
 
 | word type | cycles | ms at 480 MHz | scratch |
 |---|---|---|---|
-| **`uint32`** | 46,934,832 | **97.8** | 6,480 B |
-| `uint64` | 62,584,544 | 130.4 | 6,480 B |
+| **`uint32`** | 40,177,240 | **83.7** | 6,480 B |
+| `uint64` | 56,819,546 | 118.4 | 6,480 B |
 
-**`uint64` is 1.33× slower: the 64-bit guidance inverts at 32-bit pointer width**, as a
+**`uint64` is 1.41× slower: the 64-bit guidance inverts at 32-bit pointer width**, as a
 core synthesizing every 64-bit ripple from register pairs would suggest, and now as a
-measurement — 1.30× at the reset clock, 1.33× at 480 MHz. `denseDisparity.hpp` carries the
+measurement — 1.41× at the reset clock too. `denseDisparity.hpp` carries the
 width-qualified guidance. The scratch tie is geometry, not a rule: at this width both types
 pack the same bytes.
 
-For scale only: a QVGA depth map on a microcontroller in 98 ms, in 6.5 KB of scratch. There
+For scale only: a QVGA depth map on a microcontroller in 84 ms, in 6.5 KB of scratch. There
 is no comparison against anything else on this part here; this is the kernel's own cost.
 
 ## 3. The feature tracker
@@ -277,17 +286,26 @@ pipeline's parameters.
 
 It is **one source on both sides**. `benchmark/frontend_pipeline.hpp` is the benchmark's binCV
 half written against views over memory the caller provides, since containers allocate and
-this part has a 4 KB heap; the host's `frontend_sequence` runs it and reproduces the
-published tracking statistics exactly (82 detections, 10,279 tracks, median lifetime 11
-frames, 96.4% survival), and `bincv_m7_track` runs the same source here.
+this part has a 4 KB heap; the host's `frontend_sequence` runs it, and `bincv_m7_track` runs
+the same source here.
 
-One thing differs in shape, and it is what makes the tracker fit: the sensor stage takes the
-frame **row by row** ([ops/medianEdgeStream.hpp](../../include/bincv/ops/medianEdgeStream.hpp)),
-as a camera delivers it, instead of as a whole 8-bit frame with an 8-bit median buffer beside
-it — 721,920 bytes at 752×480 that this part could not hold alongside the rest. The stream is
-bit-identical to the two whole-frame calls (`tests/test_median_edge_stream.cpp`). The board
-asks the host for rows and the host answers with them and their CRC-32; no transfer is
-inside a timed region.
+Two things differ in shape from the published benchmark, and they are what make the tracker
+fit:
+
+- **The sensor stage takes the frame row by row**
+  ([ops/medianEdgeStream.hpp](../../include/bincv/ops/medianEdgeStream.hpp)), as a camera
+  delivers it, instead of as a whole 8-bit frame with an 8-bit median buffer beside it —
+  721,920 bytes at 752×480 that this part could not hold alongside the rest. The stream is
+  bit-identical to the two whole-frame calls (`tests/test_median_edge_stream.cpp`).
+- **Detection collects candidates into a pool of 8,192** (64 KB) where the benchmark gives
+  it an array of 20,000 (240 KB). The bounded-pool `goodFeaturesToTrackStreaming` returns
+  exactly the corners an unbounded pool would, sweeping the frame again when the spacing walk
+  outruns the pool. The benchmark's array does truncate one of its 82 detections, so where
+  it reports 10,279 tracks and 96.4% survival this reports the untruncated answer:
+  10,286 tracks, median lifetime 11 frames, 96.5% survival.
+
+The board asks the host for rows and the host answers with them and their CRC-32; no
+transfer is inside a timed region.
 
 ### Exact against the host, every frame
 
@@ -299,8 +317,8 @@ host compares both with the same source run on x86-64
 | | result |
 |---|---|
 | integer digests equal | 1,709 of 1,709 frames |
-| points bit-identical | 1,709 of 1,709 frames: 0 of 158,839 points differ |
-| detections, tracks observed, median lifetime | 82, 10,279, 11 frames — the published figures |
+| points bit-identical | 1,709 of 1,709 frames: 0 of 159,510 points differ |
+| detections, tracks observed, median lifetime | 82, 10,286, 11 frames |
 
 The integer digests are the guarantee: every integer stage is exact by construction. The
 float agreement is an observation about what the two compilers emitted for this source, not
@@ -316,15 +334,15 @@ Buffer geometry, so exact; the stack is measured by painting.
 | derivative ladders | 275,040 | AXI SRAM |
 | response ring | 9,024 | AXI SRAM |
 | sensor stream rows | 3,760 | D2 SRAM |
-| corner candidates (20,000) | 240,000 | D2 SRAM |
+| corner pool (8,192) and the kept corners (200) | 67,936 | D2 SRAM |
 | tracks | 4,200 | D2 SRAM |
-| **everything the pipeline holds** | **684,664** | |
-| stack, measured | 8,728 | DTCM |
-| flash, the whole image | 104,252 | |
+| **everything the pipeline holds** | **512,600** | |
+| stack, measured | 8,468 | DTCM |
+| flash, the whole image | 101,692 | |
 
-The first three rows are the 436,704 bytes the published footprint counts. The corner
-candidates are the largest thing left that it does not, and they exist only because the
-spacing filter runs after ranking.
+The first three rows are the 436,704 bytes the published footprint counts. The pool's
+size is a cost in sweeps, never in the answer: 34 of the 82 detections outran it and
+swept again, at most three times.
 
 ### Speed
 
@@ -333,15 +351,15 @@ frames):
 
 | stage | cycles per frame | ms at 480 MHz | share |
 |---|---|---|---|
-| sensor stage | 4,778,077 | 9.95 | 16.8% |
-| pyramid | 480,126 | 1.00 | 1.7% |
-| derivatives | 451,985 | 0.94 | 1.6% |
-| detect | 1,410,239 | 2.94 | 5.0% |
-| track | 21,267,343 | 44.31 | 74.9% |
-| **the frame** | **28,387,772** | **59.14** | |
+| sensor stage | 4,256,172 | 8.87 | 23.2% |
+| pyramid | 480,016 | 1.00 | 2.6% |
+| derivatives | 459,965 | 0.96 | 2.5% |
+| detect | 1,200,117 | 2.50 | 6.5% |
+| track | 11,980,448 | 24.96 | 65.2% |
+| **the frame** | **18,376,720** | **38.28** | |
 
 For scale only — there is nothing on this part to compare it with yet: a full-resolution
-frame through the whole tracker in 59 ms.
+frame through the whole tracker in 38 ms.
 
 ### What moved it
 
@@ -353,40 +371,70 @@ runs — the published tracking code — over the same 60 frames, both bit-ident
 
 | | per-row count | window count | |
 |---|---|---|---|
-| track, cycles per frame | 87,968,397 | 33,407,993 | 2.63× |
-| whole frame | 94,786,325 | 40,225,885 | 2.36× |
+| track, cycles per frame | 89,404,260 | 19,505,319 | 4.58× |
+| whole frame | 96,236,171 | 26,336,190 | 3.65× |
 
-The arm keeps per-byte partial counts down the window and collapses them once, where the
-per-row count calls libgcc's SWAR sequence for every single-word count — eighty per window
-row at two bits per pixel — and folds each into a `long long`. When the window is staged it
-also runs the rows inside each term, so the partial counts stay in registers; and an
-iteration whose displacement floors to the previous one's reuses its sums, since they depend
-on nothing else, with the previous frame's two carried across every iteration. Its code is
-9,822 bytes of the 104,252-byte image. Whether that is worth it is the owner's call
+Its price is flash: **13,556 bytes**, measured by building the same image without it.
+Whether that is worth it is the owner's call
 ([#104](https://github.com/ryanhou28/bincv/issues/104)); it ships on by default meanwhile.
+
+What the arm does, against the per-row count's eighty libgcc calls per window row at two bits
+per pixel:
+
+- **It counts down the window.** Per-byte partial counts are carried in a register and
+  collapsed once per fold, instead of each single-word count being collapsed and widened.
+- **It writes the signed gradient in two's complement**, N + 1 planes from the magnitude
+  and the sign, so a term costs N(N + 1) counts where `pos − neg` costs 2N² — six a row
+  at N = 2, not eight. Counts of one weight are added as nibbles before they are widened,
+  so a term carries N + 1 lanes and they stay in registers.
+- **It holds the count's masks in registers**, so each `(x >> s) & m` is one Thumb-2
+  instruction.
+- **It counts less.** An iteration whose displacement floors to the previous one's reuses
+  its sums; the previous frame's two sums are carried across every iteration; and when the
+  displacement moves by a pixel the taps the two positions share are carried too — every
+  move between counted iterations on this sequence was at most a pixel per axis.
+- **It reads the next frame straight down a column**, one row pointer and bit offset per
+  plane for the whole window.
+- The staged covariance gets the same treatment: the selector-signed gradient in two's
+  complement, the squares merged by weight.
 
 **The steps, in order**, each measured on the same 60 frames as it was made. The images
 they ran on no longer exist, so these are a record rather than figures to re-take; the A/B
-above is the committed measurement.
+above is the committed measurement. On this part a figure moves by about 1% with unrelated
+code — where the linker puts things — so a step smaller than that is not resolved.
 
-| step | belongs to | track, cycles per frame |
-|---|---|---|
-| the published code | — | 89.75M |
-| the residual counted down the window | the arm | 47.82M |
-| the staged covariance counted down the window | the arm | 45.24M |
-| register-blocked when the window is staged | the arm | 41.48M |
-| an iteration that floors to the previous displacement reuses its sums | the arm | 34.71M |
-| the previous frame's two sums carried across iterations | the arm | 33.16M |
+| step | track, cycles per frame |
+|---|---|
+| the published code | 89.75M |
+| the residual counted down the window | 47.82M |
+| the staged covariance counted down the window | 45.24M |
+| register-blocked when the window is staged | 41.48M |
+| an iteration that floors to the previous displacement reuses its sums | 34.71M |
+| the previous frame's two sums carried across iterations | 33.16M |
+| the fold loops unrolled, the term chosen once outside the rows | 33.74M |
+| the gradient in two's complement, counts merged by weight before widening | 26.76M |
+| the count's masks held in registers | 24.84M |
+| tap sums carried across a one-pixel move | 23.18M |
+| the term count out of line, staged windows only (−14 KB of flash) | 23.55M |
+| the staged covariance in two's complement | 22.24M |
+| taps read down a column | 19.94M |
+| word-wide `memcpy`/`memset` in the image (above) | 19.50M |
 
-The sums reuse would apply on any target — Lucas–Kanade's ten integers are a function of
-the window and the integer displacement only, and a converging iteration usually moves by
-less than a pixel — but it runs only under this arm: a change that would move the x86-64 or
-Pi figures is measured there in its own right, not carried in with microcontroller work.
+The reuse would apply on any target — Lucas–Kanade's ten integers are a function of the
+window and the integer displacement only — but it runs only under this arm, and the arm is
+compiled only where it is the default: a change that would move the x86-64 or Pi figures is
+measured there in its own right, not carried in with microcontroller work.
 
-**Where `track` still goes** — the diagnostic image over the same 60 frames, never a
-figure: about 81% in the iterations (almost all of it the residual's counting), 11% the
-covariance, 7% staging the window. The sums reuse cut the residual calls that count from
-90,274 to 67,024.
+**Detection** runs three changes of its own. The 3×3 response's square root comes from a
+table on M-profile (`BINCV_CORNER_ROOT_TABLE`, switchable with `SET rt`): a 3×3 window's
+counts are 0 to 9, so the discriminant has a hundred values, and the table holds their
+correctly rounded roots inside `minEigenValue`'s own double expression — the same float.
+It costs 2,984 bytes of flash, measured the same way. The scalar suppression compares the responses' bit patterns
+rather than the floats, which order the same way because a response is never negative, and
+which a Cortex-M branches on without moving flags out of the FPU. And the pool orders its
+candidates by one 64-bit compare. Over the sequence `detect` went from 1,410,239 cycles a
+frame to the 1,200,117 above, while its pool shrank from 240 KB to 64 KB and 34 of the 82
+detections sweep more than once.
 
 ### What this does not claim
 
@@ -414,8 +462,8 @@ median of 5:
 
 | | portable | DSP arm | |
 |---|---|---|---|
-| median rows | 4,334,864 | 1,211,331 | 3.58× |
-| edge rows | 8,592,403 | 2,268,840 | 3.79× |
-| the stream, both together | 13,349,559 | 4,084,439 | 3.27× |
+| median rows | 4,334,880 | 1,211,778 | 3.58× |
+| edge rows | 8,953,198 | 2,268,987 | 3.95× |
+| the stream, both together | 12,803,171 | 3,555,291 | 3.60× |
 
 The tracker runs with them on, and its digests hold to the host's.

@@ -195,7 +195,7 @@ choice loses on a core of the other width:
 |---|---|---|---|---|
 | x86-64 | `countNonZero`, 640×480 | 1.57× faster | 0.005895 against 0.009270 ns/pixel | [primitives.md](../reports/primitives.md) |
 | aarch64 | `countNonZero`, 640×480 | 1.95× faster | 1.95× [1.95, 1.95] | [footprint.md](../reports/footprint.md) |
-| Cortex-M7 | dense disparity, 320×240 | 1.33× slower | 62,584,544 against 46,934,832 cycles | [targets/stm32h753](../../targets/stm32h753/README.md) |
+| Cortex-M7 | dense disparity, 320×240 | 1.41× slower | 56,819,546 against 40,177,240 cycles | [targets/stm32h753](../../targets/stm32h753/README.md) |
 | GPU | every kernel | not offered | `uint64_t` is two 32-bit operations | [ARCHITECTURE.md §8.5](../ARCHITECTURE.md) |
 
 The x86-64 speedup is computed from the two published medians; the others are published as
@@ -242,10 +242,10 @@ once per word. Four ways of counting a word, timed inside `countNonZero` on a 75
 <!-- figure-check values="cycles|against the shipped arm" source="@targets/stm32h753/README.md" -->
 | per-word counter | cycles | against the shipped arm |
 |---|---|---|
-| libgcc `__popcountsi2`, the shipped arm | 204,317 | 1.00× |
-| the same sequence, inlined | 216,525 | 1.06× slower |
-| a 64-bit sequence, inlined | 377,405 | 1.85× slower |
-| inlined, with the DSP extension's `USAD8` for the final sum | 181,546 | 1.13× faster |
+| libgcc `__popcountsi2`, the shipped arm | 204,590 | 1.00× |
+| the same sequence, inlined | 216,032 | 1.06× slower |
+| a 64-bit sequence, inlined | 377,909 | 1.85× slower |
+| inlined, with the DSP extension's `USAD8` for the final sum | 182,058 | 1.12× faster |
 
 Almost nothing is available in the per-word counter. What moves the number is the
 **loop**: keeping the software count's per-byte partial sums in an accumulator and
@@ -332,7 +332,7 @@ binCV threads only through a backend the caller installs.
 |---|---|---|
 | a 752×480 frame, as bits and as `CV_8U` | 46,080 against 360,960 bytes | [limits.md](../reports/limits.md#what-is-not-measured-at-all) |
 | tracker staging on the stack, at 2 bits per pixel | 4,120 bytes of a 16 KiB stack | [limits.md](../reports/limits.md#what-is-not-measured-at-all) |
-| dense disparity, 320×240, 32 disparities, `uint32_t` | 97.8 ms at 480 MHz, in 6,480 B of scratch | [targets/stm32h753](../../targets/stm32h753/README.md) |
+| dense disparity, 320×240, 32 disparities, `uint32_t` | 83.7 ms at 480 MHz, in 6,480 B of scratch | [targets/stm32h753](../../targets/stm32h753/README.md) |
 
 The stack budget is a compile-time setting that fails the build rather than overflowing at
 run time, which matters on a part where an overflow is silent corruption rather than a
@@ -340,7 +340,7 @@ crash. The dense-disparity kernel's first run on this core returned the exact di
 its test pair, and the same map at both word types.
 
 The assembled feature tracker runs there too, at the reference sequence's full 752×480 and
-bit-identical to the x86-64 run on every frame, in 684,664 bytes; the target page has its
+bit-identical to the x86-64 run on every frame, in 512,600 bytes; the target page has its
 speed and what moved it. What has **not** been measured there is as important: no comparison
 against OpenCV or any other library. Every figure above is at the part's full 480 MHz, with
 the clock checked against the board's 32.768 kHz crystal.
