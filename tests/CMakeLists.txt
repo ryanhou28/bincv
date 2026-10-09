@@ -256,6 +256,11 @@ foreach(TEST_NAME ${BINCV_CORE_TESTS})
     bincv_add_test_target(${TEST_NAME} ${TEST_NAME}.cpp)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endforeach()
+# Lucas-Kanade's window-count arm is compiled only where it is the default -- a core
+# whose population count is software -- so this suite compiles it everywhere, and
+# Flow.WindowCountArmIsBitExact holds it to the other arm on whatever runs the tests.
+# Switched off by default here as anywhere else, so every other case is unchanged.
+target_compile_definitions(test_opticalflow PRIVATE BINCV_LK_WINDOW_COUNT=1)
 
 # ---------------------------------------------------------------------------
 # A translation unit that MUST NOT COMPILE

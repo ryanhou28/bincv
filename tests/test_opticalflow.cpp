@@ -4214,12 +4214,76 @@ BINCV_TEST(Flow, CovarianceNeonArmIsBitExact_uint32_t) {
 }
 
 // ---------------------------------------------------------------------------
+// The staged covariance's window-count arm against the portable loop, directly:
+// random staged windows -- magnitudes masked to a region, signs not, as staging
+// leaves them -- at every row count a staged window can have, so every fold
+// boundary is crossed. GradientCovariance's three integers must be identical.
+// ---------------------------------------------------------------------------
+inline uint64_t nextRand(uint64_t& state) {  // xorshift64
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    return state;
+}
+
+template <size_t N>
+size_t covarianceWindowCountMismatches(uint64_t seed, size_t& windows) {
+    bincv::impl::StagedWindow<N, uint32_t> sw{};
+    size_t bad = 0;
+    for (size_t rows = 1; rows <= bincv::impl::kStagedMaxRows; ++rows) {
+        for (int rep = 0; rep < 8; ++rep) {
+            const uint32_t width = static_cast<uint32_t>(1 + nextRand(seed) % 32);
+            const uint32_t region = width == 32 ? ~0u : ((1u << width) - 1u);
+            // Density from sparse to full, so the lanes reach their limits too.
+            const uint32_t dense = static_cast<uint32_t>(rep % 4);
+            for (size_t i = 0; i < rows; ++i) {
+                for (size_t k = 0; k < N; ++k) {
+                    uint32_t mx = static_cast<uint32_t>(nextRand(seed));
+                    uint32_t my = static_cast<uint32_t>(nextRand(seed));
+                    for (uint32_t d = 0; d < dense; ++d) {
+                        mx |= static_cast<uint32_t>(nextRand(seed));
+                        my |= static_cast<uint32_t>(nextRand(seed));
+                    }
+                    sw.magX[i][k] = mx & region;
+                    sw.magY[i][k] = my & region;
+                }
+                sw.signX[i] = static_cast<uint32_t>(nextRand(seed));
+                sw.signY[i] = static_cast<uint32_t>(nextRand(seed));
+            }
+            bool& on = bincv::impl::lkWindowCountEnabled();
+            const bool saved = on;
+            on = true;
+            const bincv::GradientCovariance a = bincv::impl::stagedCovariance<N, uint32_t>(sw, rows);
+            on = false;
+            const bincv::GradientCovariance b = bincv::impl::stagedCovariance<N, uint32_t>(sw, rows);
+            on = saved;
+            if (a.sumXX != b.sumXX || a.sumYY != b.sumYY || a.sumXY != b.sumXY) ++bad;
+            ++windows;
+        }
+    }
+    return bad;
+}
+
+BINCV_TEST(Flow, CovarianceWindowCountArmIsBitExact) {
+    size_t windows1 = 0, windows2 = 0;
+    const size_t bad1 = covarianceWindowCountMismatches<1>(0xC0FFEEULL, windows1);
+    const size_t bad2 = covarianceWindowCountMismatches<2>(0xBEEF5ULL, windows2);
+    std::printf(" covariance window count vs portable: N=1 %zu windows, %zu differ; "
+                "N=2 %zu windows, %zu differ\n",
+                windows1, bad1, windows2, bad2);
+    BINCV_CHECK_EQ(bad1, static_cast<size_t>(0));
+    BINCV_CHECK_EQ(bad2, static_cast<size_t>(0));
+    BINCV_CHECK(windows1 > 500 && windows2 > 500);
+}
+
+// ---------------------------------------------------------------------------
 // The residual's window-count arm (`impl::lkWindowCountEnabled()`) and the arm a
 // hardware count takes are two spellings of the same integers: the first carries
 // per-byte partial counts down the window and weights them once, the second counts
-// and weights every row. On by default only where a population count is software,
-// so on this machine the switch is what puts it under test at all. Same frames,
-// same points, every ladder depth the tracker runs; nothing may differ.
+// and weights every row. Compiled and on by default only where a population count
+// is software; this suite compiles it everywhere (tests/CMakeLists.txt), and the
+// switch is what puts it under test on any other machine. Same frames, same
+// points, every ladder depth the tracker runs; nothing may differ.
 // ---------------------------------------------------------------------------
 template <size_t... LevelBits>
 void windowCountArmIsBitExact(const char* label) {
@@ -4244,6 +4308,11 @@ void windowCountArmIsBitExact(const char* label) {
     std::vector<float> errA(n), errB(n);
     LKParams params;
 
+    // The keypoint batch (AVX2) tracks without `residualSums` at all, so with it on
+    // this comparison would hold the arm to itself without ever running it.
+    bool& batch = bincv::impl::lkBatchEnabled();
+    const bool savedBatch = batch;
+    batch = false;
     bool& sw = bincv::impl::lkWindowCountEnabled();
     const bool saved = sw;
     sw = true;
@@ -4251,6 +4320,7 @@ void windowCountArmIsBitExact(const char* label) {
     sw = false;
     calcOpticalFlowPyrLK(fe.levels, pts.data(), outB.data(), stB.data(), errB.data(), n, params);
     sw = saved;
+    batch = savedBatch;
 
     size_t posDiff = 0, statusDiff = 0, errDiff = 0, tracked = 0;
     for (size_t i = 0; i < n; ++i) {
