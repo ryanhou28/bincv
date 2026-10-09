@@ -70,7 +70,7 @@ The status column is what has actually been done, not what is supported in princ
 | **CUDA** — NVIDIA GPUs | [a separate backend](../backends/cuda/), device-typed, never a drop-in dispatch target | measured — RTX 3070 Ti, against `cv::cuda` ([reports/cuda.md](reports/cuda.md)) |
 
 On the Cortex-M7: a 752×480 frame is 46,080 bytes, and a 320×240 dense-disparity map runs
-in 6.5 KB of scratch — 825 ms at the 64 MHz reset clock, with no figure at its full clock.
+in 6.5 KB of scratch — 97.8 ms at the part's full 480 MHz.
 
 A 64-bit OS is a requirement for the measured Cortex-A results rather than a preference: on
 32-bit Arm every `uint64_t` operation is synthesised from 32-bit pairs, which would measure

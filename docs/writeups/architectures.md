@@ -104,7 +104,7 @@ the causes one at a time, each with the measurement that shows it.
 
 | | x86-64 | aarch64 | Cortex-M7 | GPU |
 |---|---|---|---|---|
-| part | AMD Ryzen 5 5600X | Broadcom BCM2711 (Raspberry Pi 4), Cortex-A72 at 1.8 GHz | STM32H753ZI, run at its 64 MHz reset clock | NVIDIA RTX 3070 Ti, SM 8.6 |
+| part | AMD Ryzen 5 5600X | Broadcom BCM2711 (Raspberry Pi 4), Cortex-A72 at 1.8 GHz | STM32H753ZI at 480 MHz | NVIDIA RTX 3070 Ti, SM 8.6 |
 | memory | 32 KiB L1d, 512 KiB L2 per core, 32 MiB L3 | 32 KiB L1d, 1 MiB shared L2 | 16 KiB L1 data cache; about 1 MiB of RAM in banks, the largest 512 KiB | ~608 GB/s device memory |
 
 ### SIMD widens both sides by the same factor
@@ -195,7 +195,7 @@ choice loses on a core of the other width:
 |---|---|---|---|---|
 | x86-64 | `countNonZero`, 640×480 | 1.57× faster | 0.005895 against 0.009270 ns/pixel | [primitives.md](../reports/primitives.md) |
 | aarch64 | `countNonZero`, 640×480 | 1.95× faster | 1.95× [1.95, 1.95] | [footprint.md](../reports/footprint.md) |
-| Cortex-M7 | dense disparity, 320×240 | 1.30× slower | 68,807,055 against 52,823,363 cycles | [targets/stm32h753](../../targets/stm32h753/README.md) |
+| Cortex-M7 | dense disparity, 320×240 | 1.33× slower | 62,589,097 against 46,931,454 cycles | [targets/stm32h753](../../targets/stm32h753/README.md) |
 | GPU | every kernel | not offered | `uint64_t` is two 32-bit operations | [ARCHITECTURE.md §8.5](../ARCHITECTURE.md) |
 
 The x86-64 speedup is computed from the two published medians; the others are published as
@@ -242,14 +242,14 @@ once per word. Four ways of counting a word, timed inside `countNonZero` on a 75
 <!-- figure-check values="cycles|against the shipped arm" source="@targets/stm32h753/README.md" -->
 | per-word counter | cycles | against the shipped arm |
 |---|---|---|
-| libgcc `__popcountsi2`, the shipped arm | 201,600 | 1.00× |
-| the same sequence, inlined | 213,300 | 1.05× slower |
-| a 64-bit sequence, inlined | 374,270 | 1.85× slower |
-| inlined, with the DSP extension's `USAD8` for the final sum | 178,700 | 1.13× faster |
+| libgcc `__popcountsi2`, the shipped arm | 204,853 | 1.00× |
+| the same sequence, inlined | 216,146 | 1.06× slower |
+| a 64-bit sequence, inlined | 377,148 | 1.84× slower |
+| inlined, with the DSP extension's `USAD8` for the final sum | 181,578 | 1.13× faster |
 
 Almost nothing is available in the per-word counter. What moves the number is the
 **loop**: keeping the software count's per-byte partial sums in an accumulator and
-collapsing them once per sixteen words, rather than once per word, is **2.6× faster** on
+collapsing them once per sixteen words, rather than once per word, is **2.4× faster** on
 the M7, in plain C++. It helps only where the count is software and only on long
 contiguous reductions, and the target page
 ([targets/stm32h753](../../targets/stm32h753/README.md)) records why it does nothing for the
@@ -332,16 +332,16 @@ binCV threads only through a backend the caller installs.
 |---|---|---|
 | a 752×480 frame, as bits and as `CV_8U` | 46,080 against 360,960 bytes | [limits.md](../reports/limits.md#what-is-not-measured-at-all) |
 | tracker staging on the stack, at 2 bits per pixel | 4,120 bytes of a 16 KiB stack | [limits.md](../reports/limits.md#what-is-not-measured-at-all) |
-| dense disparity, 320×240, 32 disparities, `uint32_t` | 825 ms at 64 MHz, in 6,480 B of scratch | [targets/stm32h753](../../targets/stm32h753/README.md) |
+| dense disparity, 320×240, 32 disparities, `uint32_t` | 97.8 ms at 480 MHz, in 6,480 B of scratch | [targets/stm32h753](../../targets/stm32h753/README.md) |
 
 The stack budget is a compile-time setting that fails the build rather than overflowing at
 run time, which matters on a part where an overflow is silent corruption rather than a
 crash. The dense-disparity kernel's first run on this core returned the exact disparity on
 its test pair, and the same map at both word types.
 
-What has **not** been measured there is as important: no comparison against OpenCV, no
-pipeline or tracker timing, and nothing at the part's full 480 MHz clock. The disparity
-figure is a floor at an eighth of the clock, not the part's number.
+What has **not** been measured there is as important: no comparison against OpenCV, and no
+pipeline or tracker timing. Every figure above is at the part's full 480 MHz, with the clock
+checked against the board's 32.768 kHz crystal.
 
 ### On the GPU, the bottleneck sets the ratio
 

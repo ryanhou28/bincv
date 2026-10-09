@@ -199,11 +199,11 @@ cmake -S . -B build-m7 \
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-cortex-m7.cmake \
       -DBINCV_BUILD_EMBEDDED=ON -DBINCV_BUILD_TESTS=OFF \
       -DBINCV_USE_OPENCV=OFF -DBINCV_BUILD_BENCHMARKS=OFF
-cmake --build build-m7 --target bincv_m7
+cmake --build build-m7
 ```
 
-[targets/stm32h753/README.md](targets/stm32h753/README.md) says how to flash the image and
-read its report, and what was measured on that part. `scripts/verify_cortex_m.sh` is the
+[targets/stm32h753/README.md](targets/stm32h753/README.md) says how to flash an image and
+drive it with `scripts/m7_host.py`, and what was measured on that part. `scripts/verify_cortex_m.sh` is the
 compile-only gate for that architecture.
 
 ## Conventions

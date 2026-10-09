@@ -140,8 +140,13 @@ INCLUDE_DIRS = ('include', os.path.join('backends', 'cuda', 'include'), 'benchma
 SOURCE_DIRS = ('benchmark', 'tests', 'examples',
                os.path.join('backends', 'cuda', 'benchmark'),
                os.path.join('backends', 'cuda', 'tests'),
-               os.path.join('backends', 'cuda', 'examples'))
+               os.path.join('backends', 'cuda', 'examples'),
+               os.path.join('targets', 'stm32h753'))
 SOURCE_EXTS = ('.cpp', '.cc', '.cu')
+# What an add_executable may link besides the benchmark's own unit: a firmware image
+# (targets/stm32h753) also links its C startup and board support, and a figure
+# timed on the board moves when its clock bring-up does.
+LINKED_EXTS = SOURCE_EXTS + ('.c',)
 
 # The backend's declaration/definition split: the caller includes the .hpp, the
 # kernel is compiled from the .cu of the same name. self_check() holds this to
@@ -156,7 +161,8 @@ CUDA_SRC_DIR = os.path.join('backends', 'cuda', 'src')
 LINK_LISTS = (os.path.join('benchmark', 'CMakeLists.txt'),
               os.path.join('tests', 'CMakeLists.txt'),
               os.path.join('backends', 'cuda', 'benchmark', 'CMakeLists.txt'),
-              os.path.join('backends', 'cuda', 'tests', 'CMakeLists.txt'))
+              os.path.join('backends', 'cuda', 'tests', 'CMakeLists.txt'),
+              os.path.join('targets', 'stm32h753', 'CMakeLists.txt'))
 TARGET_RE = re.compile(r'\b(?:add_executable|bincv_add_test_target)\s*\(([^)]*)\)')
 
 
@@ -448,7 +454,7 @@ def deps_for(binary, rev=None):
             if words and words[0] == stem:
                 for w in words[1:]:
                     c = os.path.normpath(os.path.join(here, w))
-                    if w.endswith(SOURCE_EXTS) and _text(c, rev) is not None and c not in roots:
+                    if w.endswith(LINKED_EXTS) and _text(c, rev) is not None and c not in roots:
                         roots.append(c)
     seen = set()
 

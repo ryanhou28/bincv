@@ -4,7 +4,7 @@ A bare-metal target for the NUCLEO-H753ZI. It exists to answer one question: **w
 binCV cost where there is no hardware population count and no vector unit?** Everything in
 this directory is the harness; binCV itself is `bincv_core`, unchanged.
 
-## Build, flash, read
+## Build, flash, run
 
 Needs an `arm-none-eabi` GCC on `PATH` (or `BINCV_ARM_TOOLCHAIN_DIR` pointing at one).
 
@@ -13,19 +13,68 @@ cmake -S . -B build-m7 \
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-cortex-m7.cmake \
       -DBINCV_BUILD_EMBEDDED=ON -DBINCV_BUILD_TESTS=OFF \
       -DBINCV_USE_OPENCV=OFF -DBINCV_BUILD_BENCHMARKS=OFF
-cmake --build build-m7 --target bincv_m7      # writes build-m7/targets/stm32h753/bincv_m7.bin
+cmake --build build-m7          # one image per benchmark: bincv_m7_reduce, bincv_m7_dense
 ```
 
-Flash by copying `bincv_m7.bin` onto the mass-storage drive the board's ST-LINK presents
-(or with `st-flash write bincv_m7.bin 0x8000000`). The firmware reports over USART3, which
-the ST-LINK exposes as a virtual COM port: **115200 8N1**. It prints the clock, the cache
-state and which arm is which before any number, so a report that cannot state its clock is
-not a measurement.
+**One image per benchmark**, each named after its own translation unit
+(`bincv_m7_reduce.cpp` is `bincv_m7_reduce`), for the reason there is one host binary per
+benchmark: `scripts/check_figure_staleness.py` ages a figure when a file its image compiles
+changes, and one image compiling every kernel would age every figure on every edit.
+`m7_harness.cpp` is what they share — bring-up and the command loop.
+
+The images are driven from the host by **`scripts/m7_host.py`**:
+
+```bash
+scripts/m7_host.py flash bincv_m7_reduce            # through the ST-LINK's drive
+scripts/m7_host.py run PING CLOCK REDUCE            # one session, replies printed
+scripts/m7_host.py launches -n 10 --image bincv_m7_reduce \
+    -o docs/reports/logs/m7-reduce-cortex-m7-launches.log REDUCE STACK
+```
+
+`launches` is `run_launches.sh` for the board: it builds the image from the current tree,
+flashes it, and takes N launches, each one a system reset so caches, stack and statics start
+cold. Its log carries the same header the host runners write, `# sources:` included, so a
+figure taken on the board goes stale when the code under it moves, like any other.
+
+Every exchange is a request and a reply: the host sends a command line, the board answers
+with lines ending in `OK` or `ERR`, and binary data only travels when the board has asked for
+exactly that many bytes, so nothing the board times includes the link and its receive FIFO
+cannot overrun. The link runs at 4 Mbaud over the ST-LINK's virtual COM port and moved 3.7 MB
+without a CRC failure. Under WSL2 the COM port stays on the Windows side and
+`scripts/m7_bridge.ps1` pipes it to a socket, which needs no administrator; the ST-LINK's
+drive is flashed by ejecting it first, because Windows otherwise reports the copy as
+corrupted.
 
 The tests do not build for this target as a whole (`threads/pool.hpp` needs `<thread>`,
 which newlib does not supply), which is why `BINCV_BUILD_TESTS=OFF` above.
 `scripts/verify_cortex_m.sh` is the compile gate: it builds the 37 suites that can be built
-at 32-bit `size_t` and links this image; it does not run them.
+at 32-bit `size_t` and links every image; it does not run them.
+
+## The clock, and how it is checked
+
+**480 MHz**: PLL1 from the ST-LINK's 8 MHz clock in HSE bypass, `DIVM1 = 2`, `DIVN1 = 240`,
+`DIVP1 = 2`, voltage scale 0, the AXI and AHB buses at 240 MHz and every APB at 120 MHz,
+flash at 4 wait states — the settings Zephyr uses for this board. I+D caches on throughout.
+
+A misconfigured PLL still runs everything, and every number it produces is then plausible and
+wrong, so the configured frequency is not trusted: the `CLOCK` command counts core cycles
+across one second of the board's 32.768 kHz LSE crystal, through LPTIM1, and every launch
+logs it. At 480 MHz the core read **480.22–480.64 MHz** across the twenty launches below:
+about 0.1% fast, wandering by up to 870 ppm. That wander is the ST-LINK's 8 MHz reference
+rather than the method — on the internal 64 MHz oscillator the same check read 64.236–64.253
+MHz over fourteen checks, a 270 ppm spread that includes the RC oscillator's own drift
+([log](../../docs/reports/logs/m7-reduce-cortex-m7-resetclock-launches.log)). **Figures here
+are cycle counts, which none of this touches**; milliseconds are converted at 480 MHz and
+carry that 0.1%.
+
+The first figures on this board were taken on the 64 MHz reset clock, before this path was
+brought up and checked. `-DBINCV_M7_RESET_CLOCK=ON` still builds that configuration, and its
+logs sit beside the 480 MHz ones. **Its cycle counts do not transfer to 480 MHz**: the
+dense-disparity kernel takes 52,593,359 cycles there and 46,931,454 at 480 MHz
+([log](../../docs/reports/logs/m7-dense-cortex-m7-resetclock-launches.log)), while the
+population count goes the other way, 201,771 against 204,853. The two configurations differ
+in flash wait states (7 at reset), bus ratio and voltage scale, and which of those moves
+which count was not isolated.
 
 ## What was measured
 
@@ -33,15 +82,13 @@ Two things, each with its rule written down before the board ran:
 
 1. **Population count without an instruction** — four ways to count the bits of a 32-bit
    word, timed inside the bulk reduction that calls them.
-2. **Dense disparity at 32-bit pointer width** — the binary dense kernel's first execution
-   on an M-profile core, at `uint32` against `uint64`.
+2. **Dense disparity at 32-bit pointer width** — the binary dense kernel on an M-profile
+   core, at `uint32` against `uint64`.
 
-All figures are at the reset clock, **HSI 64 MHz, no PLL**, I+D cache on. That is
-deliberate for a first bring-up: the PLL, voltage-scaling and flash-wait-state path is the
-step most likely to fail silently into a wrong frequency, and a wrong frequency is a wrong
-measurement that still looks plausible. Ratios between arms are unaffected; absolute
-milliseconds are a floor, not the part's number, until the 480 MHz path is brought up and
-checked against a known interval.
+Both are re-taken at 480 MHz, ten launches each, from the logs named under each table. Every
+launch returned the same cycle count to within 0.002%: this core has no frequency scaling,
+no other process and no OS, so the run-to-run scatter the host logs exist to measure is
+not there to measure.
 
 ## 1. Population count
 
@@ -73,20 +120,25 @@ failure rather than a footnote.
 
 ### Result
 
-Median of 7 interleaved repeats, three consecutive power-on reports agreeing to better
-than 0.5%. All four arms and `bincv::countNonZero` returned 180,378.
+Each launch is the median of 7 interleaved repeats; the cycles are the median over ten
+launches, which agreed exactly ([log](../../docs/reports/logs/m7-reduce-cortex-m7-launches.log)).
+All four arms and `bincv::countNonZero` returned 180,378.
 
 | arm | cycles | vs A | `.text` |
 |---|---|---|---|
-| **A — shipped** (`__popcountsi2`) | 201,600 | 1.00× | 48 B |
-| B — portable (64-bit SWAR) | 374,270 | 1.85× slower | 180 B |
-| C — SWAR32 | 213,300 | 1.05× slower | 78 B |
-| D — SWAR32 + `USAD8` | 178,700 | 1.13× faster | 78 B |
+| **A — shipped** (`__popcountsi2`) | 204,853 | 1.00× | 48 B |
+| B — portable (64-bit SWAR) | 377,148 | 1.84× slower | 180 B |
+| C — SWAR32 | 216,146 | 1.06× slower | 78 B |
+| D — SWAR32 + `USAD8` | 181,578 | 1.13× faster | 78 B |
 
-**Decision: not adopted; arm A stays.** D is the fastest and the library keeps the slower
-arm deliberately: a 1.13× gain on a microbenchmark that counts bits and does nothing else
-does not buy a chip-specific code path that must stay bit-exact with the portable one on
-every future change, on a core with no CI here.
+**Decision at the time: not adopted; arm A stays.** D is the fastest, and the library kept
+the slower arm on two grounds: a 1.13× gain on a microbenchmark that counts bits and does
+nothing else, and a chip-specific path that must stay bit-exact with the portable one on
+every future change with nothing in CI executing it. **The second ground no longer
+stands** — an M-profile arm is now judged on its measurement, with its correctness proven
+on the board, rather than declined because CI cannot run it — so the decision is open
+again. It belongs with the Lucas–Kanade work below, where the counts that remain are
+single words, rather than with this loop.
 
 Three things it settled:
 
@@ -98,9 +150,10 @@ Three things it settled:
 - **B is 1.85× slower than what ships.** `popcountWordPortable` is not what this target
   compiles to (GCC calls libgcc's `__popcountsi2`), and `reduce.hpp` says so.
 
-For scale: 201,600 cycles is **3.15 ms** to count a 752×480 frame at 64 MHz. Whether that
-scales to ~0.42 ms at 480 MHz is not something this measurement can say, because at 7.5×
-the core clock the AXI SRAM becomes the limit rather than the counter.
+For scale: 204,853 cycles is **0.43 ms** to count a 752×480 frame at 480 MHz. The first
+bring-up expected the AXI SRAM, at half the core clock, to become the limit at 480 MHz; it
+did not — the count takes 1.5% more cycles than the 201,771 it takes at the reset clock,
+because 46 KB in 0.2 million cycles is far below what the bus delivers.
 
 ### The loop, which is where the win was
 
@@ -118,14 +171,15 @@ none using an intrinsic or a target `#if`:
 |---|---|---|---|
 | L0 | 1.00× | 1.00× | 1.00× |
 | L1 | 1.18× slower | 0.93× | 0.60× |
-| **L2** | **0.39×** | **0.12×** | 1.06× |
-| L3 | 0.42× | 0.11× | 0.96× |
+| **L2** | **0.42×** | **0.12×** | 1.06× |
+| L3 | 0.44× | 0.11× | 0.96× |
 
-M7 figures are cycle counts, three consecutive reports agreeing within 0.5%. Host figures
-are medians whose run-to-run spread was 49–107%, so only the order-of-magnitude differences
-there carry, which is all that is claimed from them.
+M7 figures are cycle ratios at 480 MHz, ten launches that agreed exactly
+([log](../../docs/reports/logs/m7-reduce-cortex-m7-launches.log); L0 is 205,591 cycles). Host
+figures are medians whose run-to-run spread was 49–107%, so only the order-of-magnitude
+differences there carry, which is all that is claimed from them.
 
-**L2 is 2.6× faster on the M7 and roughly 8× on x86 without POPCNT**, in plain C++ any
+**L2 is 2.4× faster on the M7 and roughly 8× on x86 without POPCNT**, in plain C++ any
 target compiles. The split is by family, not by part: L2 wins wherever the count is a
 software SWAR and is neutral-to-slightly-worse where the hardware has an instruction, so
 gating it on "no hardware population count" leaves x86-with-POPCNT and aarch64 on exactly
@@ -183,18 +237,20 @@ decision: both word types ship and the caller chooses; the header carries the re
 
 ### Result
 
-Median of 3 interleaved repeats. Both word types exact on the supported region, and the
-two maps byte-identical: the kernel's first execution on M-profile is bit-exact.
+Each launch is the median of 3 interleaved repeats; the cycles are the median over ten
+launches, which agreed to 0.002% ([log](../../docs/reports/logs/m7-dense-cortex-m7-launches.log)).
+Both word types exact on the supported region, and the two maps byte-identical.
 
-| word type | cycles | ms at 64 MHz | scratch |
+| word type | cycles | ms at 480 MHz | scratch |
 |---|---|---|---|
-| **`uint32`** | 52,823,363 | **825** | 6,480 B |
-| `uint64` | 68,807,055 | 1,075 | 6,480 B |
+| **`uint32`** | 46,931,454 | **97.8** | 6,480 B |
+| `uint64` | 62,589,097 | 130.4 | 6,480 B |
 
-**`uint64` is 1.30× slower: the 64-bit guidance inverts at 32-bit pointer width**, as a
+**`uint64` is 1.33× slower: the 64-bit guidance inverts at 32-bit pointer width**, as a
 core synthesizing every 64-bit ripple from register pairs would suggest, and now as a
-measurement. `denseDisparity.hpp` carries the width-qualified guidance. The scratch tie is
-geometry, not a rule: at this width both types pack the same bytes.
+measurement — 1.30× at the reset clock, 1.33× at 480 MHz. `denseDisparity.hpp` carries the
+width-qualified guidance. The scratch tie is geometry, not a rule: at this width both types
+pack the same bytes.
 
-For scale only: a QVGA depth map on a microcontroller in under a second at an eighth of the
-part's clock, in 6.5 KB of scratch.
+For scale only: a QVGA depth map on a microcontroller in 98 ms, in 6.5 KB of scratch. There
+is no comparison against anything else on this part here; this is the kernel's own cost.

@@ -279,8 +279,9 @@ caller-installed backend, so a target with no threads never installs one.
 drags in enough of newlib's stdio to want `_sbrk` at link time. No kernel allocates,
 throws or does I/O, so neither reaches one.
 
-**What is NOT measured there:** any OpenCV comparison, any pipeline or tracker timing, and
-anything at the part's full clock — the reductions were timed at the 64 MHz reset default.
+**What is NOT measured there:** any OpenCV comparison and any pipeline or tracker timing.
+The reductions and dense disparity are timed at the part's full 480 MHz, with the clock
+checked against the board's 32.768 kHz crystal rather than assumed.
 
 **The stack was expected to be the binding constraint. On the first real part it was
 not.** The tracker stages each window into stack buffers whose size grows with the bit

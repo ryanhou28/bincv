@@ -141,11 +141,11 @@ inline void runDenseBenchmark() {
     const auto line = [&](const char* name, uint32_t cyc, uint32_t scratchBytes) {
         boardPuts("  ");
         boardPuts(name);
-        boardPuts(" ");
+        boardPuts("  ");
         boardPutU32(cyc);
         boardPuts(" cyc = ");
-        boardPutU32(cyc / (BINCV_M7_CLOCK_HZ / 1000u));
-        boardPuts(" ms   scratch ");
+        boardPutU32(cyc / (BINCV_M7_CLOCK_HZ / 1000000u));
+        boardPuts(" us   scratch ");
         boardPutU32(scratchBytes);
         boardPuts(" B\n");
     };

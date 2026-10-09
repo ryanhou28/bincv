@@ -208,9 +208,8 @@ runs on an STM32H753ZI (Cortex-M7): the reductions are bit-exact against the lib
 entry point, a 752×480 frame occupies 46,080 bytes where a `CV_8U` one would occupy 360,960,
 and the tracker's staging buffers measure 4,120 bytes at the shipped pyramid depth of 2 bits
 per pixel against that board's 16 KiB stack — so the constraint this section expected to
-bite did not. What does **not** exist for that part is any OpenCV comparison, any pipeline or
-tracker timing, and any figure at the part's full clock; the one operation timed there ran at
-the reset default of 64 MHz. `stagingStackBytes<N, W>()` gives the exact stack figure for a
+bite did not. What does **not** exist for that part is any OpenCV comparison or any pipeline or
+tracker timing; the operations timed there run at the part's full 480 MHz. `stagingStackBytes<N, W>()` gives the exact stack figure for a
 configuration, and the build-time budget fails compilation rather than overflowing at run
 time.
 
