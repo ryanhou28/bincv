@@ -128,6 +128,7 @@
 #include "bincv/ops/derivative.hpp"
 #include "bincv/ops/blockMatch.hpp"
 #include "bincv/ops/opticalFlow.hpp"
+#include "bincv/ops/opticalFlowOnDemand.hpp"
 #include "bincv/ops/pyramid.hpp"
 #include "bincv/quantMat.hpp"
 #include "test_util.hpp"
@@ -877,6 +878,7 @@ struct LadderPipeline {
     Pyr prev, next;
     DerivLadder<WordType, LevelBits...> dx, dy;
     bincv::LKLevels<WordType, LevelBits...> levels;
+    bincv::BorderType border = bincv::BORDER_REFLECT_101;  ///< the derivatives'
 
     LadderPipeline(int w, int h) : prev(w, h), next(w, h), dx(w, h), dy(w, h) {}
 
@@ -892,8 +894,8 @@ struct LadderPipeline {
     template <size_t I>
     void buildDeriv() {
         if constexpr (I < Levels) {
-            bincv::derivativeX(prev.template level<I>(), dx.template get<I>());
-            bincv::derivativeY(prev.template level<I>(), dy.template get<I>());
+            bincv::derivativeX(prev.template level<I>(), dx.template get<I>(), border);
+            bincv::derivativeY(prev.template level<I>(), dy.template get<I>(), border);
             buildDeriv<I + 1>();
         }
     }
@@ -924,6 +926,17 @@ void seedLevelZero(LadderPipeline<WordType, LevelBits...>& fe, const BinMat<Word
             fe.prev.template level<0>().set(y, x, prevSrc.at(y, x));
             fe.next.template level<0>().set(y, x, nextSrc.at(y, x));
         }
+    }
+}
+
+/// @brief Binds an on-demand ladder to a pipeline's own pyramids and derivative border.
+template <size_t I, typename WordType, size_t... LevelBits>
+void bindOnDemand(LadderPipeline<WordType, LevelBits...>& fe,
+                  bincv::LKLevelsOnDemand<WordType, LevelBits...>& od) {
+    if constexpr (I < sizeof...(LevelBits)) {
+        od.template get<I>() = bincv::lkLevelOnDemand(fe.prev.template level<I>(),
+                                                      fe.next.template level<I>(), fe.border);
+        bindOnDemand<I + 1>(fe, od);
     }
 }
 
@@ -4213,12 +4226,6 @@ BINCV_TEST(Flow, CovarianceNeonArmIsBitExact_uint32_t) {
     BINCV_CHECK(errDiff == 0);
 }
 
-// ---------------------------------------------------------------------------
-// The staged covariance's window-count arm against the portable loop, directly:
-// random staged windows -- magnitudes masked to a region, signs not, as staging
-// leaves them -- at every row count a staged window can have, so every fold
-// boundary is crossed. GradientCovariance's three integers must be identical.
-// ---------------------------------------------------------------------------
 inline uint64_t nextRand(uint64_t& state) {  // xorshift64
     state ^= state << 13;
     state ^= state >> 7;
@@ -4226,6 +4233,180 @@ inline uint64_t nextRand(uint64_t& state) {  // xorshift64
     return state;
 }
 
+// ---------------------------------------------------------------------------
+// Derivatives on demand (ops/opticalFlowOnDemand.hpp) against the stored planes.
+// First the staged words themselves, the one place the two forms differ: every
+// window position along every edge and through the interior, every border type,
+// several depths and word types. Inside the window the words must be the stored
+// form's exactly; a sign may differ only where the magnitude is zero.
+// ---------------------------------------------------------------------------
+template <size_t N, typename WordType>
+size_t onDemandStagingMismatches(int width, int height, bincv::BorderType border, uint64_t seed,
+                                 size_t& windows) {
+    using bincv::impl::StagedWindow;
+    using bincv::impl::RegionWords;
+    bincv::QuantMat<N, WordType> src(width, height);
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x)
+            src.set(y, x, static_cast<unsigned>(nextRand(seed) % (1u << N)));
+    bincv::SignedQuantMat<N, WordType> dx(width, height), dy(width, height);
+    bincv::derivativeX(src, dx, border);
+    bincv::derivativeY(src, dy, border);
+    bincv::LKLevelN<N, WordType> stored;
+    for (size_t k = 0; k < N; ++k) {
+        stored.prev[k] = src.constPlane(k);
+        stored.next[k] = src.constPlane(k);
+        stored.dxMag[k] = dx.constMagnitude(k);
+        stored.dyMag[k] = dy.constMagnitude(k);
+    }
+    stored.dxSign = dx.constSign();
+    stored.dySign = dy.constSign();
+    const auto onDemand =
+        bincv::impl::onDemandImpl(bincv::lkLevelOnDemand(src, src, border));
+
+    constexpr size_t kBits = bincv::impl::bitsPerWord<WordType>();
+    // The reference width where the word holds it, and a window the whole word wide,
+    // whose top bit is the only one that reads past the word.
+    const size_t widths[2] = {kBits < 31 ? kBits - 1 : 31, kBits};
+    size_t bad = 0;
+    for (size_t winW : widths)
+    for (int y0 = -4; y0 < height; y0 += 3) {
+        for (int x0 = -6; x0 < width; ++x0) {
+            const bincv::Rect window(x0, y0, static_cast<int>(winW), 9);
+            const RegionWords<WordType> r = bincv::impl::clipRegion<WordType>(
+                static_cast<size_t>(width), static_cast<size_t>(height), window);
+            if (r.x1 <= r.x0 || r.y1 <= r.y0) continue;
+            StagedWindow<N, WordType> a{}, b{};
+            const bool sa = bincv::impl::stageWindow(stored, r, a);
+            const bool sb = bincv::impl::stageWindow(onDemand, r, b);
+            if (sa != sb) { ++bad; continue; }
+            if (!sa) continue;
+            ++windows;
+            for (size_t i = 0; i < r.y1 - r.y0; ++i) {
+                for (size_t k = 0; k < N; ++k) {
+                    if (a.self[i][k] != b.self[i][k] || a.magX[i][k] != b.magX[i][k] ||
+                        a.magY[i][k] != b.magY[i][k])
+                        ++bad;
+                }
+                WordType mx = 0, my = 0;
+                for (size_t k = 0; k < N; ++k) {
+                    mx = static_cast<WordType>(mx | a.magX[i][k]);
+                    my = static_cast<WordType>(my | a.magY[i][k]);
+                }
+                if (static_cast<WordType>((a.signX[i] ^ b.signX[i]) & mx) != 0 ||
+                    static_cast<WordType>((a.signY[i] ^ b.signY[i]) & my) != 0)
+                    ++bad;
+            }
+        }
+    }
+    return bad;
+}
+
+BINCV_TEST(Flow, OnDemandStagingMatchesStoredDerivatives) {
+    const bincv::BorderType borders[] = {bincv::BORDER_REFLECT_101, bincv::BORDER_REFLECT,
+                                         bincv::BORDER_REPLICATE, bincv::BORDER_WRAP,
+                                         bincv::BORDER_CONSTANT};
+    size_t bad = 0, windows = 0;
+    uint64_t seed = 0xD1CEULL;
+    for (bincv::BorderType border : borders) {
+        bad += onDemandStagingMismatches<1, uint32_t>(70, 23, border, seed++, windows);
+        bad += onDemandStagingMismatches<2, uint32_t>(70, 23, border, seed++, windows);
+        bad += onDemandStagingMismatches<3, uint32_t>(45, 19, border, seed++, windows);
+        bad += onDemandStagingMismatches<2, uint64_t>(130, 17, border, seed++, windows);
+        bad += onDemandStagingMismatches<1, uint16_t>(37, 15, border, seed++, windows);
+        bad += onDemandStagingMismatches<2, uint8_t>(29, 13, border, seed++, windows);
+        bad += onDemandStagingMismatches<1, uint32_t>(32, 9, border, seed++, windows);
+        bad += onDemandStagingMismatches<1, uint32_t>(1, 5, border, seed++, windows);
+    }
+    std::printf(" on-demand staging vs stored derivatives: %zu windows, %zu differ\n", windows,
+                bad);
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+    BINCV_CHECK(windows > 10000);
+}
+
+// And whole ladders: the same pyramids tracked through stored derivative planes and
+// through on-demand levels, every depth the tracker runs and three borders. Points,
+// status and error must be the same bits.
+template <size_t... LevelBits>
+size_t onDemandTrackingMismatches(bincv::BorderType border, size_t& tracked, size_t& points) {
+    const int width = kW, height = kH;
+    BinMat<uint32_t> prevSrc(width, height), nextSrc(width, height);
+    renderWarped(prevSrc, Warp{});
+    renderWarped(nextSrc, translation(1.3, -0.7));
+    LadderPipeline<uint32_t, LevelBits...> fe(width, height);
+    fe.border = border;
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+
+    bincv::LKLevelsOnDemand<uint32_t, LevelBits...> od;
+    bindOnDemand<0>(fe, od);
+
+    std::vector<Point2f> pts;
+    for (int y = 0; y < height; y += 5)
+        for (int x = 0; x < width; x += 7)
+            pts.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+    const size_t n = pts.size();
+    std::vector<Point2f> outA(n), outB(n);
+    std::vector<uint8_t> stA(n), stB(n);
+    std::vector<float> errA(n), errB(n);
+    LKParams params;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outA.data(), stA.data(), errA.data(), n, params);
+    calcOpticalFlowPyrLK(od, pts.data(), outB.data(), stB.data(), errB.data(), n, params);
+    size_t bad = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (stA[i] != stB[i] || std::memcmp(&outA[i], &outB[i], sizeof(Point2f)) != 0 ||
+            std::memcmp(&errA[i], &errB[i], sizeof(float)) != 0)
+            ++bad;
+        tracked += stA[i] != 0;
+    }
+    points += n;
+    return bad;
+}
+
+BINCV_TEST(Flow, OnDemandTrackingMatchesStoredDerivatives) {
+    const bincv::BorderType borders[] = {bincv::BORDER_REFLECT_101, bincv::BORDER_REPLICATE,
+                                         bincv::BORDER_CONSTANT};
+    size_t bad = 0, tracked = 0, points = 0;
+    for (bincv::BorderType border : borders) {
+        bad += onDemandTrackingMismatches<1, 2, 2, 2>(border, tracked, points);
+        bad += onDemandTrackingMismatches<1, 1, 1, 1>(border, tracked, points);
+        bad += onDemandTrackingMismatches<2, 3, 3>(border, tracked, points);
+    }
+    // The window-count arm stages through the same buffer; run it over on-demand too.
+    bool& sw = bincv::impl::lkWindowCountEnabled();
+    const bool saved = sw;
+    sw = true;
+    bad += onDemandTrackingMismatches<1, 2, 2, 2>(bincv::BORDER_REFLECT_101, tracked, points);
+    sw = saved;
+    std::printf(" on-demand vs stored tracking: %zu points, %zu tracked, %zu differ\n", points,
+                tracked, bad);
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+    BINCV_CHECK(tracked > points / 2);
+
+    // A window the tracker cannot stage is refused, every point lost.
+    LadderPipeline<uint32_t, 1, 2> fe(64, 48);
+    fe.build();
+    bincv::LKLevelsOnDemand<uint32_t, 1, 2> od;
+    bindOnDemand<0>(fe, od);
+    Point2f p{20.0f, 20.0f}, q{};
+    uint8_t st = 1;
+    LKParams wide;
+    wide.winWidth = 41;
+    wide.winHeight = 15;
+#if BINCV_DEBUG_CHECKS
+    (void)p; (void)q; (void)st; (void)wide;
+#else
+    calcOpticalFlowPyrLK(od, &p, &q, &st, nullptr, 1, wide);
+    BINCV_CHECK_EQ(st, static_cast<uint8_t>(0));
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// The staged covariance's window-count arm against the portable loop, directly:
+// random staged windows -- magnitudes masked to a region, signs not, as staging
+// leaves them -- at every row count a staged window can have, so every fold
+// boundary is crossed. GradientCovariance's three integers must be identical.
+// ---------------------------------------------------------------------------
 template <size_t N>
 size_t covarianceWindowCountMismatches(uint64_t seed, size_t& windows) {
     bincv::impl::StagedWindow<N, uint32_t> sw{};

@@ -22,7 +22,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/bitslice.hpp`](#opsbitslicehpp) — 5 entries
 - [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 4 entries
 - [`ops/census.hpp`](#opscensushpp) — 5 entries
-- [`ops/corner.hpp`](#opscornerhpp) — 12 entries
+- [`ops/corner.hpp`](#opscornerhpp) — 14 entries
 - [`ops/covariance.hpp`](#opscovariancehpp) — 2 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 1 entries
 - [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 7 entries
@@ -37,6 +37,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 17 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 10 entries
+- [`ops/opticalFlowOnDemand.hpp`](#opsopticalFlowOnDemandhpp) — 4 entries
 - [`ops/orbPattern.hpp`](#opsorbPatternhpp) — 1 entries
 - [`ops/orientation.hpp`](#opsorientationhpp) — 1 entries
 - [`ops/pack.hpp`](#opspackhpp) — 10 entries
@@ -189,6 +190,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `kResponseRingRows` *(constant)* | 3 | Rows the streaming form's ring must have |
 | `cornerMinEigenValRow` | 2 | One ROW of the minimum-eigenvalue response map |
 | `goodFeaturesToTrackStreaming` | 2 | `goodFeaturesToTrack` over a THREE-ROW ring instead of a frame-sized response map |
+| `GradientSource` *(struct)* | 3 | The image a detection takes its gradient from, and the border the gradient is taken with -- `derivativeX` and `derivativeY`'s, defaulting as they do |
+| `gradientRowWords` | 3 | Words of scratch the on-demand detector needs at this width: three rows of both derivatives, `N + 1` planes each |
 
 ## `ops/covariance.hpp`
 
@@ -373,6 +376,17 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `lkPathName` | 3 | Which residual kernel this level type will actually run, as a string |
 | `LKLevels` *(struct)* | 2 | A tracking ladder whose levels have DIFFERENT bit depths, level 0 first |
 | `stagingStackBytes` | 3 | Stack bytes the tracker's staging buffers occupy at `(N, WordType)` |
+
+## `ops/opticalFlowOnDemand.hpp`
+
+[`include/bincv/ops/opticalFlowOnDemand.hpp`](../include/bincv/ops/opticalFlowOnDemand.hpp)
+
+| | tier | |
+|---|---|---|
+| `LKLevelOnDemand` *(struct)* | 2 | One pyramid level at N bits per pixel for the on-demand tracker: both frames' bit-planes and the border the derivative is taken with |
+| `lkLevelOnDemand` | 2 | An on-demand level over two `QuantMat` frames |
+| `calcOpticalFlowPyrLK` | 2 | Pyramidal Lucas–Kanade over on-demand levels of one depth, level 0 first |
+| `LKLevelsOnDemand` *(struct)* | 2 | A ladder of on-demand levels of different depths, level 0 first: `LKLevels` without the derivative planes |
 
 ## `ops/orbPattern.hpp`
 

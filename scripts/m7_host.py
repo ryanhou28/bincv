@@ -435,7 +435,7 @@ def compare_runs(board_path, ref_path):
 def cmd_track(args):
     import struct as st
     build = os.path.abspath(args.build)
-    image_name = 'bincv_m7_track'
+    image_name = args.image
     r = subprocess.run(['cmake', '--build', build, '--target', image_name],
                        capture_output=True, text=True)
     if r.returncode != 0:
@@ -562,6 +562,8 @@ def main():
     t.add_argument('--frames-out', default='',
                    help="where the per-frame lines go (default: beside the log)")
     t.add_argument('--build', default=DEFAULT_BUILD)
+    t.add_argument('--image', default='bincv_m7_track',
+                   help='the tracker image: bincv_m7_track, or bincv_m7_track_ondemand')
     t.add_argument('--no-flash', action='store_true')
 
     args = p.parse_args()

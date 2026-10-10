@@ -48,12 +48,24 @@ constexpr size_t kChunkRows = 40;
 /// frames, so nothing reaches it.
 constexpr size_t kMaxAge = 2048;
 
-constexpr frontend::Layout<W> kMax(kMaxW, kMaxH, kPoolCapacity, kMaxTracks);
+/// Derivatives computed where they are read instead of stored: the image
+/// bincv_m7_track_ondemand is this source built with BINCV_M7_DERIVATIVES_ON_DEMAND.
+#if defined(BINCV_M7_DERIVATIVES_ON_DEMAND)
+constexpr bool kOnDemand = true;
+constexpr const char* kImageName = "track-ondemand";
+#else
+constexpr bool kOnDemand = false;
+constexpr const char* kImageName = "track";
+#endif
+
+constexpr frontend::Layout<W> kMax(kMaxW, kMaxH, kPoolCapacity, kMaxTracks, kOnDemand);
+/// A buffer the build does not use still needs a size the language allows.
+constexpr size_t atLeastOne(size_t n) { return n > 0 ? n : 1; }
 
 // AXI SRAM: the buffers the published figure counts.
 __attribute__((section(".frames"), aligned(32))) W g_pyrA[kMax.pyramidWords()];
 __attribute__((section(".frames"), aligned(32))) W g_pyrB[kMax.pyramidWords()];
-__attribute__((section(".frames"), aligned(32))) W g_deriv[kMax.derivativeWords()];
+__attribute__((section(".frames"), aligned(32))) W g_deriv[atLeastOne(kMax.derivativeWords())];
 __attribute__((section(".frames"), aligned(32))) float g_ring[kMax.ringFloats()];
 
 // D2 SRAM: what the published figure leaves out, and the harness's own.
@@ -66,6 +78,7 @@ __attribute__((section(".sram2"), aligned(32))) uint8_t g_status[kMaxTracks];
 __attribute__((section(".sram2"), aligned(32))) int g_age[kMaxTracks];
 __attribute__((section(".sram2"), aligned(32))) uint8_t g_rx[kChunkRows * kMaxW];
 __attribute__((section(".sram2"), aligned(32))) uint16_t g_lifetimes[kMaxAge];
+__attribute__((section(".sram2"), aligned(32))) W g_gradient[atLeastOne(kMax.gradientWords())];
 
 struct CycleClock {
     uint64_t operator()() const { return boardCycles64(); }
@@ -145,12 +158,13 @@ void cmdTrack(const char* args) {
         boardPuts("ERR TRACK <frames >= 2> <width <= 752> <height <= 480>\n");
         return;
     }
-    const frontend::Layout<W> L(w, h, kPoolCapacity, kMaxTracks);
+    const frontend::Layout<W> L(w, h, kPoolCapacity, kMaxTracks, kOnDemand);
     frontend::Memory<W> mem;
     mem.sensor = g_sensor;
     mem.pyramidA = g_pyrA;
     mem.pyramidB = g_pyrB;
     mem.derivatives = g_deriv;
+    mem.gradientRows = g_gradient;
     mem.ring = g_ring;
     mem.pool = g_pool;
     mem.corners = g_corners;
@@ -160,7 +174,8 @@ void cmdTrack(const char* args) {
     mem.age = g_age;
     std::memset(g_lifetimes, 0, sizeof g_lifetimes);
 
-    frontend::Tracker<W, CycleClock> tr(L, mem, CycleClock{}, &recordLifetime, nullptr);
+    frontend::Tracker<W, CycleClock, kOnDemand> tr(L, mem, CycleClock{}, &recordLifetime,
+                                                   nullptr);
     tr.clear();
     boardStackPaint();
 
@@ -260,6 +275,7 @@ void cmdTrack(const char* args) {
     putBytes("derivative ladders       : ", L.derivativeBytes());
     putBytes("response ring            : ", L.ringBytes());
     putBytes("  = the published figure : ", L.publishedBytes());
+    if (L.derivativesOnDemand) putBytes("gradient rows (on demand): ", L.gradientBytes());
     putBytes("sensor stream rows       : ", L.sensorScratchBytes());
     putBytes("corner pool + kept       : ", L.cornerBytes());
     putBytes("tracks                   : ", L.trackBytes());
@@ -319,4 +335,4 @@ const m7::Command kCommands[] = {{"TRACK", &cmdTrack}, {"SET", &cmdSet}};
 
 }  // namespace
 
-int main() { m7::serve("track", kCommands, sizeof(kCommands) / sizeof(kCommands[0])); }
+int main() { m7::serve(kImageName, kCommands, sizeof(kCommands) / sizeof(kCommands[0])); }

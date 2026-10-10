@@ -73,6 +73,13 @@ bincv_m7_image(bincv_m7_dense)
 add_executable(bincv_m7_track startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_track.cpp)
 bincv_m7_image(bincv_m7_track)
 
+# The tracker with its derivatives computed where they are read instead of stored
+# (ops/opticalFlowOnDemand.hpp and goodFeaturesToTrackStreaming's GradientSource): the
+# same source, so the two images differ in that and nothing else.
+add_executable(bincv_m7_track_ondemand startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_track.cpp)
+bincv_m7_image(bincv_m7_track_ondemand)
+target_compile_definitions(bincv_m7_track_ondemand PRIVATE BINCV_M7_DERIVATIVES_ON_DEMAND)
+
 # DIAGNOSTIC, never a published figure: the tracker with opticalFlow.hpp's stage
 # timers on, reading the board's cycle counter. It answers where `track` goes.
 add_executable(bincv_m7_lkstages startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_track.cpp)

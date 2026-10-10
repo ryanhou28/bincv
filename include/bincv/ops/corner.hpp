@@ -378,6 +378,7 @@
 #include "../core/types.hpp"
 #include "../core/view.hpp"
 #include "../quantMat.hpp"
+#include "derivative.hpp"
 // countAndSplit and SlidingWindowCount: the cross term that recomputes and the
 // two sums that slide. Nothing here writes a word loop.
 #include "reduce.hpp"
@@ -1930,6 +1931,31 @@ inline void cornerMinEigenValWordSliced(const WordType* const (&mxr)[3],
     }
 }
 
+/// @brief `cornerMinEigenValRowSliced` over the three rows it reads, given as pointers
+/// -- row y - 1, y and y + 1 of each plane, null where the row is outside the frame --
+/// so a caller that holds only those rows computes the same response row. **INTERNAL.**
+/// `rowsPresent` says that none is null.
+template <typename WordType>
+inline void cornerMinEigenValRowSlicedRows(const WordType* const (&mxr)[3],
+                                           const WordType* const (&myr)[3],
+                                           const WordType* const (&sxr)[3],
+                                           const WordType* const (&syr)[3], size_t width,
+                                           bool rowsPresent, float* dstRow) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    const size_t words = minRowWords<WordType>(width);
+    for (size_t w = 0; w < words; ++w) {
+        const size_t lo = w * kBits;
+        const size_t hi = (lo + kBits < width) ? (lo + kBits) : width;
+        if (rowsPresent && w > 0 && w + 1 < words) {
+            cornerMinEigenValWordSliced<WordType, false>(mxr, myr, sxr, syr, words, w, lo, hi,
+                                                         dstRow);
+        } else {
+            cornerMinEigenValWordSliced<WordType, true>(mxr, myr, sxr, syr, words, w, lo, hi,
+                                                        dstRow);
+        }
+    }
+}
+
 /// @brief One row of `cornerMinEigenVal` at `blockSize == 3`, bit-sliced.
 /// @note Bit-identical to the per-pixel form; see the section comment above.
 template <typename WordType>
@@ -1937,10 +1963,8 @@ inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
                                        BinMatConstView<WordType> magY,
                                        BinMatConstView<WordType> signX,
                                        BinMatConstView<WordType> signY, size_t y, float* dstRow) {
-    constexpr size_t kBits = bitsPerWord<WordType>();
     const size_t width = magX.width;
     const size_t height = magX.height;
-    const size_t words = minRowWords<WordType>(width);
 
     const WordType* mxr[3];
     const WordType* myr[3];
@@ -1959,18 +1983,7 @@ inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
     // word test is per word, below -- together they are the precondition the
     // unguarded body is compiled against.
     const bool rowsPresent = y > 0 && y + 1 < height;
-
-    for (size_t w = 0; w < words; ++w) {
-        const size_t lo = w * kBits;
-        const size_t hi = (lo + kBits < width) ? (lo + kBits) : width;
-        if (rowsPresent && w > 0 && w + 1 < words) {
-            cornerMinEigenValWordSliced<WordType, false>(mxr, myr, sxr, syr, words, w, lo, hi,
-                                                         dstRow);
-        } else {
-            cornerMinEigenValWordSliced<WordType, true>(mxr, myr, sxr, syr, words, w, lo, hi,
-                                                        dstRow);
-        }
-    }
+    cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width, rowsPresent, dstRow);
 }
 
 } // namespace impl
@@ -2042,27 +2055,26 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
 
 namespace impl {
 
-/// @brief The streaming sweep both selection forms share: each response row into
+/// @brief The streaming sweep every selection form shares: each response row into
 /// the caller's ring, the running maximum, and the 3x3 non-maximum suppression.
-/// **INTERNAL.** `onCandidate(x, y, response)` is called for every admitted pixel
-/// that survives the suppression above the running threshold -- which only ever
-/// rises, so a pixel below it is below the final one too. Returns the frame's
-/// maximum response, or -1 when a mask admitted no pixel at all.
-template <typename WordType, typename OnCandidate>
-inline float sweepCornerCandidates(BinMatConstView<WordType> magX, BinMatConstView<WordType> magY,
-                                   BinMatConstView<WordType> signX,
-                                   BinMatConstView<WordType> signY,
-                                   const GoodFeaturesParams& params, ResponseMap ring,
-                                   BinMatConstView<WordType> mask, OnCandidate&& onCandidate) {
+/// **INTERNAL.** `rowAt(y, dst)` writes response row y, called for y = 0, 1, ... in
+/// order; `onCandidate(x, y, response)` is called for every admitted pixel that
+/// survives the suppression above the running threshold -- which only ever rises, so
+/// a pixel below it is below the final one too. Returns the frame's maximum response,
+/// or -1 when a mask admitted no pixel at all.
+template <typename WordType, typename RowAt, typename OnCandidate>
+inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
+                                  const GoodFeaturesParams& params, ResponseMap ring,
+                                  BinMatConstView<WordType> mask, RowAt&& rowAt,
+                                  OnCandidate&& onCandidate) {
     // Hoisted out of both loops: `masked` is a constant for the whole call, so the
     // no-mask path pays a predictable branch and never touches the mask's memory.
     const bool masked = !mask.empty();
     const impl::AdmitMasked<WordType> masked_admit{mask};
     const auto admit = [&](int mx, int my) { return !masked || masked_admit(mx, my); };
 
-    const int width = static_cast<int>(magX.width);
-    const int height = static_cast<int>(magX.height);
-    const int blockSize = params.blockSize;
+    const int width = static_cast<int>(frameWidth);
+    const int height = static_cast<int>(frameHeight);
 
     // Row 0 seeds the running maximum. UNDER A MASK THE SEED IS GATED TOO: a
     // strong unadmitted pixel in row 0 would otherwise inflate the running
@@ -2082,7 +2094,7 @@ inline float sweepCornerCandidates(BinMatConstView<WordType> magX, BinMatConstVi
     // top-K argument in the section comment already tolerates any running
     // threshold at or below the final one, so the answer is unchanged.
     float* first = ring.row(0);
-    cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, 0, first);
+    rowAt(0, first);
     float runningMax;
     if (masked) {
         runningMax = -1.0f;
@@ -2097,7 +2109,7 @@ inline float sweepCornerCandidates(BinMatConstView<WordType> magX, BinMatConstVi
 
     for (int y = 1; y < height; ++y) {
         float* cur = ring.row(static_cast<size_t>(y) % kResponseRingRows);
-        cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, cur);
+        rowAt(y, cur);
         // The mask gates this the way it gates the frame-map form's maxVal: the
         // threshold is a fraction of the strongest ADMITTED response, because
         // that is the region cv::minMaxLoc is given. The unmasked twin is
@@ -2187,6 +2199,22 @@ inline float sweepCornerCandidates(BinMatConstView<WordType> magX, BinMatConstVi
     // qualityLevel > 1 the `maxDiscarded > threshold` reconstruction below would
     // then report a truncation the frame-map form does not.
     return runningMax;
+}
+
+/// @brief `sweepCornerResponses` over stored derivative planes. **INTERNAL.**
+template <typename WordType, typename OnCandidate>
+inline float sweepCornerCandidates(BinMatConstView<WordType> magX, BinMatConstView<WordType> magY,
+                                   BinMatConstView<WordType> signX,
+                                   BinMatConstView<WordType> signY,
+                                   const GoodFeaturesParams& params, ResponseMap ring,
+                                   BinMatConstView<WordType> mask, OnCandidate&& onCandidate) {
+    const int blockSize = params.blockSize;
+    return sweepCornerResponses<WordType>(
+        magX.width, magX.height, params, ring, mask,
+        [&](int y, float* dst) {
+            cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, dst);
+        },
+        onCandidate);
 }
 
 }  // namespace impl
@@ -2376,56 +2404,85 @@ struct CandidateStronger {
 
 }  // namespace impl
 
-/// @brief `goodFeaturesToTrackStreaming` in memory the CALLER bounds, with the same
-/// corners an unbounded pool would give. **API TIER 2** -- `cv::goodFeaturesToTrack`'s
-/// selection.
-///
-/// **WHY A SECOND FORM.** The selection ranks every local maximum above the quality
-/// threshold and walks them strongest first, keeping one when no kept corner is
-/// within `minDistance`, until `maxCorners` are kept. How deep that walk goes is a
-/// property of the image: on the reference sequence at 752x480 it runs through
-/// 3,000 to 23,000 candidates, because most detections end with fewer than
-/// `maxCorners` corners and so exhaust the candidates. The one-pool form holds them
-/// all or truncates -- and a truncated pool changes the answer. This form takes a
-/// pool of any size and SWEEPS AGAIN when the walk outruns it: each pass keeps the
-/// strongest candidates strictly weaker than every one already walked, ranks them
-/// and continues the same walk. The corners are those of an unbounded pool, in the
-/// same order; a smaller pool costs a response sweep per pass instead of memory.
-///
-/// @param pool The candidate pool, `poolCapacity` entries, the caller's; at least 1.
-/// @param corners Where the kept corners go, strongest first; `capacity` entries.
-/// At most `min(capacity, maxCorners)` are kept, as in the other forms.
-/// @note `candidatesRanked` counts every candidate walked, over all passes;
-/// `candidatesTruncated` is always false; `passes` says how many sweeps it took.
-/// @note **TERNARY PLANES ONLY**, as the view form above.
-/// @note Never throws; allocates nothing.
-template <typename WordType>
-inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
-                                                 BinMatConstView<WordType> magY,
-                                                 BinMatConstView<WordType> signX,
-                                                 BinMatConstView<WordType> signY,
-                                                 const GoodFeaturesParams& params,
-                                                 ResponseMap ring, CornerCandidate* pool,
-                                                 size_t poolCapacity, Corner* corners,
-                                                 size_t capacity,
-                                                 BinMatConstView<WordType> mask = {}) {
-    BINCV_ASSERT(magX.width == magY.width && magX.height == magY.height &&
-                     magX.width == signX.width && magX.height == signX.height &&
-                     magX.width == signY.width && magX.height == signY.height,
-                 "corner: the four derivative planes must have the same dimensions");
-    BINCV_ASSERT(magX.width <= 65535 && magX.height <= 65535,
-                 "corner: a pool entry holds a position in 16 bits");
-    BINCV_ASSERT(params.blockSize > 0, "corner: blockSize must be positive");
-    BINCV_ASSERT(params.qualityLevel > 0.0, "corner: qualityLevel must be positive");
-    BINCV_ASSERT(params.minDistance >= 0.0, "corner: minDistance must not be negative");
-    BINCV_ASSERT(pool != nullptr && poolCapacity > 0, "corner: the pool needs at least one entry");
-    BINCV_ASSERT(corners != nullptr || capacity == 0,
-                 "corner: a non-zero capacity needs a non-null corner array");
+namespace impl {
 
+/// @brief One row of `derivativeX` and `derivativeY` for the on-demand detector, from
+/// the source rows it needs. **INTERNAL.** The same expressions as derivative.hpp's
+/// routes -- the taps one bit each way, the border at the two edge columns and rows,
+/// `signedDifference` between them, the tail masked -- kept apart from the routes
+/// because sharing a row function with them changed how the whole-frame derivative
+/// compiled on aarch64, 5.5% slower. `Corner.OnDemandGradient_IdenticalToStoredDerivatives`
+/// holds it to the routes' output.
+/// @param rowA, rowB The rows below and above, null where the border puts them outside.
+template <size_t N, typename WordType>
+inline void gradientRow(const WordType* const (&srcRow)[N], const WordType* const (&rowA)[N],
+                        const WordType* const (&rowB)[N], size_t width, ptrdiff_t leftSrc,
+                        ptrdiff_t rightSrc, bool borderValue, WordType* const (&magX)[N],
+                        WordType* signX, WordType* const (&magY)[N], WordType* signY) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    const size_t words = minRowWords<WordType>(width);
+    const WordType tailMask = rowTailMask<WordType>(width);
+    const WordType lastLiveBit = bitMask<WordType>(width - 1);
+    const WordType topBit = static_cast<WordType>(static_cast<WordType>(1) << (kBits - 1));
+    const WordType fill =
+        borderValue ? static_cast<WordType>(~static_cast<WordType>(0)) : static_cast<WordType>(0);
+    const bool haveA = rowA[0] != nullptr;
+    const bool haveB = rowB[0] != nullptr;
+    WordType prev[N];
+    for (size_t p = 0; p < N; ++p) {
+        const bool bit = leftSrc < 0 ? borderValue
+                                     : rowBit<WordType>(srcRow[p], static_cast<size_t>(leftSrc));
+        prev[p] = bit ? topBit : static_cast<WordType>(0);
+    }
+    for (size_t i = 0; i < words; ++i) {
+        const bool last = i + 1 == words;
+        WordType a[N], b[N], ya[N], yb[N];
+        for (size_t p = 0; p < N; ++p) {
+            const WordType cur = srcRow[p][i];
+            const WordType nxt = last ? static_cast<WordType>(0) : srcRow[p][i + 1];
+            a[p] = static_cast<WordType>(static_cast<WordType>(cur >> 1) |
+                                         static_cast<WordType>(nxt << (kBits - 1)));
+            b[p] = static_cast<WordType>(static_cast<WordType>(cur << 1) |
+                                         static_cast<WordType>(prev[p] >> (kBits - 1)));
+            prev[p] = cur;
+            if (last) {
+                const bool bit = rightSrc < 0
+                                     ? borderValue
+                                     : rowBit<WordType>(srcRow[p], static_cast<size_t>(rightSrc));
+                a[p] = static_cast<WordType>(
+                    static_cast<WordType>(a[p] & static_cast<WordType>(~lastLiveBit)) |
+                    (bit ? lastLiveBit : static_cast<WordType>(0)));
+            }
+            ya[p] = haveA ? rowA[p][i] : fill;
+            yb[p] = haveB ? rowB[p][i] : fill;
+        }
+        WordType mx[N], my[N];
+        WordType sx = static_cast<WordType>(0), sy = static_cast<WordType>(0);
+        signedDifference<N, WordType, false>(a, b, mx, sx);
+        signedDifference<N, WordType, false>(ya, yb, my, sy);
+        for (size_t p = 0; p < N; ++p) {
+            magX[p][i] = last ? static_cast<WordType>(mx[p] & tailMask) : mx[p];
+            magY[p][i] = last ? static_cast<WordType>(my[p] & tailMask) : my[p];
+        }
+        signX[i] = last ? static_cast<WordType>(sx & tailMask) : sx;
+        signY[i] = last ? static_cast<WordType>(sy & tailMask) : sy;
+    }
+}
+
+/// @brief The bounded-pool selection, over whatever produces the frame's response rows.
+/// **INTERNAL.** `sweep(onCandidate)` runs one whole sweep -- `sweepCornerResponses`
+/// with the caller's row source -- and returns its maximum; it is run again for each
+/// pass the spacing walk needs. `masked` says a mask restricted the sweep.
+template <typename Sweep>
+inline CornerResult selectWithBoundedPool(size_t width, size_t height,
+                                          const GoodFeaturesParams& params, ResponseMap ring,
+                                          bool masked, Sweep&& sweep, CornerCandidate* pool,
+                                          size_t poolCapacity, Corner* corners, size_t capacity) {
+    static_cast<void>(ring);  // read only by the assert below, which a release build drops
     CornerResult out;
     out.passes = 0;
-    if (magX.width == 0 || magX.height == 0) return out;
-    BINCV_ASSERT(ring.data != nullptr && ring.width == magX.width &&
+    if (width == 0 || height == 0) return out;
+    BINCV_ASSERT(ring.data != nullptr && ring.width == width &&
                      ring.height >= kResponseRingRows && ring.stride >= ring.width,
                  "corner: the ring must be three rows of the frame's width");
 
@@ -2455,8 +2512,7 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
         ++out.passes;
         size_t retained = 0;
         float maxDiscarded = -1.0f;
-        const float runningMax = impl::sweepCornerCandidates<WordType>(
-            magX, magY, signX, signY, params, ring, mask, [&](int x, int cy, float val) {
+        const float runningMax = sweep([&](int x, int cy, float val) {
                 CornerCandidate c;
                 c.x = static_cast<uint16_t>(x);
                 c.y = static_cast<uint16_t>(cy);
@@ -2479,7 +2535,7 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
                 }
             });
         if (out.passes == 1) {
-            if (!mask.empty() && runningMax == -1.0f) return out;
+            if (masked && runningMax == -1.0f) return out;
             threshold = static_cast<float>(static_cast<double>(runningMax) * params.qualityLevel);
         }
 
@@ -2546,6 +2602,182 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
     std::sort(corners, corners + kept, impl::CornerStronger());
     out.count = kept;
     return out;
+}
+
+} // namespace impl
+
+/// @brief `goodFeaturesToTrackStreaming` in memory the CALLER bounds, with the same
+/// corners an unbounded pool would give. **API TIER 2** -- `cv::goodFeaturesToTrack`'s
+/// selection.
+///
+/// **WHY A SECOND FORM.** The selection ranks every local maximum above the quality
+/// threshold and walks them strongest first, keeping one when no kept corner is
+/// within `minDistance`, until `maxCorners` are kept. How deep that walk goes is a
+/// property of the image: on the reference sequence at 752x480 it runs through
+/// 3,000 to 23,000 candidates, because most detections end with fewer than
+/// `maxCorners` corners and so exhaust the candidates. The one-pool form holds them
+/// all or truncates -- and a truncated pool changes the answer. This form takes a
+/// pool of any size and SWEEPS AGAIN when the walk outruns it: each pass keeps the
+/// strongest candidates strictly weaker than every one already walked, ranks them
+/// and continues the same walk. The corners are those of an unbounded pool, in the
+/// same order; a smaller pool costs a response sweep per pass instead of memory.
+///
+/// @param pool The candidate pool, `poolCapacity` entries, the caller's; at least 1.
+/// @param corners Where the kept corners go, strongest first; `capacity` entries.
+/// At most `min(capacity, maxCorners)` are kept, as in the other forms.
+/// @note `candidatesRanked` counts every candidate walked, over all passes;
+/// `candidatesTruncated` is always false; `passes` says how many sweeps it took.
+/// @note **TERNARY PLANES ONLY**, as the view form above.
+/// @note Never throws; allocates nothing.
+template <typename WordType>
+inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
+                                                 BinMatConstView<WordType> magY,
+                                                 BinMatConstView<WordType> signX,
+                                                 BinMatConstView<WordType> signY,
+                                                 const GoodFeaturesParams& params,
+                                                 ResponseMap ring, CornerCandidate* pool,
+                                                 size_t poolCapacity, Corner* corners,
+                                                 size_t capacity,
+                                                 BinMatConstView<WordType> mask = {}) {
+    BINCV_ASSERT(magX.width == magY.width && magX.height == magY.height &&
+                     magX.width == signX.width && magX.height == signX.height &&
+                     magX.width == signY.width && magX.height == signY.height,
+                 "corner: the four derivative planes must have the same dimensions");
+    BINCV_ASSERT(magX.width <= 65535 && magX.height <= 65535,
+                 "corner: a pool entry holds a position in 16 bits");
+    BINCV_ASSERT(params.blockSize > 0, "corner: blockSize must be positive");
+    BINCV_ASSERT(params.qualityLevel > 0.0, "corner: qualityLevel must be positive");
+    BINCV_ASSERT(params.minDistance >= 0.0, "corner: minDistance must not be negative");
+    BINCV_ASSERT(pool != nullptr && poolCapacity > 0, "corner: the pool needs at least one entry");
+    BINCV_ASSERT(corners != nullptr || capacity == 0,
+                 "corner: a non-zero capacity needs a non-null corner array");
+
+    return impl::selectWithBoundedPool(
+        magX.width, magX.height, params, ring, !mask.empty(),
+        [&](auto&& onCandidate) {
+            return impl::sweepCornerCandidates<WordType>(magX, magY, signX, signY, params, ring,
+                                                         mask, onCandidate);
+        },
+        pool, poolCapacity, corners, capacity);
+}
+
+/// @brief The image a detection takes its gradient from, and the border the gradient is
+/// taken with -- `derivativeX` and `derivativeY`'s, defaulting as they do. **API TIER 3.**
+template <size_t N, typename WordType>
+struct GradientSource {
+    BinMatConstView<WordType> planes[N];   ///< the image's planes, least significant first
+    BorderType border = BORDER_REFLECT_101;
+    bool borderValue = false;              ///< BORDER_CONSTANT's fill
+};
+
+/// @brief Words of scratch the on-demand detector needs at this width: three rows of
+/// both derivatives, `N + 1` planes each. **API TIER 3.**
+template <size_t N, typename WordType>
+constexpr size_t gradientRowWords(size_t width) {
+    constexpr size_t kBits = impl::bitsPerWord<WordType>();
+    return kResponseRingRows * 2 * (N + 1) * ((width + kBits - 1) / kBits);
+}
+
+/// @brief `goodFeaturesToTrackStreaming` in a bounded pool, deriving the gradient as it
+/// sweeps instead of reading stored derivative planes. **API TIER 2** -- the corners
+/// the stored form returns from `derivativeX`/`derivativeY` of the same image with the
+/// same border, bit for bit.
+/// @param src The image, and the derivative's border.
+/// @param gradientRows Caller scratch of at least `gradientRowWords<N, WordType>(width)`
+/// words: the three derivative rows the 3x3 window reads, made as the sweep reaches
+/// them, so the derivative planes are never held -- at 752x480, 1,152 bytes where the
+/// two level-0 planes are 90,240.
+/// @note blockSize 3 only, the reference value and the bit-sliced response's. Any
+/// other returns no corners (and asserts in a checked build).
+/// @note Each sweep derives the frame's gradient again, so a detection the pool makes
+/// sweep twice derives it twice; the stored form reads its planes twice instead.
+template <size_t N, typename WordType>
+inline CornerResult goodFeaturesToTrackStreaming(const GradientSource<N, WordType>& src,
+                                                 const GoodFeaturesParams& params,
+                                                 ResponseMap ring, WordType* gradientRows,
+                                                 size_t gradientRowWordsAvailable,
+                                                 CornerCandidate* pool, size_t poolCapacity,
+                                                 Corner* corners, size_t capacity,
+                                                 BinMatConstView<WordType> mask = {}) {
+    const size_t width = src.planes[0].width;
+    const size_t height = src.planes[0].height;
+    BINCV_ASSERT(params.blockSize == 3,
+                 "corner: the on-demand gradient serves blockSize 3, the bit-sliced response");
+    BINCV_ASSERT(width <= 65535 && height <= 65535,
+                 "corner: a pool entry holds a position in 16 bits");
+    BINCV_ASSERT(params.qualityLevel > 0.0, "corner: qualityLevel must be positive");
+    BINCV_ASSERT(params.minDistance >= 0.0, "corner: minDistance must not be negative");
+    BINCV_ASSERT(pool != nullptr && poolCapacity > 0, "corner: the pool needs at least one entry");
+    BINCV_ASSERT(corners != nullptr || capacity == 0,
+                 "corner: a non-zero capacity needs a non-null corner array");
+    BINCV_ASSERT((gradientRows != nullptr &&
+                  gradientRowWordsAvailable >= gradientRowWords<N, WordType>(width)),
+                 "corner: the gradient scratch must hold gradientRowWords(width) words");
+    static_cast<void>(gradientRowWordsAvailable);
+    if (params.blockSize != 3) {
+        CornerResult none;
+        none.passes = 0;
+        return none;
+    }
+
+    const size_t words = impl::minRowWords<WordType>(width);
+    const ptrdiff_t leftSrc = impl::borderIndex(static_cast<ptrdiff_t>(-1), width, src.border);
+    const ptrdiff_t rightSrc =
+        impl::borderIndex(static_cast<ptrdiff_t>(width), width, src.border);
+    // Slot s, axis a (0 = x), plane p (N = the sign): one row of `words` words each.
+    const auto rowOf = [&](size_t slot, size_t axis, size_t plane) {
+        return gradientRows + ((slot * 2 + axis) * (N + 1) + plane) * words;
+    };
+    size_t derived = 0;  // derivative rows made in this sweep
+    const auto derive = [&](size_t r) {
+        const size_t slot = r % kResponseRingRows;
+        const WordType* srcRow[N];
+        const WordType* rowA[N];
+        const WordType* rowB[N];
+        WordType* magX[N];
+        WordType* magY[N];
+        const ptrdiff_t ya = impl::borderIndex(static_cast<ptrdiff_t>(r) + 1, height, src.border);
+        const ptrdiff_t yb = impl::borderIndex(static_cast<ptrdiff_t>(r) - 1, height, src.border);
+        for (size_t p = 0; p < N; ++p) {
+            srcRow[p] = src.planes[p].row(r);
+            rowA[p] = ya >= 0 ? src.planes[p].row(static_cast<size_t>(ya)) : nullptr;
+            rowB[p] = yb >= 0 ? src.planes[p].row(static_cast<size_t>(yb)) : nullptr;
+            magX[p] = rowOf(slot, 0, p);
+            magY[p] = rowOf(slot, 1, p);
+        }
+        impl::gradientRow<N, WordType>(srcRow, rowA, rowB, width, leftSrc, rightSrc,
+                                       src.borderValue, magX, rowOf(slot, 0, N), magY,
+                                       rowOf(slot, 1, N));
+    };
+    // Response row y reads derivative rows y - 1 .. y + 1, which the sweep reaches in
+    // order: each row is made once per sweep, when the response first needs it.
+    const auto rowAt = [&](int yi, float* dst) {
+        const size_t y = static_cast<size_t>(yi);
+        const size_t need = y + 1 < height ? y + 1 : height - 1;
+        while (derived <= need) derive(derived++);
+        const WordType* mxr[3];
+        const WordType* myr[3];
+        const WordType* sxr[3];
+        const WordType* syr[3];
+        for (size_t k = 0; k < 3; ++k) {
+            const bool ok = y + k >= 1 && y + k - 1 < height;
+            const size_t slot = ok ? (y + k - 1) % kResponseRingRows : 0;
+            mxr[k] = ok ? rowOf(slot, 0, 0) : nullptr;
+            myr[k] = ok ? rowOf(slot, 1, 0) : nullptr;
+            sxr[k] = ok ? rowOf(slot, 0, N) : nullptr;
+            syr[k] = ok ? rowOf(slot, 1, N) : nullptr;
+        }
+        impl::cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width,
+                                                       y > 0 && y + 1 < height, dst);
+    };
+    return impl::selectWithBoundedPool(
+        width, height, params, ring, !mask.empty(),
+        [&](auto&& onCandidate) {
+            derived = 0;
+            return impl::sweepCornerResponses<WordType>(width, height, params, ring, mask, rowAt,
+                                                        onCandidate);
+        },
+        pool, poolCapacity, corners, capacity);
 }
 
 /// @brief The container spelling of the streaming form. **API TIER 2.**

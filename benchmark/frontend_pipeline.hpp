@@ -34,6 +34,7 @@
 #include "bincv/ops/medianEdgeStream.hpp"
 #include "bincv/ops/opticalFlow.hpp"
 #include "bincv/ops/pyramid.hpp"
+#include "bincv/ops/opticalFlowOnDemand.hpp"
 
 namespace frontend {
 
@@ -54,9 +55,15 @@ struct Layout {
     size_t lw[kLevels] = {}, lh[kLevels] = {}, stride[kLevels] = {};
     size_t poolCapacity = 0;   ///< candidate pool entries (8 bytes each)
     size_t maxTracks = 0;
+    /// Derivatives computed where they are read (ops/opticalFlowOnDemand.hpp and the
+    /// `GradientSource` detector) instead of stored: no derivative planes, three
+    /// gradient rows of scratch for detection.
+    bool derivativesOnDemand = false;
 
-    constexpr Layout(size_t width, size_t height, size_t pool, size_t tracks)
-        : w(width), h(height), poolCapacity(pool), maxTracks(tracks) {
+    constexpr Layout(size_t width, size_t height, size_t pool, size_t tracks,
+                     bool onDemand = false)
+        : w(width), h(height), poolCapacity(pool), maxTracks(tracks),
+          derivativesOnDemand(onDemand) {
         size_t cw = width, ch = height;
         for (size_t l = 0; l < kLevels; ++l) {
             lw[l] = cw;
@@ -75,13 +82,19 @@ struct Layout {
         for (size_t l = 0; l < kLevels; ++l) n += kLevelBits[l] * planeWords(l);
         return n;
     }
-    /// dx and dy at every level: a sign plane plus kLevelBits[l] magnitude planes each.
+    /// dx and dy at every level: a sign plane plus kLevelBits[l] magnitude planes each;
+    /// none on demand.
     constexpr size_t derivativeWords() const {
+        if (derivativesOnDemand) return 0;
         size_t n = 0;
         for (size_t l = 0; l < kLevels; ++l) n += 2 * (kLevelBits[l] + 1) * planeWords(l);
         return n;
     }
     constexpr size_t ringFloats() const { return bincv::kResponseRingRows * w; }
+    /// The on-demand detector's derivative rows at level 0; none when they are stored.
+    constexpr size_t gradientWords() const {
+        return derivativesOnDemand ? bincv::gradientRowWords<1, W>(w) : 0;
+    }
     constexpr size_t sensorScratchBytes() const {
         using Stream = bincv::MedianEdgeStream<3, uint8_t, W>;
         return Stream::scratchElements(w, bincv::kMedianReferenceL);
@@ -90,6 +103,7 @@ struct Layout {
     constexpr size_t pyramidBytes() const { return 2 * pyramidWords() * sizeof(W); }
     constexpr size_t derivativeBytes() const { return derivativeWords() * sizeof(W); }
     constexpr size_t ringBytes() const { return ringFloats() * sizeof(float); }
+    constexpr size_t gradientBytes() const { return gradientWords() * sizeof(W); }
     /// The candidate pool plus the kept corners: the bounded-pool selection takes the
     /// pool's size as a cost in sweeps, never in the answer.
     constexpr size_t cornerBytes() const {
@@ -106,7 +120,8 @@ struct Layout {
     }
     /// Everything this pipeline holds at once, which is what a device has to have.
     constexpr size_t bytes() const {
-        return sensorScratchBytes() + publishedBytes() + cornerBytes() + trackBytes();
+        return sensorScratchBytes() + publishedBytes() + gradientBytes() + cornerBytes() +
+               trackBytes();
     }
 };
 
@@ -117,6 +132,7 @@ struct Memory {
     W* pyramidA = nullptr;          ///< Layout::pyramidWords()
     W* pyramidB = nullptr;          ///< Layout::pyramidWords()
     W* derivatives = nullptr;       ///< Layout::derivativeWords()
+    W* gradientRows = nullptr;      ///< Layout::gradientWords(), on demand only
     float* ring = nullptr;          ///< Layout::ringFloats()
     bincv::CornerCandidate* pool = nullptr;  ///< Layout::poolCapacity
     bincv::Corner* corners = nullptr;        ///< Layout::maxTracks: the kept corners
@@ -160,20 +176,25 @@ inline constexpr uint32_t kFnvSeed = 2166136261u;
 /// benchmark records the same three; a host keeps a list, a board a histogram.
 using LifetimeSink = void (*)(void* ctx, int frames);
 
-template <typename W, typename Clock>
+/// `OnDemand` selects the derivatives' handling at compile time, so an image carries
+/// one form's code; the layout must have been made for the same one.
+template <typename W, typename Clock, bool OnDemand = false>
 class Tracker {
 public:
     Tracker(const Layout<W>& layout, const Memory<W>& mem, Clock clock,
             LifetimeSink sink = nullptr, void* sinkCtx = nullptr)
         : L_(layout), m_(mem), clock_(clock), prev_(mem.pyramidA), next_(mem.pyramidB),
-          sink_(sink), sinkCtx_(sinkCtx) {}
+          sink_(sink), sinkCtx_(sinkCtx) {
+        BINCV_ASSERT(layout.derivativesOnDemand == OnDemand,
+                     "frontend: the layout was made for the other derivative form");
+    }
 
     /// Zero every buffer: padding bits must start clear, and a caller's static
     /// buffer need not be (a NOLOAD section is not).
     void clear() {
         std::memset(m_.pyramidA, 0, L_.pyramidWords() * sizeof(W));
         std::memset(m_.pyramidB, 0, L_.pyramidWords() * sizeof(W));
-        std::memset(m_.derivatives, 0, L_.derivativeWords() * sizeof(W));
+        if (L_.derivativeWords() > 0) std::memset(m_.derivatives, 0, L_.derivativeWords() * sizeof(W));
         std::memset(m_.ring, 0, L_.ringBytes());
         prev_ = m_.pyramidA;
         next_ = m_.pyramidB;
@@ -221,14 +242,24 @@ public:
     FrameResult step(const bincv::GoodFeaturesParams& gftt, const bincv::LKParams& lk) {
         FrameResult r;
         buildPyramid(next_, times_);
-        derivatives(prev_, times_);
+        if constexpr (!OnDemand) derivatives(prev_, times_);
 
         uint64_t t0 = clock_();
         if (count_ < kMinTracks) {
             bincv::ResponseMap ring{m_.ring, L_.w, bincv::kResponseRingRows, L_.w};
-            const bincv::CornerResult cr = bincv::goodFeaturesToTrackStreaming<W>(
-                derivMag(0, 0, 0), derivMag(1, 0, 0), derivSign(0, 0), derivSign(1, 0), gftt,
-                ring, m_.pool, L_.poolCapacity, m_.corners, L_.maxTracks);
+            bincv::CornerResult cr;
+            if constexpr (OnDemand) {
+                bincv::GradientSource<1, W> gs;
+                gs.planes[0] = plane(prev_, 0, 0);
+                cr = bincv::goodFeaturesToTrackStreaming(gs, gftt, ring, m_.gradientRows,
+                                                         L_.gradientWords(), m_.pool,
+                                                         L_.poolCapacity, m_.corners,
+                                                         L_.maxTracks);
+            } else {
+                cr = bincv::goodFeaturesToTrackStreaming<W>(
+                    derivMag(0, 0, 0), derivMag(1, 0, 0), derivSign(0, 0), derivSign(1, 0),
+                    gftt, ring, m_.pool, L_.poolCapacity, m_.corners, L_.maxTracks);
+            }
             for (size_t i = 0; i < count_; ++i) record(m_.age[i]);  // discarded, not immortal
             count_ = cr.count < L_.maxTracks ? cr.count : L_.maxTracks;
             for (size_t i = 0; i < count_; ++i) {
@@ -246,13 +277,23 @@ public:
 
         t0 = clock_();
         if (count_ > 0) {
-            bincv::LKLevels<W, 1, 2, 2, 2> levels;
-            levels.template get<0>() = level<1>(0);
-            levels.template get<1>() = level<2>(1);
-            levels.template get<2>() = level<2>(2);
-            levels.template get<3>() = level<2>(3);
-            bincv::calcOpticalFlowPyrLK(levels, m_.points, m_.tracked, m_.status, nullptr,
-                                        count_, lk);
+            if constexpr (OnDemand) {
+                bincv::LKLevelsOnDemand<W, 1, 2, 2, 2> levels;
+                levels.template get<0>() = levelOnDemand<1>(0);
+                levels.template get<1>() = levelOnDemand<2>(1);
+                levels.template get<2>() = levelOnDemand<2>(2);
+                levels.template get<3>() = levelOnDemand<2>(3);
+                bincv::calcOpticalFlowPyrLK(levels, m_.points, m_.tracked, m_.status, nullptr,
+                                            count_, lk);
+            } else {
+                bincv::LKLevels<W, 1, 2, 2, 2> levels;
+                levels.template get<0>() = level<1>(0);
+                levels.template get<1>() = level<2>(1);
+                levels.template get<2>() = level<2>(2);
+                levels.template get<3>() = level<2>(3);
+                bincv::calcOpticalFlowPyrLK(levels, m_.points, m_.tracked, m_.status, nullptr,
+                                            count_, lk);
+            }
         }
         times_.track += clock_() - t0;
 
@@ -349,6 +390,16 @@ private:
     }
 
     template <size_t N>
+    bincv::LKLevelOnDemand<N, W> levelOnDemand(size_t l) const {
+        bincv::LKLevelOnDemand<N, W> lv;
+        for (size_t p = 0; p < N; ++p) {
+            lv.prev[p] = plane(prev_, l, p);
+            lv.next[p] = plane(next_, l, p);
+        }
+        return lv;
+    }
+
+    template <size_t N>
     bincv::LKLevelN<N, W> level(size_t l) const {
         bincv::LKLevelN<N, W> lv;
         for (size_t p = 0; p < N; ++p) {
@@ -393,7 +444,7 @@ private:
     uint32_t digest(const FrameResult& r) const {
         uint32_t h = kFnvSeed;
         h = fnv1a(h, next_, L_.pyramidWords() * sizeof(W));
-        h = fnv1a(h, m_.derivatives, L_.derivativeWords() * sizeof(W));
+        if (L_.derivativeWords() > 0) h = fnv1a(h, m_.derivatives, L_.derivativeWords() * sizeof(W));
         if (r.detected) {
             for (size_t i = 0; i < r.corners && i < L_.maxTracks; ++i) {
                 const int32_t xy[2] = {m_.corners[i].x, m_.corners[i].y};

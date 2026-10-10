@@ -1939,6 +1939,101 @@ BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint32_t) { rowKernelSuite<uint3
 BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint64_t) { rowKernelSuite<uint64_t>("uint64_t"); }
 
 // ---------------------------------------------------------------------------
+// The on-demand gradient (`GradientSource`): the bounded-pool detector deriving the
+// gradient as it sweeps, against the same detector reading stored derivative planes
+// of the same image with the same border. Every frame, border and selection setting
+// the bounded-pool suite runs, pools that force several sweeps, a mask, and a two-bit
+// source. Count, positions, responses and sweep count must all be the same.
+// ---------------------------------------------------------------------------
+namespace {
+
+template <size_t N>
+size_t onDemandCornerMismatches(const bincv::QuantMat<N, uint32_t>& src, BorderType border,
+                                const SelectionParams& sp, size_t poolSize,
+                                const bincv::BinMatConstView<uint32_t>& mask, size_t& cells,
+                                size_t& multiPass) {
+    const int w = static_cast<int>(src.getWidth()), h = static_cast<int>(src.getHeight());
+    bincv::SignedQuantMat<N, uint32_t> dx(w, h), dy(w, h);
+    bincv::derivativeX(src, dx, border);
+    bincv::derivativeY(src, dy, border);
+    GoodFeaturesParams params;
+    params.blockSize = 3;
+    params.maxCorners = sp.maxCorners;
+    params.qualityLevel = sp.qualityLevel;
+    params.minDistance = sp.minDistance;
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(w));
+    const ResponseMap ring{ringStorage.data(), static_cast<size_t>(w), bincv::kResponseRingRows,
+                           static_cast<size_t>(w)};
+    const size_t cap = static_cast<size_t>(w) * static_cast<size_t>(h) + 1;
+    std::vector<bincv::CornerCandidate> pool(poolSize);
+    std::vector<Corner> a(cap), b(cap);
+    const CornerResult ra = bincv::goodFeaturesToTrackStreaming<uint32_t>(
+        dx.constMagnitude(0), dy.constMagnitude(0), dx.constSign(), dy.constSign(), params, ring,
+        pool.data(), pool.size(), a.data(), a.size(), mask);
+    bincv::GradientSource<N, uint32_t> gs;
+    for (size_t p = 0; p < N; ++p) gs.planes[p] = src.constPlane(p);
+    gs.border = border;
+    std::vector<uint32_t> scratch(bincv::gradientRowWords<N, uint32_t>(static_cast<size_t>(w)));
+    const CornerResult rb = bincv::goodFeaturesToTrackStreaming(
+        gs, params, ring, scratch.data(), scratch.size(), pool.data(), pool.size(), b.data(),
+        b.size(), mask);
+    ++cells;
+    multiPass += rb.passes > 1;
+    size_t bad = (ra.count != rb.count || ra.passes != rb.passes ||
+                  ra.candidatesRanked != rb.candidatesRanked)
+                     ? 1
+                     : 0;
+    for (size_t i = 0; bad == 0 && i < ra.count; ++i) {
+        if (a[i].x != b[i].x || a[i].y != b[i].y ||
+            std::memcmp(&a[i].response, &b[i].response, sizeof(float)) != 0)
+            bad = 1;
+    }
+    return bad;
+}
+
+} // namespace
+
+BINCV_TEST(Corner, OnDemandGradient_IdenticalToStoredDerivatives) {
+    const Frame frames[] = {
+        checkerboardFrame(kWideW, kWideH, 1), checkerboardFrame(kWideW, kWideH, 4),
+        stripeFrame(kWideW, kWideH, 3),       uniformFrame(kNarrowW, kNarrowH, 1),
+        dotFrame(kWideW, kWideH),             diagonalFrame(kWideW, kWideH),
+        randomFrame(kWideW, kWideH, 0x51ED5EEDULL), randomFrame(kNarrowW, kNarrowH, 0xC0FFEEULL),
+    };
+    const BorderType borders[] = {bincv::BORDER_REFLECT_101, bincv::BORDER_REPLICATE,
+                                  bincv::BORDER_CONSTANT, bincv::BORDER_WRAP};
+    size_t bad = 0, cells = 0, multiPass = 0;
+    for (const Frame& f : frames) {
+        const BinMat<uint32_t> bits = pack<uint32_t>(f);
+        for (BorderType border : borders) {
+            for (const SelectionParams& sp : kStreamParams) {
+                for (size_t poolSize : {size_t{3}, size_t{17}, size_t{4096}}) {
+                    bad += onDemandCornerMismatches<1>(bits, border, sp, poolSize, {}, cells,
+                                                       multiPass);
+                }
+            }
+        }
+        // A mask over the left half, and a two-bit source built from two frames.
+        BinMat<uint32_t> mask(f.width, f.height);
+        for (int y = 0; y < f.height; ++y)
+            for (int x = 0; x < f.width / 2; ++x) mask.set(y, x, 1u);
+        bad += onDemandCornerMismatches<1>(bits, bincv::BORDER_REFLECT_101, kStreamParams[0], 64,
+                                           mask.constView(), cells, multiPass);
+        bincv::QuantMat<2, uint32_t> two(f.width, f.height);
+        for (int y = 0; y < f.height; ++y)
+            for (int x = 0; x < f.width; ++x)
+                two.set(y, x, static_cast<unsigned>(f.at(y, x)) + static_cast<unsigned>((x / 5 + y / 3) % 2) * 2u);
+        bad += onDemandCornerMismatches<2>(two, bincv::BORDER_REFLECT_101, kStreamParams[0], 64,
+                                           {}, cells, multiPass);
+    }
+    std::printf(" on-demand gradient == stored derivatives: %zu cells (%zu multi-sweep), "
+                "%zu differ\n",
+                cells, multiPass, bad);
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+    BINCV_CHECK(multiPass > 0);
+}
+
+// ---------------------------------------------------------------------------
 // The 3x3 response's square root from a table (`impl::minEigenValue3x3`) against
 // `minEigenValue`'s own root. A 3x3 window's counts are xx, yy in [0, 9] and xy in
 // [-9, 9], so every input there is is checked here, bit for bit -- which reaches

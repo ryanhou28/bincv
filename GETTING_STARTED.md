@@ -209,11 +209,17 @@ Both have a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTabl
 so one image can time both arms, and both give bit-identical output. They change inline
 bodies, so like `BINCV_NO_NEON` a define must be the same in every translation unit.
 
-**Two entry points exist for a frame that does not fit.** `MedianEdgeStream`
+**Three things exist for a frame that does not fit.** `MedianEdgeStream`
 (`ops/medianEdgeStream.hpp`) runs the sensor stage on rows as a camera delivers them, in
 a few rows of scratch instead of two whole 8-bit frames. `goodFeaturesToTrackStreaming`
 takes a candidate pool of the size you choose and returns the same corners an
-unbounded one would, sweeping again when the pool is outrun.
+unbounded one would, sweeping again when the pool is outrun. And the derivative planes
+need not be stored at all: `LKLevelOnDemand` / `LKLevelsOnDemand`
+(`ops/opticalFlowOnDemand.hpp`) track from the two pyramids alone, computing each
+window's derivatives as they stage it, and `goodFeaturesToTrackStreaming` over a
+`GradientSource` derives the detector's gradient row by row. Both give the stored
+form's output bit for bit; on the Cortex-M7 tracker they remove 275,040 of 512,600
+bytes at no measurable cost in time ([targets/stm32h753](targets/stm32h753/README.md)).
 
 ### Building for Cortex-M7
 
