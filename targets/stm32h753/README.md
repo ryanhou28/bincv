@@ -581,28 +581,31 @@ on the stack.
 
 ### What runs
 
-`findEssentialMat` ([ops/essential.hpp](../../include/bincv/ops/essential.hpp)) over three
-scenes of [benchmark/essential_scene.hpp](../../benchmark/essential_scene.hpp): points seen
-by two cameras a known rotation and translation apart, in normalised coordinates, with a
-planted share of outliers — 200 and 500 correspondences at 30%, 1,000 at 50% — threshold
-0.002 and a cap of 500 iterations. The scene is built without trigonometry, so the board and
-the host start from the same bits. Double precision throughout, on the M7's double-precision
-FPU; the solver's working set is stack, the inlier flags two bits per correspondence of
-caller scratch.
+`findEssentialMat` ([ops/essential.hpp](../../include/bincv/ops/essential.hpp)) — and
+`findEssentialMatRealRoots`, the same estimation over a minimal solver built for a part like
+this one — over three scenes of
+[benchmark/essential_scene.hpp](../../benchmark/essential_scene.hpp): points seen by two
+cameras a known rotation and translation apart, in normalised coordinates, with a planted
+share of outliers — 200 and 500 correspondences at 30%, 1,000 at 50% — threshold 0.002 and a
+cap of 500 iterations. The scene is built without trigonometry, so the board and the host
+start from the same bits. Double precision throughout, on the M7's double-precision FPU; the
+solver's working set is stack, the inlier flags two bits per correspondence of caller
+scratch.
 
 ### Against the host
 
 | | 200 at 30% | 500 at 30% | 1,000 at 50% |
 |---|---|---|---|
-| iterations, inliers | 26, 140 | 25, 352 | 134, 508 |
-| inlier mask | identical | identical | identical |
+| iterations, inliers — both solvers | 26, 140 | 25, 352 | 134, 508 |
+| inlier mask — both solvers | identical | identical | identical |
 | the model, largest difference from the host's | 5.6e-15 | 4.5e-12 | 4.8e-11 |
+| the same, real-root solver | 6.2e-15 | 4.5e-12 | 4.8e-11 |
 
-**The model differs in its last bits, and the reason is the compiler, not the kernel.** GCC's
-default `-ffp-contract=fast` fuses the solver's multiply-adds into the M7's `vfma.f64`, and
-the x86-64 baseline has no FMA to fuse them into. Built with `-ffp-contract=off`, the board's
-model is the host's to the bit in all three scenes, as is everything else — newlib's `cos`,
-`sin` and `log` gave glibc's answers here
+**The models differ in their last bits, and the reason is the compiler, not the kernel.**
+GCC's default `-ffp-contract=fast` fuses the solvers' multiply-adds into the M7's
+`vfma.f64`, and the x86-64 baseline has no FMA to fuse them into. Built with
+`-ffp-contract=off`, both solvers' models are the host's to the bit in all three scenes, as
+is everything else — newlib's `cos`, `sin` and `log` gave glibc's answers here
 ([default](../../docs/reports/logs/m7-essential-cortex-m7-launches.log),
 [contraction off](../../docs/reports/logs/m7-essential-nofpcontract-cortex-m7-launches.log);
 `scripts/m7_dump_compare.py` against `m7_reference essential --dump`).
@@ -613,20 +616,62 @@ Cycles for the whole estimation, median of 3:
 
 | | 200 at 30% | 500 at 30% | 1,000 at 50% |
 |---|---|---|---|
-| published scoring | 78,479,451 | 139,771,918 | 374,389,844 |
-| squared test | 78,047,944 | 138,683,737 | 364,230,416 |
-| | 1.006× | 1.008× | 1.028× |
-| ms at 480 MHz | 162.6 | 288.9 | 758.8 |
+| published, scoring by the residual | 78,484,471 | 139,771,909 | 374,419,731 |
+| published, the squared test | 78,048,703 | 138,679,383 | 364,232,738 |
+| **real-root solver**, the squared test | **15,524,872** | **22,436,018** | **175,261,378** |
+| ms at 480 MHz, squared test: published → real-root | 162.6 → **32.3** | 288.9 → **46.7** | 758.8 → **365.1** |
 
-**The minimal solver is the cost, and its root finder is most of that.** An iteration costs
-2.7 to 5.6 million cycles here, most of it the five-point solve, and the solve's cost moves
-with the sample: its root finder iterates until it converges, 92 to 208 passes a solve on
-these scenes. On the host's instruction counts over the three scenes the solver is 73% of the
+And their parts, from the same log: a five-point solve, over 200 samples of the last scene
+drawn five at a time, costs 3,385,397 cycles published and **419,784** real-root — **8.06×**;
+scoring costs 244 cycles a correspondence by the residual and 193 by the squared test.
+
+**The published solver's cost is its root finder.** The solve's cost moves with the sample,
+because its root finder iterates until it converges, 92 to 208 passes a solve on these
+scenes. On the host's instruction counts over the three scenes the solver is 73% of the
 estimation and scoring 23%, and inside the solver the Aberth–Ehrlich iteration that finds
 the degree-10 polynomial's roots is 80% — all ten roots, complex, to a step of 1e-14, with
-two double divides per pair of roots per pass. Nothing that changes that arithmetic can give
-the published answer bit for bit, so nothing here does; a solver that finds only the real
-roots would be a different trade, and is not made here.
+two double divides per pair of roots per pass — and the Jacobi eigendecomposition that
+recovers each root's `(x, y)` is 15%.
+
+### A solver built for the part
+
+`fivePointEssentialRealRoots` shares the published solver's system — the nullspace, the ten
+cubics, `det M(z)` from the same eleven nodes, one source for both — and replaces the two
+steps that are nearly all of its cost:
+
+- **Only the real roots, isolated between the derivative's.** Between two consecutive real
+  roots of `p'`, `p` is monotone, so it holds one root there exactly when it changes sign.
+  The highest derivative is linear; each lower one's roots are bracketed by the one above,
+  and polished by Newton's method held inside the bracket. About 10 n² operations for
+  degree n, where the simultaneous iteration costs that per pass. A tangent root, which
+  changes no sign, is looked for at a root of `p'` and accepted by the published finder's
+  own near-real test, translated.
+- **Each root's `(x, y)` from one elimination** with complete pivoting on `M(z)` itself,
+  instead of an eigendecomposition of `M^T M`, which squares the condition number.
+- Its Chebyshev nodes are tabulated, so it links no trigonometry.
+
+**Its accuracy is its own, and it is held to every bound the published solver is held to.**
+Every accuracy case in `tests/test_essential.cpp` runs for both solvers at the same bounds,
+and they return the same figures: the planted E recovered on 196 of 200 samples, 4.70
+solutions a call, every solution epipolar; 25 of 25 scenes cleanly separated; inlier counts
+within 5% of `cv::findEssentialMat` on 12 of 12 scenes and on three degenerate geometries;
+epipolar error under noise 0.000409 against OpenCV's 0.000392. Solution by solution, the two
+agree wherever the problem is well conditioned — every published solution within 1e-10 of
+satisfying the essential constraints has a real-root counterpart within 4.1e-9 on x86-64
+and 1.5e-7 on aarch64 — and
+differ, both inaccurate, where it is not: 2.3% of solutions on planted poses
+(`Essential.RealRootSolverAgreesWhereWellConditioned`). On the board's three scenes the two
+find the same inliers in the same iterations.
+
+Its stack is the published solver's, 5,512 bytes on this core — the peak is the cubic
+construction the two share — and its code 20,896 bytes against 21,316, with no `cos` or
+`sin` behind it. The published solver's own code is untouched: it compiles to the same
+instructions as before on x86-64 and aarch64.
+
+**With the solve cheap, scoring is what is left.** At 1,000 correspondences about 110 of the
+real-root estimation's 175 million cycles are scoring — 134 iterations, about 4.2 hypotheses
+each (848 solutions in the 200 samples above), 1,000 correspondences, 193 cycles a test —
+and 56 million the solves.
 
 **The squared test** (`BINCV_RANSAC_SQUARED_TEST`, M-profile, `impl::ransacSquaredTestEnabled`)
 decides each point's `residual < threshold` on squares wherever the squares decide it —

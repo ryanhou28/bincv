@@ -15,6 +15,7 @@
 // Ground truth is a planted E = [t]x R, so "correct" is checkable without an
 // oracle. cv::findEssentialMat is compared against as well, but as a second
 // opinion rather than as the definition.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -179,9 +180,34 @@ double distanceToPlanted(const EssentialMatrix& got, const double planted[9]) {
     return std::sqrt(plus < minus ? plus : minus);
 }
 
+/// @brief The published solver and the one built for a small core behind one spelling,
+/// so that each accuracy test below holds both to the same bound.
+template <bool RealRoots>
+int solveFive(const Point2f* from, const Point2f* to, EssentialMatrix* out) {
+    if constexpr (RealRoots) {
+        return fivePointEssentialRealRoots(from, to, out);
+    } else {
+        return fivePointEssential(from, to, out);
+    }
+}
+template <bool RealRoots>
+RansacResult estimate(const Point2f* from, const Point2f* to, size_t count,
+                      const RansacParams& params, RansacScratch scratch, EssentialMatrix* model,
+                      uint8_t* mask = nullptr) {
+    if constexpr (RealRoots) {
+        return findEssentialMatRealRoots(from, to, count, params, scratch, model, mask);
+    } else {
+        return findEssentialMat(from, to, count, params, scratch, model, mask);
+    }
+}
+constexpr const char* solverName(bool realRoots) {
+    return realRoots ? "real-root solver" : "published solver";
+}
+
 } // namespace
 
-BINCV_TEST(Essential, FivePointRecoversThePlantedMatrix) {
+template <bool RealRoots>
+void FivePointRecoversThePlantedMatrixBody() {
     Rng rng(0x5EED5);
     const int kTrials = 200;
     int recovered = 0, everySolutionEpipolar = 0, solutionsTotal = 0, solved = 0;
@@ -192,7 +218,7 @@ BINCV_TEST(Essential, FivePointRecoversThePlantedMatrix) {
         for (int i = 0; i < 5; ++i) project(pose, rng, from[i], to[i]);
 
         EssentialMatrix sols[10];
-        const int n = fivePointEssential(from, to, sols);
+        const int n = solveFive<RealRoots>(from, to, sols);
         solutionsTotal += n;
         BINCV_CHECK(n >= 0 && n <= 10);
         if (n >= 1) ++solved;
@@ -226,13 +252,21 @@ BINCV_TEST(Essential, FivePointRecoversThePlantedMatrix) {
     // Float input coordinates bound how closely the planted E can be recovered;
     // see the note on EssentialMatrix.
     BINCV_CHECK(recovered >= kTrials - 4);
+    std::printf(" [%s]", solverName(RealRoots));
     std::printf(" essential: solutions found on %d/%d samples, planted E recovered %d/%d,"
                 " every solution epipolar %d/%d, %.2f solutions per call\n",
                 solved, kTrials, recovered, kTrials, everySolutionEpipolar, kTrials,
                 static_cast<double>(solutionsTotal) / kTrials);
 }
+BINCV_TEST(Essential, FivePointRecoversThePlantedMatrix) {
+    FivePointRecoversThePlantedMatrixBody<false>();
+}
+BINCV_TEST(Essential, FivePointRecoversThePlantedMatrix_RealRoots) {
+    FivePointRecoversThePlantedMatrixBody<true>();
+}
 
-BINCV_TEST(Essential, RansacSeparatesInliersFromOutliers) {
+template <bool RealRoots>
+void RansacSeparatesInliersFromOutliersBody() {
     Rng rng(0xC0FFEE);
     const int kScenes = 25, kPoints = 300;
     int clean = 0;
@@ -262,7 +296,7 @@ BINCV_TEST(Essential, RansacSeparatesInliersFromOutliers) {
         params.maxIterations = 500;
         params.seed = 7;
         EssentialMatrix e;
-        const RansacResult r = findEssentialMat(from.data(), to.data(),
+        const RansacResult r = estimate<RealRoots>(from.data(), to.data(),
                                                 static_cast<size_t>(kPoints), params, scratch, &e,
                                                 mask.data());
         BINCV_CHECK_EQ(r.found, true);
@@ -281,8 +315,101 @@ BINCV_TEST(Essential, RansacSeparatesInliersFromOutliers) {
     }
 
     BINCV_CHECK_EQ(clean, kScenes);
+    std::printf(" [%s]", solverName(RealRoots));
     std::printf(" essential: %d/%d scenes clean, mean inlier precision %.4f recall %.4f\n",
                 clean, kScenes, sumPrecision / kScenes, sumRecall / kScenes);
+}
+BINCV_TEST(Essential, RansacSeparatesInliersFromOutliers) {
+    RansacSeparatesInliersFromOutliersBody<false>();
+}
+BINCV_TEST(Essential, RansacSeparatesInliersFromOutliers_RealRoots) {
+    RansacSeparatesInliersFromOutliersBody<true>();
+}
+
+namespace {
+/// @brief How far `e` is from being an essential matrix: the larger of |det E| and the
+/// largest entry of `2 E E^T E - tr(E E^T) E`, at unit norm.
+double essentialConstraint(const EssentialMatrix& m) {
+    double e[3][3], eet[3][3];
+    for (int i = 0; i < 9; ++i) e[i / 3][i % 3] = m.m[i];
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            eet[i][j] = 0.0;
+            for (int k = 0; k < 3; ++k) eet[i][j] += e[i][k] * e[j][k];
+        }
+    }
+    const double tr = eet[0][0] + eet[1][1] + eet[2][2];
+    double worst = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            double acc = 0.0;
+            for (int k = 0; k < 3; ++k) acc += eet[i][k] * e[k][j];
+            worst = std::max(worst, std::fabs(2.0 * acc - tr * e[i][j]));
+        }
+    }
+    const double det = e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                       e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                       e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]);
+    return std::max(worst, std::fabs(det));
+}
+/// @brief The largest entry of `a - b` or `a + b`, whichever is smaller: E is defined
+/// only up to sign.
+double signlessDistance(const EssentialMatrix& a, const EssentialMatrix& b) {
+    double plus = 0.0, minus = 0.0;
+    for (int i = 0; i < 9; ++i) {
+        plus = std::max(plus, std::fabs(a.m[i] - b.m[i]));
+        minus = std::max(minus, std::fabs(a.m[i] + b.m[i]));
+    }
+    return std::min(plus, minus);
+}
+} // namespace
+
+BINCV_TEST(Essential, RealRootSolverAgreesWhereWellConditioned) {
+    // The two solvers share the system and differ in how they find its roots, so where
+    // the problem is well conditioned they must give the same matrices to roundoff, and
+    // where it is not, both answers are poor and may differ. "Well conditioned" is read
+    // off the published solver's own answer: an E within 1e-10 of satisfying the
+    // essential constraints. Every such solution must have a counterpart from the
+    // real-root solver within 1e-6; everything else is reported, not judged.
+    Rng rng(0x2EA1);
+    size_t accurate = 0, accurateMatched = 0, published = 0, realRoots = 0, unmatched = 0;
+    // Solutions far from satisfying the essential constraints: a spurious root lands
+    // there, and the epipolar residual cannot see it -- every combination of the
+    // nullspace basis satisfies the five epipolar constraints by construction.
+    size_t poorPublished = 0, poorRealRoots = 0;
+    double worstAccurate = 0.0;
+    for (int trial = 0; trial < 3000; ++trial) {
+        const Pose pose = makePose(rng, 0.5);
+        Point2f from[5], to[5];
+        for (int i = 0; i < 5; ++i) project(pose, rng, from[i], to[i]);
+        EssentialMatrix a[10], b[10];
+        const int na = fivePointEssential(from, to, a);
+        const int nb = fivePointEssentialRealRoots(from, to, b);
+        published += static_cast<size_t>(na);
+        realRoots += static_cast<size_t>(nb);
+        for (int j = 0; j < nb; ++j) poorRealRoots += essentialConstraint(b[j]) > 1e-6 ? 1u : 0u;
+        for (int i = 0; i < na; ++i) {
+            poorPublished += essentialConstraint(a[i]) > 1e-6 ? 1u : 0u;
+            double best = 1e30;
+            for (int j = 0; j < nb; ++j) best = std::min(best, signlessDistance(a[i], b[j]));
+            if (best >= 1e-6) ++unmatched;
+            if (essentialConstraint(a[i]) < 1e-10) {
+                ++accurate;
+                if (best < 1e-6) ++accurateMatched;
+                worstAccurate = std::max(worstAccurate, best);
+            }
+        }
+    }
+    BINCV_CHECK_EQ(accurateMatched, accurate);
+    BINCV_CHECK(accurate > published / 2);
+    // No more poor solutions than the published solver returns, with a margin for the
+    // ill-conditioned samples on which the two differ.
+    BINCV_CHECK(poorRealRoots <= poorPublished + poorPublished / 10 + 5);
+    std::printf(" essential: solutions more than 1e-6 from essential -- published %zu,"
+                " real-root %zu\n", poorPublished, poorRealRoots);
+    std::printf(" essential: %zu published solutions, %zu real-root; of the %zu accurate to"
+                " 1e-10, all within %.1e of a real-root one; %zu of all unmatched to 1e-6\n",
+                published, realRoots, accurate, worstAccurate, unmatched);
 }
 
 #if BINCV_RANSAC_SQUARED_TEST
@@ -392,7 +519,8 @@ BINCV_TEST(Essential, SquaredTestScoringIsBitExact) {
 }
 #endif
 
-BINCV_TEST(Essential, DeterministicAndDegenerate) {
+template <bool RealRoots>
+void DeterministicAndDegenerateBody() {
     Rng rng(0xD00D);
     const Pose pose = makePose(rng, 0.4);
     const int kPoints = 120;
@@ -406,9 +534,9 @@ BINCV_TEST(Essential, DeterministicAndDegenerate) {
     params.threshold = 0.002;
 
     EssentialMatrix e1, e2;
-    const RansacResult r1 = findEssentialMat(from.data(), to.data(),
+    const RansacResult r1 = estimate<RealRoots>(from.data(), to.data(),
                                              static_cast<size_t>(kPoints), params, scratch, &e1);
-    const RansacResult r2 = findEssentialMat(from.data(), to.data(),
+    const RansacResult r2 = estimate<RealRoots>(from.data(), to.data(),
                                              static_cast<size_t>(kPoints), params, scratch, &e2);
     BINCV_CHECK_EQ(r1.inliers, r2.inliers);
     BINCV_CHECK_EQ(r1.iterations, r2.iterations);
@@ -417,7 +545,7 @@ BINCV_TEST(Essential, DeterministicAndDegenerate) {
     // Fewer than five correspondences: no model, output untouched.
     EssentialMatrix untouched;
     untouched.m[4] = 42.0;
-    const RansacResult few = findEssentialMat(from.data(), to.data(), 4, params, scratch,
+    const RansacResult few = estimate<RealRoots>(from.data(), to.data(), 4, params, scratch,
                                               &untouched);
     BINCV_CHECK_EQ(few.found, false);
     BINCV_CHECK_EQ(untouched.m[4], 42.0);
@@ -430,12 +558,20 @@ BINCV_TEST(Essential, DeterministicAndDegenerate) {
         sameTo[i] = Point2f{0.31f, -0.08f};
     }
     EssentialMatrix sols[10];
-    const int n = fivePointEssential(same, sameTo, sols);
+    const int n = solveFive<RealRoots>(same, sameTo, sols);
     BINCV_CHECK(n >= 0 && n <= 10);
+    std::printf(" [%s]", solverName(RealRoots));
     std::printf(" essential: deterministic across runs; degenerate five-point returns %d\n", n);
 }
+BINCV_TEST(Essential, DeterministicAndDegenerate) {
+    DeterministicAndDegenerateBody<false>();
+}
+BINCV_TEST(Essential, DeterministicAndDegenerate_RealRoots) {
+    DeterministicAndDegenerateBody<true>();
+}
 
-BINCV_TEST(Essential, DegenerateGeometryStaysFiniteAndNormalised) {
+template <bool RealRoots>
+void DegenerateGeometryStaysFiniteAndNormalisedBody() {
     // Pure rotation admits NO essential matrix -- E = [t]x R with t = 0 is the zero
     // matrix -- and a tiny baseline is arbitrarily close to that. A planar scene
     // leaves the five-point problem with a family of solutions rather than a point.
@@ -454,7 +590,8 @@ BINCV_TEST(Essential, DegenerateGeometryStaysFiniteAndNormalised) {
         p.threshold = 0.002;
         p.maxIterations = 500;
         EssentialMatrix e{};
-        const RansacResult r = findEssentialMat(a.data(), b.data(), a.size(), p, scratch, &e);
+        const RansacResult r =
+            estimate<RealRoots>(a.data(), b.data(), a.size(), p, scratch, &e);
         double fro = 0.0;
         for (int i = 0; i < 9; ++i) {
             BINCV_CHECK(std::isfinite(e.m[i]));
@@ -467,6 +604,12 @@ BINCV_TEST(Essential, DegenerateGeometryStaysFiniteAndNormalised) {
         }
         BINCV_CHECK_EQ(r.refined, false);
     }
+}
+BINCV_TEST(Essential, DegenerateGeometryStaysFiniteAndNormalised) {
+    DegenerateGeometryStaysFiniteAndNormalisedBody<false>();
+}
+BINCV_TEST(Essential, DegenerateGeometryStaysFiniteAndNormalised_RealRoots) {
+    DegenerateGeometryStaysFiniteAndNormalisedBody<true>();
 }
 
 BINCV_TEST(Essential, AllocatesNothing) {
@@ -498,7 +641,8 @@ BINCV_TEST(Essential, AllocatesNothing) {
 }
 
 #ifdef BINCV_WITH_OPENCV
-BINCV_TEST(Essential, AgreesWithOpenCV) {
+template <bool RealRoots>
+void AgreesWithOpenCVBody() {
     Rng rng(0xBEEF77);
     const int kScenes = 12, kPoints = 260;
     int agreed = 0;
@@ -526,7 +670,7 @@ BINCV_TEST(Essential, AgreesWithOpenCV) {
         params.threshold = 0.002;
         params.maxIterations = 500;
         EssentialMatrix e;
-        const RansacResult r = findEssentialMat(from.data(), to.data(),
+        const RansacResult r = estimate<RealRoots>(from.data(), to.data(),
                                                 static_cast<size_t>(kPoints), params, scratch, &e,
                                                 mask.data());
 
@@ -544,11 +688,19 @@ BINCV_TEST(Essential, AgreesWithOpenCV) {
     }
 
     BINCV_CHECK_EQ(agreed, kScenes);
+    std::printf(" [%s]", solverName(RealRoots));
     std::printf(" essential: inlier counts agree with cv::findEssentialMat on %d/%d scenes\n",
                 agreed, kScenes);
 }
+BINCV_TEST(Essential, AgreesWithOpenCV) {
+    AgreesWithOpenCVBody<false>();
+}
+BINCV_TEST(Essential, AgreesWithOpenCV_RealRoots) {
+    AgreesWithOpenCVBody<true>();
+}
 
-BINCV_TEST(Essential, DegenerateGeometryIsNoWorseThanOpenCV) {
+template <bool RealRoots>
+void DegenerateGeometryIsNoWorseThanOpenCVBody() {
     // The bar for a Tier 2 drop-in on a degenerate configuration is not "gets it
     // right" -- there is no right answer for pure rotation -- but "does not behave
     // worse than the call it stands in for". Both find a large consensus set on all
@@ -570,7 +722,8 @@ BINCV_TEST(Essential, DegenerateGeometryIsNoWorseThanOpenCV) {
         p.threshold = 0.002;
         p.maxIterations = 500;
         EssentialMatrix e{};
-        const RansacResult r = findEssentialMat(a.data(), b.data(), a.size(), p, scratch, &e);
+        const RansacResult r =
+            estimate<RealRoots>(a.data(), b.data(), a.size(), p, scratch, &e);
         cv::Mat mask;
         const cv::Mat cvE = cv::findEssentialMat(ca, cb, 1.0, cv::Point2d(0, 0), cv::RANSAC,
                                                  0.99, 0.002, mask);
@@ -582,12 +735,20 @@ BINCV_TEST(Essential, DegenerateGeometryIsNoWorseThanOpenCV) {
         // searches over a degenerate family land on different members of it.
         const double gap = std::fabs(static_cast<double>(cvIn) - static_cast<double>(r.inliers));
         BINCV_CHECK(gap <= 0.05 * static_cast<double>(a.size()));
+        std::printf(" [%s]", solverName(RealRoots));
         std::printf(" essential: %-14s binCV %zu inliers, OpenCV %zu"
                     " (neither detects the degeneracy)\n", names[ki], r.inliers, cvIn);
     }
 }
+BINCV_TEST(Essential, DegenerateGeometryIsNoWorseThanOpenCV) {
+    DegenerateGeometryIsNoWorseThanOpenCVBody<false>();
+}
+BINCV_TEST(Essential, DegenerateGeometryIsNoWorseThanOpenCV_RealRoots) {
+    DegenerateGeometryIsNoWorseThanOpenCVBody<true>();
+}
 
-BINCV_TEST(Essential, ModelAccuracyMatchesOpenCVUnderNoise) {
+template <bool RealRoots>
+void ModelAccuracyMatchesOpenCVUnderNoiseBody() {
     // Neither side refits here -- cv::findEssentialMat returns what its RANSAC
     // registrator found, exactly as this driver does -- so this asks whether the
     // five-point solve itself is as good, on data that is not exact.
@@ -628,7 +789,7 @@ BINCV_TEST(Essential, ModelAccuracyMatchesOpenCVUnderNoise) {
         p.threshold = 0.002;
         p.maxIterations = 500;
         EssentialMatrix e;
-        const RansacResult r = findEssentialMat(from.data(), to.data(), n, p, scratch, &e);
+        const RansacResult r = estimate<RealRoots>(from.data(), to.data(), n, p, scratch, &e);
         cv::Mat mask;
         const cv::Mat cvE = cv::findEssentialMat(cf, ct, 1.0, cv::Point2d(0, 0), cv::RANSAC,
                                                  0.99, 0.002, mask);
@@ -655,8 +816,15 @@ BINCV_TEST(Essential, ModelAccuracyMatchesOpenCVUnderNoise) {
     // Two different random draws, so not equality. The claim is that binCV is not
     // worse, with a band for the difference in hypotheses each happened to see.
     BINCV_CHECK(binErr <= cvErr * 1.5);
+    std::printf(" [%s]", solverName(RealRoots));
     std::printf(" essential: epipolar error on clean pairs -- binCV %.6f,"
                 " OpenCV %.6f (0.001 inlier noise)\n", binErr, cvErr);
+}
+BINCV_TEST(Essential, ModelAccuracyMatchesOpenCVUnderNoise) {
+    ModelAccuracyMatchesOpenCVUnderNoiseBody<false>();
+}
+BINCV_TEST(Essential, ModelAccuracyMatchesOpenCVUnderNoise_RealRoots) {
+    ModelAccuracyMatchesOpenCVUnderNoiseBody<true>();
 }
 #endif  // BINCV_WITH_OPENCV
 

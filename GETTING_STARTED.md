@@ -216,6 +216,14 @@ Each has a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTable
 arms, and each gives the published code's output bit for bit. They change inline bodies,
 so like `BINCV_NO_NEON` a define must be the same in every translation unit.
 
+**RANSAC's five-point solver has a second form built for such a part.**
+`findEssentialMatRealRoots` (`fivePointEssentialRealRoots`, `EssentialModelRealRoots`) finds
+only the real roots of the solver's degree-10 polynomial, isolating them between its
+derivative's, where `findEssentialMat` finds all ten complex ones together: on the Cortex-M7
+a solve is 8× faster, an estimation 2× to 6×, in the same stack. Its answers are not the
+published solver's bit for bit — it is held to every accuracy bound that solver is, and on
+the measured scenes it finds the same inliers — so it is a separate name rather than an arm.
+
 **Three things exist for a frame that does not fit.** `MedianEdgeStream`
 (`ops/medianEdgeStream.hpp`) runs the sensor stage on rows as a camera delivers them, in
 a few rows of scratch instead of two whole 8-bit frames. `goodFeaturesToTrackStreaming`

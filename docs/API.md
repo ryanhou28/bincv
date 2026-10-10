@@ -29,7 +29,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/derivative.hpp`](#opsderivativehpp) — 4 entries
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 14 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 4 entries
-- [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
+- [`ops/essential.hpp`](#opsessentialhpp) — 10 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 2 entries
 - [`ops/logic.hpp`](#opslogichpp) — 4 entries
 - [`ops/medianEdgeStream.hpp`](#opsmedianEdgeStreamhpp) — 5 entries
@@ -274,12 +274,15 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `EssentialMatrix` *(struct)* | 2 | A 3x3 essential matrix, row-major |
-| `essentialSolverStackBytes` | 3 | Stack the five-point solver uses for one call, in bytes |
+| `essentialSolverStackBytes` | 3 | Stack either five-point solver uses for one call, in bytes |
 | `fivePointEssential` | 2 | Up to ten essential matrices through five correspondences |
+| `fivePointEssentialRealRoots` | 2 | Up to ten essential matrices through five correspondences, by a solver built for a small core |
 | `EssentialModel` *(struct)* | 2 | The five-point model policy, for `bincv::ransac` |
 | `refine` | — | No refit |
 | `residual` | — | Sampson distance -- the first-order approximation of geometric reprojection error, which is what `cv::findEssentialMat`'s threshold is in |
 | `findEssentialMat` | 2 | `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role over caller-owned scratch |
+| `EssentialModelRealRoots` *(struct)* | 2 | The five-point model policy over `fivePointEssentialRealRoots`, for `bincv::ransac` |
+| `findEssentialMatRealRoots` | 2 | `findEssentialMat` with the minimal solver built for a small core |
 
 ## `ops/fast.hpp`
 

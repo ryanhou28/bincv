@@ -126,8 +126,12 @@ void runSize(size_t count, int outlierPct) {
 
     std::printf("\n================ %zu correspondences, %d%% outliers ================\n",
                 count, outlierPct);
-    std::printf(" planted inliers %zu | binCV %zu (%d iterations) | OpenCV %zu\n",
-                s.inliers, r.inliers, r.iterations, cvInliers);
+    EssentialMatrix modelRR;
+    const bincv::RansacResult rRR = bincv::findEssentialMatRealRoots(
+        s.from.data(), s.to.data(), count, p, scratch, &modelRR, mask.data());
+    std::printf(" planted inliers %zu | binCV %zu (%d iterations) | binCV, real-root solver"
+                " %zu (%d iterations) | OpenCV %zu\n",
+                s.inliers, r.inliers, r.iterations, rRR.inliers, rRR.iterations, cvInliers);
     if (!r.found || cvE.empty()) {
         std::printf(" ONE SIDE FOUND NO MODEL -- no ratio below is meaningful.\n");
         return;
@@ -169,6 +173,12 @@ void runSize(size_t count, int outlierPct) {
                                s.from.data(), s.to.data(), count, p, scratch, &m2, nullptr);
                            measure::g_sink += rr.inliers;
                        }});
+    benches.push_back({"binCV, real-root solver", [&](int) {
+                           EssentialMatrix m2;
+                           const bincv::RansacResult rr2 = bincv::findEssentialMatRealRoots(
+                               s.from.data(), s.to.data(), count, p, scratch, &m2, nullptr);
+                           measure::g_sink += rr2.inliers;
+                       }});
     benches.push_back({"cv::findEssentialMat", [&](int) {
                            cv::Mat mk;
                            const cv::Mat ee =
@@ -180,7 +190,8 @@ void runSize(size_t count, int outlierPct) {
     std::printf("\n %-24s %12s %8s %11s\n", "variant", "us/call", "spread", "vs OpenCV");
     for (size_t i = 0; i < benches.size(); ++i) {
         std::printf(" %-24s %12.1f %7.1f%% %10.2fx\n", benches[i].name.c_str(),
-                    t[i].medianNs / 1000.0, t[i].spreadPct(), t[1].medianNs / t[i].medianNs);
+                    t[i].medianNs / 1000.0, t[i].spreadPct(),
+                    t.back().medianNs / t[i].medianNs);
     }
 }
 
