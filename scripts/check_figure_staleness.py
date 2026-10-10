@@ -441,9 +441,9 @@ def deps_for(binary, rev=None):
             if roots:
                 roots.append(cand)
             break
-    if not roots:
-        return None
-    # the other translation units the build links into this binary
+    # the other translation units the build links into this binary -- and, for a
+    # target with no unit named after it (one source built twice under different
+    # definitions, as a firmware image's variants are), every unit it names
     for rel in LINK_LISTS:
         text = _text(rel, rev)
         if text is None:
@@ -456,6 +456,8 @@ def deps_for(binary, rev=None):
                     c = os.path.normpath(os.path.join(here, w))
                     if w.endswith(LINKED_EXTS) and _text(c, rev) is not None and c not in roots:
                         roots.append(c)
+    if not roots:
+        return None
     seen = set()
 
     def walk(rel):

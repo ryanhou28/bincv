@@ -196,18 +196,25 @@ on the Cortex-M7 they made the streaming sensor stage 13% slower and dense dispa
 Link word-wide ones — full newlib's, your vendor's, or
 [targets/stm32h753/string.c](targets/stm32h753/string.c).
 
-**A part without a population-count instruction gets arms of its own**, chosen from the
-compiler's macros — M-profile Arm, and RISC-V without Zbb — and compiled nowhere else, so
-the other targets' code is untouched:
+**A microcontroller gets arms of its own**, chosen from the compiler's macros and compiled
+nowhere else, so the other targets' code is untouched. The ones that replace a population
+count are selected wherever that count is software — M-profile Arm, and RISC-V without
+Zbb; the rest are M-profile only:
 
 | | what it does | on the Cortex-M7 ([targets/stm32h753](targets/stm32h753/README.md)) |
 |---|---|---|
-| `BINCV_LK_WINDOW_COUNT` | Lucas–Kanade counts down the window in byte lanes | tracking 4.58× faster; 13,556 B of flash |
-| `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table | detection 1.47× faster; 2,984 B of flash |
+| `BINCV_LK_WINDOW_COUNT` | Lucas–Kanade counts down the window in byte lanes | tracking 4.57× faster; 13,556 B of flash |
+| `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table (M-profile) | detection 1.47× faster; 2,984 B of flash |
+| `BINCV_STEREO_WINDOW_COUNT` | sparse stereo's refinement reads its windows once and counts down them in byte lanes | refinement 6.28× faster; 1,137 B |
+| `BINCV_STEREO_INTEGER_ROW_GATE` | sparse stereo's descriptor stage tests rows on the coordinates' bit patterns (M-profile) | descriptor stage 2.89× faster; 2,209 B |
+| `BINCV_RANSAC_SQUARED_TEST` | RANSAC decides an inlier on squares, taking the root only near the threshold (M-profile) | 1.006× to 1.028× faster; 505 B |
+| `BINCV_SUBPIX_REUSE` | `cornerSubPix` reuses the sums of an anchor it has already summed (M-profile) | 1.36× faster; 205 B |
 
-Both have a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTableEnabled`)
-so one image can time both arms, and both give bit-identical output. They change inline
-bodies, so like `BINCV_NO_NEON` a define must be the same in every translation unit.
+Each has a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTableEnabled`,
+`impl::stereoWindowCountEnabled`, `impl::stereoIntegerRowGateEnabled`,
+`impl::ransacSquaredTestEnabled`, `impl::subPixReuseEnabled`) so one image can time both
+arms, and each gives the published code's output bit for bit. They change inline bodies,
+so like `BINCV_NO_NEON` a define must be the same in every translation unit.
 
 **Three things exist for a frame that does not fit.** `MedianEdgeStream`
 (`ops/medianEdgeStream.hpp`) runs the sensor stage on rows as a camera delivers them, in

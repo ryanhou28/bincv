@@ -90,8 +90,54 @@
 #include "../core/error.hpp"
 #include "../core/types.hpp"
 
+// Scoring decided on squares: a model that can say "inlier or not" without its
+// residual's square root and divide supplies `isInlier`, and the driver asks it instead
+// of comparing `residual`. Selected, and COMPILED, only on M-profile, where a double
+// square root and divide are two of the slowest instructions the core has -- or
+// software, on one without a double-precision unit -- so every other target compiles
+// the scoring loop it always has. It changes inline bodies, so like BINCV_LK_WINDOW_COUNT it must
+// be the same in every translation unit of a program.
+#if defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
+#define BINCV_RANSAC_SQUARED_TEST_DEFAULT 1
+#else
+#define BINCV_RANSAC_SQUARED_TEST_DEFAULT 0
+#endif
+#if !defined(BINCV_RANSAC_SQUARED_TEST)
+#define BINCV_RANSAC_SQUARED_TEST BINCV_RANSAC_SQUARED_TEST_DEFAULT
+#endif
+#if BINCV_RANSAC_SQUARED_TEST_DEFAULT && !BINCV_RANSAC_SQUARED_TEST
+#error "BINCV_RANSAC_SQUARED_TEST=0 on a target whose default selects the squared test"
+#endif
+#if BINCV_RANSAC_SQUARED_TEST
+#include <type_traits>
+#include <utility>
+#endif
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
+
+#if BINCV_RANSAC_SQUARED_TEST
+namespace impl {
+
+/// @brief Whether the driver asks a model's `isInlier`. **INTERNAL.** Exists where the
+/// test is compiled (BINCV_RANSAC_SQUARED_TEST); on by default on M-profile. The tests
+/// and the board flip it to hold the two scorings to each other and to time them.
+inline bool& ransacSquaredTestEnabled() {
+    static bool on = BINCV_RANSAC_SQUARED_TEST_DEFAULT != 0;
+    return on;
+}
+
+/// @brief Whether `Model` supplies `isInlier(model, from, to, threshold)`. **INTERNAL.**
+template <typename Model, typename = void>
+struct RansacHasIsInlier : std::false_type {};
+template <typename Model>
+struct RansacHasIsInlier<
+    Model, decltype(static_cast<void>(Model::isInlier(
+               std::declval<const typename Model::Type&>(), Point2f(), Point2f(), 0.0f)))>
+    : std::true_type {};
+
+} // namespace impl
+#endif
 
 /// @brief The four parameters a RANSAC call takes. **API TIER 2** -- the same
 /// meanings `cv::estimateAffine2D` gives them.
@@ -330,6 +376,9 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                  "ransac: scratch capacity must cover every correspondence");
 
     const float threshold = static_cast<float>(params.threshold);
+#if BINCV_RANSAC_SQUARED_TEST
+    const bool squaredTest = impl::ransacSquaredTestEnabled();   // once a call, not a point
+#endif
     const size_t words = ransacScratchWords(count);
     uint32_t* bestFlags = scratch.words;
     uint32_t* candFlags = scratch.words + words;
@@ -361,7 +410,19 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
             for (size_t w = 0; w < words; ++w) candFlags[w] = 0;
             size_t support = 0;
             for (size_t i = 0; i < count; ++i) {
+#if BINCV_RANSAC_SQUARED_TEST
+                bool inlier;
+                if constexpr (impl::RansacHasIsInlier<Model>::value) {
+                    inlier = squaredTest
+                                 ? Model::isInlier(models[m], from[i], to[i], threshold)
+                                 : Model::residual(models[m], from[i], to[i]) < threshold;
+                } else {
+                    inlier = Model::residual(models[m], from[i], to[i]) < threshold;
+                }
+                if (inlier) {
+#else
                 if (Model::residual(models[m], from[i], to[i]) < threshold) {
+#endif
                     candFlags[i >> 5] |= static_cast<uint32_t>(1u) << (i & 31u);
                     ++support;
                 }

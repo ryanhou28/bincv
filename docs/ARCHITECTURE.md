@@ -280,8 +280,11 @@ drags in enough of newlib's stdio to want `_sbrk` at link time. No kernel alloca
 throws or does I/O, so neither reaches one.
 
 **Measured there:** the assembled feature tracker at 752×480, bit-identical to the x86-64
-run on every frame, in 512,600 bytes split across two RAM banks; the reductions and dense
-disparity; all at the part's full 480 MHz, with the clock checked against the board's
+run on every frame, in 512,600 bytes split across two RAM banks, or 238,712 with its
+derivatives made where they are read; the reductions and dense disparity; sparse stereo and
+sub-pixel corner refinement, bit-identical to the host, and the five-point RANSAC, identical
+in its masks and within 5e-11 in its model, the difference being the compiler's fused
+multiply-adds; all at the part's full 480 MHz, with the clock checked against the board's
 32.768 kHz crystal rather than assumed. **Not measured there:** any comparison against
 OpenCV or another library.
 

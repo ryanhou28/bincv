@@ -1,0 +1,99 @@
+# launch sweep -- 3 system resets of one firmware image
+# benchmark: bincv_m7_stereo STEREO
+# launches: 3
+# arch:     cortex-m7
+# host:     NUCLEO-H753ZI (STM32H753ZI)
+# compiler: arm-none-eabi-g++ (Arm GNU Toolchain 14.2.Rel1 (Build arm-14.52)) 14.2.1 20241119
+# commit:   564c6b3 (dirty)
+# sources:  benchmark/stereo_scene.hpp=bb8915e89177 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=36791a71f6a2 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=5bc9214bf036 include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/blockMatch.hpp=0b79f7e96fb5 include/bincv/ops/corner.hpp=273f10cd0fa0 include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/descriptor.hpp=0df3853b7f8b include/bincv/ops/opticalFlow.hpp=8a5615c33c3a include/bincv/ops/pack.hpp=6659758b8d64 include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/ops/stereo.hpp=be859d1af5ea include/bincv/quantMat.hpp=9571cce97de6 targets/stm32h753/bincv_m7_stereo.cpp=844c7a707e2e targets/stm32h753/board.c=ab5621aa2813 targets/stm32h753/board.h=3967e62ac995 targets/stm32h753/m7_harness.cpp=a308cda46d25 targets/stm32h753/m7_harness.hpp=4ae6cf7e2678 targets/stm32h753/startup.c=db5771d4d7f2 targets/stm32h753/string.c=85ca2e9bf016 targets/stm32h753/syscalls.c=cc70640148f0
+# image:    targets/stm32h753/bincv_m7_stereo.bin sha256 6a89956f0f20
+# board:    HELLO bincv-m7 image=stereo proto=1 clock_hz=480000000 baud=4000000 stack_bytes=16384 caches=ID
+# clock:    CLOCK configured_hz=480000000 measured_hz=480701881
+# date:     2026-10-09T18:44:03-07:00
+# Each launch is a system reset: caches, stack and statics start cold.
+# NO launch is discarded.
+
+### run 1
+CLOCK configured_hz=480000000 measured_hz=480898841
+OK
+-- digests, for the host's --
+  left bits        de2cfcf0
+  right bits       b14f0d2e
+  left brief       7b9ac9a8
+  right brief      7b9ac9a8
+  matches          fbc92496
+  coarse, float rows  8d261c55
+  coarse, integer rows  8d261c55
+  refined, per row  fbc92496
+  refined, staged   fbc92496
+  radius 12, per row  fbc92496
+  radius 12, staged   fbc92496
+  matched  500 of 500
+-- sparse stereo, 752x480, 500 keypoints, cycles, median of 5 --
+  brief, left frame  1710851 cyc
+  brief, right frame  1710409 cyc
+  descriptor stage, float rows  4740024 cyc
+  descriptor stage, integer rows  1642167 cyc
+  refinement stage, per row  8602033 cyc
+  refinement stage, staged  1369919 cyc
+  radius 12, per row  20135428 cyc
+  radius 12, arm declines  20140363 cyc
+  both stages  3014139 cyc
+OK
+### run 2
+CLOCK configured_hz=480000000 measured_hz=480858013
+OK
+-- digests, for the host's --
+  left bits        de2cfcf0
+  right bits       b14f0d2e
+  left brief       7b9ac9a8
+  right brief      7b9ac9a8
+  matches          fbc92496
+  coarse, float rows  8d261c55
+  coarse, integer rows  8d261c55
+  refined, per row  fbc92496
+  refined, staged   fbc92496
+  radius 12, per row  fbc92496
+  radius 12, staged   fbc92496
+  matched  500 of 500
+-- sparse stereo, 752x480, 500 keypoints, cycles, median of 5 --
+  brief, left frame  1710851 cyc
+  brief, right frame  1710409 cyc
+  descriptor stage, float rows  4740054 cyc
+  descriptor stage, integer rows  1642506 cyc
+  refinement stage, per row  8601483 cyc
+  refinement stage, staged  1369919 cyc
+  radius 12, per row  20134407 cyc
+  radius 12, arm declines  20140382 cyc
+  both stages  3014812 cyc
+OK
+### run 3
+CLOCK configured_hz=480000000 measured_hz=480770049
+OK
+-- digests, for the host's --
+  left bits        de2cfcf0
+  right bits       b14f0d2e
+  left brief       7b9ac9a8
+  right brief      7b9ac9a8
+  matches          fbc92496
+  coarse, float rows  8d261c55
+  coarse, integer rows  8d261c55
+  refined, per row  fbc92496
+  refined, staged   fbc92496
+  radius 12, per row  fbc92496
+  radius 12, staged   fbc92496
+  matched  500 of 500
+-- sparse stereo, 752x480, 500 keypoints, cycles, median of 5 --
+  brief, left frame  1710851 cyc
+  brief, right frame  1710409 cyc
+  descriptor stage, float rows  4740054 cyc
+  descriptor stage, integer rows  1642506 cyc
+  refinement stage, per row  8601493 cyc
+  refinement stage, staged  1369919 cyc
+  radius 12, per row  20134416 cyc
+  radius 12, arm declines  20140382 cyc
+  both stages  3014812 cyc
+OK
+
+# date:     2026-10-09T18:44:09-07:00
+# done

@@ -4,24 +4,24 @@
 # arch:     cortex-m7
 # host:     NUCLEO-H753ZI (STM32H753ZI)
 # compiler: arm-none-eabi-g++ (Arm GNU Toolchain 14.2.Rel1 (Build arm-14.52)) 14.2.1 20241119
-# commit:   0a28578 (dirty)
-# sources:  benchmark/frontend_pipeline.hpp=d4b6ba23a345 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=36791a71f6a2 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=5bc9214bf036 include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=9b3f14a4cb40 include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/edge.hpp=361fd538a5c0 include/bincv/ops/medianEdgeStream.hpp=42ea942cda04 include/bincv/ops/medianWide.hpp=ce1df9d13d48 include/bincv/ops/opticalFlow.hpp=8a5615c33c3a include/bincv/ops/pyramid.hpp=59388d95dccc include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/resample.hpp=d0db5aee157f include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6 targets/stm32h753/bincv_m7_track.cpp=bb30c9fa2ca0 targets/stm32h753/board.c=ab5621aa2813 targets/stm32h753/board.h=3967e62ac995 targets/stm32h753/m7_harness.cpp=a308cda46d25 targets/stm32h753/m7_harness.hpp=4ae6cf7e2678 targets/stm32h753/startup.c=db5771d4d7f2 targets/stm32h753/string.c=85ca2e9bf016 targets/stm32h753/syscalls.c=cc70640148f0
-# image:    targets/stm32h753/bincv_m7_track.bin sha256 59eb54f57cd5
+# commit:   564c6b3 (dirty)
+# sources:  benchmark/frontend_pipeline.hpp=7e99581de547 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=36791a71f6a2 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=5bc9214bf036 include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=273f10cd0fa0 include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/edge.hpp=361fd538a5c0 include/bincv/ops/medianEdgeStream.hpp=42ea942cda04 include/bincv/ops/medianWide.hpp=ce1df9d13d48 include/bincv/ops/opticalFlow.hpp=8a5615c33c3a include/bincv/ops/opticalFlowOnDemand.hpp=c3b46bfdeb2f include/bincv/ops/pyramid.hpp=59388d95dccc include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/resample.hpp=d0db5aee157f include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6 targets/stm32h753/bincv_m7_track.cpp=b8f227a44845 targets/stm32h753/board.c=ab5621aa2813 targets/stm32h753/board.h=3967e62ac995 targets/stm32h753/m7_harness.cpp=a308cda46d25 targets/stm32h753/m7_harness.hpp=4ae6cf7e2678 targets/stm32h753/startup.c=db5771d4d7f2 targets/stm32h753/string.c=85ca2e9bf016 targets/stm32h753/syscalls.c=cc70640148f0
+# image:    targets/stm32h753/bincv_m7_track.bin sha256 a697407c4573
 # board:    HELLO bincv-m7 image=track proto=1 clock_hz=480000000 baud=4000000 stack_bytes=16384 caches=ID
-# clock:    CLOCK configured_hz=480000000 measured_hz=480166557
+# clock:    CLOCK configured_hz=480000000 measured_hz=480455121
 # sequence: v1_02-752x480-8bit.bsq, 60 frames of 752x480
-# reference: ref752-final.txt
+# reference: ref-st-60.txt
 # settings: SET lkwc=0
-# date:     2026-10-09T05:52:38-07:00
-# per-frame F/P/T lines: m7-track-lkwc0-cortex-m7.log.frames (not committed: ~3 KB a frame)
+# date:     2026-10-09T17:05:13-07:00
+# per-frame F/P/T lines: rt-lkwc0.frames (not committed: ~3 KB a frame)
 
 -- per frame, mean cycles over 59 frame pairs --
-  sensor stage  4258871 cyc
-  pyrDown  479825 cyc
-  derivatives  460393 cyc
-  detect  1632820 cyc
-  track  89404260 cyc
-  total  96236171 cyc
+  sensor stage  4266102 cyc
+  pyrDown  480227 cyc
+  derivatives  453795 cyc
+  detect  1634047 cyc
+  track  89264119 cyc
+  total  96098291 cyc
 -- tracking --
 detections               : 1 (0 truncated, 1 took more than one sweep, at most 3)
 tracks observed          : 200
@@ -37,7 +37,7 @@ corner pool + kept       : 67936
 tracks                   : 4200
   = everything held      : 512600
 receive buffer (harness) : 30080
-stack used               : 8636
+stack used               : 8596
 OK
 
 -- against the host reference --
@@ -46,5 +46,5 @@ integer digests equal    : 59 of 59
 points bit-identical     : 59 of 59 frames
 points that differ       : 0 of 11746, largest 0 px, status differs on 0
 
-# wall time 105 s, mostly the link
+# wall time 98 s, mostly the link
 # done

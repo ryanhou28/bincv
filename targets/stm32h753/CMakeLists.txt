@@ -89,3 +89,12 @@ target_compile_definitions(bincv_m7_lkstages PRIVATE BINCV_LK_STAGE_TIMING
 
 add_executable(bincv_m7_sensor startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_sensor.cpp)
 bincv_m7_image(bincv_m7_sensor)
+
+add_executable(bincv_m7_stereo startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_stereo.cpp)
+bincv_m7_image(bincv_m7_stereo)
+
+add_executable(bincv_m7_essential startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_essential.cpp)
+bincv_m7_image(bincv_m7_essential)
+
+add_executable(bincv_m7_subpix startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_subpix.cpp)
+bincv_m7_image(bincv_m7_subpix)

@@ -114,7 +114,7 @@ level regardless of how small that level is. `1/1/1/1` is faster and less accura
 shipped ladder is the operating point that keeps keypoint yield up.
 
 **This is Lucas–Kanade against Lucas–Kanade.** Wired into a whole pipeline the end-to-end
-figure is 3.97× on x86-64 and 5.39× on aarch64
+figure is 3.97× on x86-64 and 5.41× on aarch64
 ([feature-tracking.md](feature-tracking.md#speed)); the stages around tracking do not have
 this ratio.
 

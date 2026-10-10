@@ -20,7 +20,7 @@ USAGE
     scripts/m7_host.py flash  IMAGE                  e.g. bincv_m7_reduce
     scripts/m7_host.py run    CMD [CMD ...]          one session, print replies
     scripts/m7_host.py link   [--bytes N] [--repeats R]   link integrity + rate
-    scripts/m7_host.py launches -n N -o LOG --image IMAGE [--build DIR] CMD [CMD ...]
+    scripts/m7_host.py launches -n N -o LOG --image IMAGE [--build DIR] [--note TEXT] CMD [CMD ...]
     scripts/m7_host.py track --blob BSQ --reference REF -o LOG [--frames N]
 
 There is one firmware image per benchmark (targets/stm32h753/CMakeLists.txt says
@@ -347,6 +347,8 @@ def cmd_launches(args):
         log.write(f'# commit:   {git_commit()}\n')
         log.write(f'# sources:  {sources_line(args.image)}\n')
         log.write(f'# image:    {image_rel(args.image)} sha256 {image_hash}\n')
+        if args.note:
+            log.write(f'# note:     {args.note}\n')
         log.write(f'# board:    {hello}\n')
         log.write(f'# clock:    {clock[0]}\n')
         log.write(f'# date:     {datetime.datetime.now().astimezone().isoformat(timespec="seconds")}\n')
@@ -549,6 +551,8 @@ def main():
     n.add_argument('--no-flash', action='store_true',
                    help='the image on the board is already the one just built')
     n.add_argument('--timeout', type=float, default=600.0)
+    n.add_argument('--note', default='',
+                   help='a line for the header: how this build differs from the default one')
     n.add_argument('commands', nargs='+')
 
     t = sub.add_parser('track')

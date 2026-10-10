@@ -5,7 +5,10 @@ count and no vector unit, and 1 MB of RAM in five banks. Everything in this dire
 harness; binCV itself is `bincv_core`, the same headers every other target compiles.
 
 **The assembled feature tracker runs here at the reference sequence's full 752×480,
-bit-identical to the x86-64 host on every frame, in 512,600 bytes** — section 3.
+bit-identical to the x86-64 host on every frame, in 512,600 bytes — or 238,712 with its
+derivatives made where they are read** — section 3. Sparse stereo, the five-point RANSAC
+and sub-pixel corner refinement run here too, each against the host's output (sections 5
+to 7).
 
 ## Build, flash, run
 
@@ -30,8 +33,15 @@ changes, and one image compiling every kernel would age every figure on every ed
 | `bincv_m7_reduce` | `REDUCE` | population count without an instruction (section 1) |
 | `bincv_m7_dense` | `DENSE` | dense disparity at both word types (section 2) |
 | `bincv_m7_track` | `TRACK`, `SET lkwc`, `SET rt` | the assembled feature tracker over a sequence (section 3) |
+| `bincv_m7_track_ondemand` | `TRACK`, `SET lkwc`, `SET rt` | the same tracker, its derivatives made where they are read (section 3) |
 | `bincv_m7_sensor` | `SENSOR` | the sensor stage by part, DSP arms on and off (section 4) |
+| `bincv_m7_stereo` | `STEREO` | sparse stereo by stage, its arms off and on (section 5) |
+| `bincv_m7_essential` | `ESSENTIAL`, `ESSENTIALDUMP` | the five-point RANSAC, scoring both ways; the models and masks in full (section 6) |
+| `bincv_m7_subpix` | `SUBPIX`, `SUBPIXDUMP` | `cornerSubPix`, with and without reuse; the points in full (section 7) |
 | `bincv_m7_lkstages` | `TRACK` | diagnostic only, never a published figure: `track` by stage |
+
+`m7_reference` (a host benchmark) prints what the `*DUMP` commands print, from the same
+scene sources, and `scripts/m7_dump_compare.py` holds one to the other value by value.
 
 The images are driven from the host by **`scripts/m7_host.py`**:
 
@@ -102,8 +112,12 @@ its sensitivity to the bus.)
    word, timed inside the bulk reduction that calls them.
 2. **Dense disparity at 32-bit pointer width** — the binary dense kernel on an M-profile
    core, at `uint32` against `uint64`.
-3. **The assembled feature tracker** at 752×480, against the host frame by frame.
+3. **The assembled feature tracker** at 752×480, against the host frame by frame, with its
+   derivatives stored and made where they are read.
 4. **The sensor stage**, by part, with and without the DSP extension.
+5. **Sparse stereo**: BRIEF, the descriptor stage and the window refinement.
+6. **The five-point essential matrix under RANSAC.**
+7. **Sub-pixel corner refinement.**
 
 All at 480 MHz, from the logs named under each table. Every launch returned the same cycle
 count to within 0.02%: this core has no frequency scaling, no other process and no OS, so
@@ -337,8 +351,8 @@ Buffer geometry, so exact; the stack is measured by painting.
 | corner pool (8,192) and the kept corners (200) | 67,936 | D2 SRAM |
 | tracks | 4,200 | D2 SRAM |
 | **everything the pipeline holds** | **512,600** | |
-| stack, measured | 8,468 | DTCM |
-| flash, the whole image | 101,692 | |
+| stack, measured | 8,428 | DTCM |
+| flash, the whole image | 102,380 | |
 
 The first three rows are the 436,704 bytes the published footprint counts. The pool's
 size is a cost in sweeps, never in the answer: 34 of the 82 detections outran it and
@@ -351,12 +365,12 @@ frames):
 
 | stage | cycles per frame | ms at 480 MHz | share |
 |---|---|---|---|
-| sensor stage | 4,256,172 | 8.87 | 23.2% |
-| pyramid | 480,016 | 1.00 | 2.6% |
-| derivatives | 459,965 | 0.96 | 2.5% |
-| detect | 1,200,117 | 2.50 | 6.5% |
-| track | 11,980,448 | 24.96 | 65.2% |
-| **the frame** | **18,376,720** | **38.28** | |
+| sensor stage | 4,265,948 | 8.89 | 23.2% |
+| pyramid | 480,215 | 1.00 | 2.6% |
+| derivatives | 453,340 | 0.94 | 2.5% |
+| detect | 1,189,124 | 2.48 | 6.5% |
+| track | 12,023,667 | 25.05 | 65.3% |
+| **the frame** | **18,412,296** | **38.36** | |
 
 For scale only — there is nothing on this part to compare it with yet: a full-resolution
 frame through the whole tracker in 38 ms.
@@ -371,13 +385,13 @@ runs — the published tracking code — over the same 60 frames, both bit-ident
 
 | | per-row count | window count | |
 |---|---|---|---|
-| track, cycles per frame | 89,404,260 | 19,505,319 | 4.58× |
-| whole frame | 96,236,171 | 26,336,190 | 3.65× |
+| track, cycles per frame | 89,264,119 | 19,536,428 | 4.57× |
+| whole frame | 96,098,291 | 26,369,597 | 3.64× |
 
 Its price is flash: **13,556 bytes**, measured by building the same image without it —
-0.7% of this part's 2 MB, and no RAM: the arm adds no buffer, and the measured stack is
-smaller with it on (8,468 bytes against 8,636). It is on by default on every core whose
-population count is software ([#104](https://github.com/ryanhou28/bincv/issues/104)).
+0.7% of this part's 2 MB, and no RAM: the arm adds no buffer. It is on by default on every
+core whose population count is software
+([#104](https://github.com/ryanhou28/bincv/issues/104)).
 
 What the arm does, against the per-row count's eighty libgcc calls per window row at two bits
 per pixel:
@@ -431,15 +445,41 @@ table on M-profile (`BINCV_CORNER_ROOT_TABLE`, switchable with `SET rt`): a 3×3
 counts are 0 to 9, so the discriminant has a hundred values, and the table holds their
 correctly rounded roots inside `minEigenValue`'s own double expression — the same float.
 It costs 2,984 bytes of flash, measured the same way, and over the 60 frames above, whose
-one detection sweeps three times, it takes `detect` from 2,397,505 cycles a frame to
-1,632,790 — 1.47×, the frame 2.9%
+one detection sweeps three times, it takes `detect` from 2,401,976 cycles a frame to
+1,634,107 — 1.47×, the frame 2.9%
 ([off](../../docs/reports/logs/m7-track-rt0-cortex-m7.log),
 [on](../../docs/reports/logs/m7-track-rt1-cortex-m7.log)). The scalar suppression compares the responses' bit patterns
 rather than the floats, which order the same way because a response is never negative, and
 which a Cortex-M branches on without moving flags out of the FPU. And the pool orders its
 candidates by one 64-bit compare. Over the sequence `detect` went from 1,410,239 cycles a
-frame to the 1,200,117 above, while its pool shrank from 240 KB to 64 KB and 34 of the 82
+frame to the 1,189,124 above, while its pool shrank from 240 KB to 64 KB and 34 of the 82
 detections sweep more than once.
+
+### Derivatives where they are read
+
+The derivative ladders are 275,040 of the 512,600 bytes, and nothing reads them but the
+tracker's window staging and the detector's sweep. Both can make what they read instead:
+`LKLevelOnDemand` ([ops/opticalFlowOnDemand.hpp](../../include/bincv/ops/opticalFlowOnDemand.hpp))
+stages each window's derivative words from the previous frame as it stages the window, and
+`goodFeaturesToTrackStreaming` over a `GradientSource` derives three gradient rows as its
+sweep reaches them. The stored form stays the default; a caller picks by what it constructs.
+`bincv_m7_track_ondemand` is the tracker built that way, over the same 1,709 frames
+([log](../../docs/reports/logs/m7-track-ondemand-cortex-m7.log)):
+
+| | stored derivatives | made where read | |
+|---|---|---|---|
+| everything the pipeline holds, bytes | 512,600 | 238,712 | −53% |
+| derivatives, cycles per frame | 453,340 | 0 | |
+| detect | 1,189,124 | 1,214,612 | |
+| track | 12,023,667 | 12,090,307 | |
+| **the frame** | **18,412,296** | **18,078,375** | |
+| integer digests, points | equal, bit-identical | equal, bit-identical | |
+
+Making the derivatives where they are read costs tracking 0.6% and detection 2.1% — 92,000
+cycles a frame between them — against the 453,340 the derivative stage no longer takes, so
+the frame is no slower for holding less than half: 1,152 bytes of gradient rows replace
+275,040 of ladders, and the measured stack is smaller too, 7,716 bytes against 8,428. The
+window must stage — a word wide and `kStagedMaxRows` tall — or every point is reported lost.
 
 ### What this does not claim
 
@@ -472,3 +512,180 @@ median of 5:
 | the stream, both together | 12,803,171 | 3,555,291 | 3.60× |
 
 The tracker runs with them on, and its digests hold to the host's.
+
+## 5. Sparse stereo
+
+### What runs
+
+The sparse rectified matcher of [ops/stereo.hpp](../../include/bincv/ops/stereo.hpp) — BRIEF
+descriptors, the descriptor stage along the epipolar row, the Hamming-window refinement with
+its parabola — over the host benchmark's synthetic pair: a smoothed random 752×480 frame
+and the same frame shifted 21 pixels, 500 keypoints a side, 256-bit descriptors, disparities
+0 to 64, 11×11 windows. The board builds the pair from the host's own source
+([benchmark/stereo_scene.hpp](../../benchmark/stereo_scene.hpp)) a row at a time, so one 8-bit
+frame serves both sides: described and binarized as the left, then shifted in place into
+the right.
+
+### Exact against the host
+
+Both frames' bits, both descriptor sets and the 500 matches digest equal to the x86-64
+host's `stereo_benchmark` ([log](../../docs/reports/logs/m7-stereo-cortex-m7-launches.log)).
+The matcher is integers until the parabola, whose double comes from three integer scores
+with no multiply-add to fuse.
+
+### Speed
+
+Cycles, median of 5:
+
+| | published | with the M-profile arms | |
+|---|---|---|---|
+| BRIEF, one frame | 1,710,851 | | |
+| descriptor stage | 4,740,054 | 1,642,506 | 2.89× |
+| refinement stage | 8,601,493 | 1,369,919 | 6.28× |
+
+Matching a frame pair — both stages, one call — takes 3,014,812 cycles, 6.3 ms, where the
+published stages take 13.3 million between them.
+
+**Refinement reads its windows once** (`BINCV_STEREO_WINDOW_COUNT`, where a population count
+is software; `impl::stereoWindowCountEnabled`). The published stage scores eleven
+disparities a keypoint by re-extracting both frames' rows for each and counting every word
+whole — with libgcc's `__popcountsi2`, on this core. The arm stages the left window, and a
+right strip holding the window at every disparity it can score, one word a row each; a score
+is then a shift, an XOR and a count whose byte lanes are added down the window and collapsed
+once. The window and the strip must lie inside their frames and the strip fit 32 bits —
+`winW + 2 × refineRadius + 2` — and a keypoint that does not takes the published path. At
+radius 12 no strip fits, and the two time the same, 20,134,416 cycles against 20,140,382:
+the check that the arm runs where it is said to. 1,137 bytes of flash.
+
+**The descriptor stage tests rows on bit patterns** (`BINCV_STEREO_INTEGER_ROW_GATE`,
+M-profile; `impl::stereoIntegerRowGateEnabled`). The published stage tests all 250,000
+left–right pairs here with a float subtraction and two comparisons, and on this core a float
+comparison reaches a branch only through the FPU's flags, while the two-sided test's branch
+goes either way at random: 19 cycles a pair. With `yL` fixed, the right rows the test passes
+are one interval of floats, because `y − yL` rounds monotonically in `y`, and so one interval
+of their bit patterns read as ordered integers. The arm finds that interval once per left
+keypoint — from where float arithmetic puts its ends, `yL ∓ rowTol`, galloping outward and
+evaluating the published comparison itself — and a pair becomes one integer range check on
+the bits as they lie in memory, which on one side of zero are already in order. A NaN passes
+the published test and lies in no interval, so a call holding one, or a left keypoint that
+is not finite, takes the published path. 6.6 cycles a pair, and 2,209 bytes of flash.
+
+BRIEF is 12 instructions a tested pair of pixels and takes 13 cycles a pair: its samples are
+byte loads scattered over a 31×31 patch of the 8-bit frame, which sits in AXI SRAM because
+that is where the caller put it. Nothing here was changed in it.
+
+Both stages hold nothing but their inputs and outputs; the refinement arm stages 248 bytes
+on the stack.
+
+## 6. The five-point essential matrix under RANSAC
+
+### What runs
+
+`findEssentialMat` ([ops/essential.hpp](../../include/bincv/ops/essential.hpp)) over three
+scenes of [benchmark/essential_scene.hpp](../../benchmark/essential_scene.hpp): points seen
+by two cameras a known rotation and translation apart, in normalised coordinates, with a
+planted share of outliers — 200 and 500 correspondences at 30%, 1,000 at 50% — threshold
+0.002 and a cap of 500 iterations. The scene is built without trigonometry, so the board and
+the host start from the same bits. Double precision throughout, on the M7's double-precision
+FPU; the solver's working set is stack, the inlier flags two bits per correspondence of
+caller scratch.
+
+### Against the host
+
+| | 200 at 30% | 500 at 30% | 1,000 at 50% |
+|---|---|---|---|
+| iterations, inliers | 26, 140 | 25, 352 | 134, 508 |
+| inlier mask | identical | identical | identical |
+| the model, largest difference from the host's | 5.6e-15 | 4.5e-12 | 4.8e-11 |
+
+**The model differs in its last bits, and the reason is the compiler, not the kernel.** GCC's
+default `-ffp-contract=fast` fuses the solver's multiply-adds into the M7's `vfma.f64`, and
+the x86-64 baseline has no FMA to fuse them into. Built with `-ffp-contract=off`, the board's
+model is the host's to the bit in all three scenes, as is everything else — newlib's `cos`,
+`sin` and `log` gave glibc's answers here
+([default](../../docs/reports/logs/m7-essential-cortex-m7-launches.log),
+[contraction off](../../docs/reports/logs/m7-essential-nofpcontract-cortex-m7-launches.log);
+`scripts/m7_dump_compare.py` against `m7_reference essential --dump`).
+
+### Speed
+
+Cycles for the whole estimation, median of 3:
+
+| | 200 at 30% | 500 at 30% | 1,000 at 50% |
+|---|---|---|---|
+| published scoring | 78,479,451 | 139,771,918 | 374,389,844 |
+| squared test | 78,047,944 | 138,683,737 | 364,230,416 |
+| | 1.006× | 1.008× | 1.028× |
+| ms at 480 MHz | 162.6 | 288.9 | 758.8 |
+
+**The minimal solver is the cost, and its root finder is most of that.** An iteration costs
+2.7 to 5.6 million cycles here, most of it the five-point solve, and the solve's cost moves
+with the sample: its root finder iterates until it converges, 92 to 208 passes a solve on
+these scenes. On the host's instruction counts over the three scenes the solver is 73% of the
+estimation and scoring 23%, and inside the solver the Aberth–Ehrlich iteration that finds
+the degree-10 polynomial's roots is 80% — all ten roots, complex, to a step of 1e-14, with
+two double divides per pair of roots per pass. Nothing that changes that arithmetic can give
+the published answer bit for bit, so nothing here does; a solver that finds only the real
+roots would be a different trade, and is not made here.
+
+**The squared test** (`BINCV_RANSAC_SQUARED_TEST`, M-profile, `impl::ransacSquaredTestEnabled`)
+decides each point's `residual < threshold` on squares wherever the squares decide it —
+outside a band of 2⁻²⁰ either side of the threshold, eight times the float rounding the
+residual takes — and takes the square root and the divide, two of the slowest instructions
+this core has, only inside it. Every decision is the published one: the masks, the
+iterations and the models are identical with it on and off, and
+`Essential.SquaredTestDecidesAsTheResidual` holds it to the residual at thresholds placed on
+each residual and one float either side. Inside the band the residual is the published one
+to the bit only if the compiler fuses the two copies of it alike, and on this board it does:
+both are nine fused multiply-adds, seven multiplies and six adds. It is worth what scoring
+is worth: 0.6% at 200 correspondences, 2.8% at 1,000. 505 bytes of flash.
+
+## 7. Sub-pixel corner refinement
+
+### What runs
+
+`cornerSubPix` ([ops/subpix.hpp](../../include/bincv/ops/subpix.hpp)) over the 200 corners
+`goodFeaturesToTrackStreaming` finds in the stereo scene's left frame
+([benchmark/subpix_scene.hpp](../../benchmark/subpix_scene.hpp)), from the binarized
+frame's 1-bit signed derivatives: 11×11 window, 40 iterations, ε 0.001. The scene is random
+texture, so the derivatives are dense — 84 of a window's 121 pixels carry a gradient — and
+that is the operation's expensive case: its word-wise skip of flat pixels has little to skip.
+
+### Against the host
+
+All 200 refined points are the host's to the bit, with contraction on and off
+([log](../../docs/reports/logs/m7-subpix-cortex-m7-launches.log)).
+
+### Speed
+
+Cycles for the 200 corners, median of 5:
+
+| | cycles | per corner | |
+|---|---|---|---|
+| every iteration's sums computed (published) | 7,588,206 | 37,941 | |
+| an anchor's sums reused | 5,588,056 | 27,940 | 1.36× |
+
+**An iteration that anchors where the previous one did reuses its sums**
+(`BINCV_SUBPIX_REUSE`, M-profile, `impl::subPixReuseEnabled`). The window, its weights and
+its offsets all hang off the rounded position, so the five sums are a function of the anchor
+alone, and the step that proves convergence is nearly always one that moved less than half
+a pixel: here 192 of the 688 window sums repeat their predecessor's anchor, one for each
+corner that converged. With no zero zone every weight is at least e⁻², so the per-pixel test
+for a zero weight is not made either. Both are exact on any build — nothing is recomputed
+differently, only not recomputed — and `SubPix.AnchorReuseIsBitExact` holds them to the
+published loop over 180 parameter sets. 205 bytes of flash.
+
+What remains is the double-precision arithmetic of each pixel with a gradient: about 50
+instructions, seven multiplies and two fused multiply-adds among them. Rewriting it could
+change what GCC fuses, and so the answer's last bits, and is not done.
+
+The Gaussian mask is a stack buffer sized for the largest window, 7,688 bytes whatever the
+window is — half of this harness's 16 KB stack.
+
+### What sections 5 to 7 do not claim
+
+**One synthetic scene each**, chosen so the board can build it from the host's own source,
+which is what lets its output be held to the host's. They price kernels, not a pipeline: a frontend that calls them sets its own
+keypoint counts, windows and thresholds, and the descriptor stage's cost in particular grows
+with the product of the two sides' keypoint counts. **No comparison** against another library
+on this part ([#108](https://github.com/ryanhou28/bincv/issues/108)).

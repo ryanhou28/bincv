@@ -10,9 +10,12 @@
 // same left-reference convention and the same d = xL - xR sign, which is
 // exactly what that test would catch being wrong. The real-pair arm belongs to
 // the stereo pipeline example and waits on a rectified pair sequence.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <limits>
 #include <vector>
 
 #include "bincv/binMat.hpp"
@@ -326,6 +329,202 @@ BINCV_TEST(Stereo, TheParabolaRecoversAFractionalDisparity) {
     BINCV_CHECK(std::abs(mean - 12.5) < 0.25);
     BINCV_CHECK(inside * 3 >= n * 2);
 }
+
+#if BINCV_STEREO_WINDOW_COUNT
+BINCV_TEST(Stereo, StagedArmIsBitExact) {
+    // The staged refinement against the per-row path, every field of every match, over
+    // window shapes up to the strip's 32 bits and the arm's 31 rows, radii either side
+    // of what fits a strip, and keypoints scattered to the borders so that both the
+    // windows it stages and the ones it must decline are exercised. The arm compiles
+    // only where a population count is software; this suite compiles it everywhere.
+    BINCV_CHECK(impl::stereoWindowCountEnabled() == (BINCV_STEREO_WINDOW_COUNT_DEFAULT != 0));
+    const bool saved = impl::stereoWindowCountEnabled();
+
+    constexpr size_t kW = 203, kH = 97;   // neither a whole number of words
+    BinMat<uint32_t> left(kW, kH), right(kW, kH);
+    uint64_t st = 0x57E7E0ull;
+    const auto next = [&st]() {
+        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+        return st >> 33;
+    };
+    for (size_t y = 0; y < kH; ++y)
+        for (size_t x = 0; x < kW; ++x) {
+            left.set(static_cast<int>(y), static_cast<int>(x), next() % 5u < 2u ? 1u : 0u);
+            right.set(static_cast<int>(y), static_cast<int>(x), next() % 7u < 3u ? 1u : 0u);
+        }
+
+    struct Shape {
+        int winW, winH, radius, minD, maxD;
+    };
+    const Shape shapes[] = {{3, 3, 1, 0, 64},   {11, 11, 4, 0, 64},  {11, 11, 9, 0, 64},
+                            {11, 11, 10, 0, 64}, {15, 9, 4, 5, 30},   {25, 31, 2, 0, 64},
+                            {25, 32, 2, 0, 64},  {30, 5, 1, 0, 9}, {31, 3, 1, 0, 64},
+                            {7, 13, 3, 20, 21}};
+    size_t staged = 0, declined = 0, compared = 0;
+    for (const Shape& sh : shapes) {
+        constexpr size_t kPoints = 400;
+        std::vector<float> kp(2 * kPoints);
+        std::vector<StereoMatch> in(kPoints);
+        for (size_t i = 0; i < kPoints; ++i) {
+            kp[2 * i] = static_cast<float>(next() % (kW * 8)) / 8.0f;
+            kp[2 * i + 1] = static_cast<float>(next() % (kH * 8)) / 8.0f;
+            in[i].valid = (next() % 10u) != 0u ? 1 : 0;
+            in[i].disparity = static_cast<float>(static_cast<int>(next() % 80u) - 8) / 2.0f;
+        }
+        StereoMatchParams p;
+        p.winWidth = sh.winW;
+        p.winHeight = sh.winH;
+        p.refineRadius = sh.radius;
+        p.minDisparity = sh.minD;
+        p.maxDisparity = sh.maxD;
+        for (int subPixel = 0; subPixel <= 1; ++subPixel) {
+            p.subPixel = subPixel != 0;
+            std::vector<StereoMatch> a = in, b = in;
+            impl::stereoWindowCountEnabled() = false;
+            stereoRefineDisparity<uint32_t>(left.constView(), right.constView(), kp.data(),
+                                            kPoints, a.data(), p);
+            impl::stereoWindowCountEnabled() = true;
+            stereoRefineDisparity<uint32_t>(left.constView(), right.constView(), kp.data(),
+                                            kPoints, b.data(), p);
+            for (size_t i = 0; i < kPoints; ++i) {
+                uint32_t da, db;
+                std::memcpy(&da, &a[i].disparity, sizeof da);
+                std::memcpy(&db, &b[i].disparity, sizeof db);
+                BINCV_CHECK(da == db);
+                BINCV_CHECK(a[i].valid == b[i].valid);
+                ++compared;
+            }
+        }
+        // Which windows the arm took: the kernel's own anchor and range arithmetic.
+        for (size_t i = 0; i < kPoints; ++i) {
+            if (!in[i].valid) continue;
+            const long long ax =
+                impl::floorToLL(kp[2 * i] - static_cast<float>(sh.winW - 1) * 0.5f);
+            const long long ay =
+                impl::floorToLL(kp[2 * i + 1] - static_cast<float>(sh.winH - 1) * 0.5f);
+            const long long d0 = impl::floorToLL(in[i].disparity + 0.5f);
+            const long long lo = std::max<long long>(d0 - sh.radius, sh.minD);
+            const long long hi = std::min<long long>(d0 + sh.radius, sh.maxD);
+            if (lo > hi) continue;
+            const bool ok = impl::stereoStagedPlan<uint32_t>(kW, kH, ax, ay, sh.winW, sh.winH,
+                                                             lo, hi).ok;
+            ok ? ++staged : ++declined;
+        }
+    }
+    impl::stereoWindowCountEnabled() = saved;
+    std::printf(" %zu matches compared; %zu windows staged, %zu declined\n", compared, staged,
+                declined);
+    BINCV_CHECK(staged > 1000);
+    BINCV_CHECK(declined > 1000);
+}
+#endif
+
+#if BINCV_STEREO_INTEGER_ROW_GATE
+BINCV_TEST(Stereo, IntegerRowGateIsBitExact) {
+    // The row test on bit patterns against the published float test. First the interval
+    // itself: for each left y, every probe y -- the interval's own ends and one float
+    // either side of them, and values across the whole range -- is inside the keys
+    // exactly when the published comparison passes it. Then whole calls, every field of
+    // every match, gate off against gate on, with NaN, infinite, signed-zero and huge
+    // coordinates in the mix. Compiled only on M-profile; this suite compiles it
+    // everywhere.
+    BINCV_CHECK(impl::stereoIntegerRowGateEnabled() ==
+                (BINCV_STEREO_INTEGER_ROW_GATE_DEFAULT != 0));
+    const bool saved = impl::stereoIntegerRowGateEnabled();
+    uint64_t st = 0x80A7E5ull;
+    const auto next = [&st]() {
+        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+        return st >> 33;
+    };
+    const float inf = std::numeric_limits<float>::infinity();
+    const auto drawY = [&]() -> float {
+        switch (next() % 8u) {
+        case 0: return static_cast<float>(next() % 480u);
+        case 1: return static_cast<float>(next() % 3840u) / 8.0f;
+        case 2: return static_cast<float>(next() % 100000u) / 7.0f - 5000.0f;
+        case 3: return (next() & 1u) ? 0.0f : -0.0f;
+        case 4: return static_cast<float>(next() % 1000u) * 1e5f;
+        case 5: return static_cast<float>(next()) * 1e-12f;
+        default: return static_cast<float>(next() % 480u) + 0.5f;
+        }
+    };
+
+    size_t probes = 0;
+    for (int trial = 0; trial < 3000; ++trial) {
+        const float yL = drawY();
+        const float tol = static_cast<float>(next() % 8u);
+        int32_t lo = 0, hi = 0;
+        impl::stereoRowKeys(yL, tol, lo, hi);
+        const float ends[] = {impl::stereoKeyFloat(lo), impl::stereoKeyFloat(hi)};
+        std::vector<float> ys = {yL, inf, -inf, 0.0f, -0.0f, yL + tol, yL - tol};
+        for (const float e : ends) {
+            ys.push_back(e);
+            ys.push_back(std::nextafter(e, inf));
+            ys.push_back(std::nextafter(e, -inf));
+        }
+        for (int k = 0; k < 20; ++k) ys.push_back(drawY());
+        for (const float y : ys) {
+            const float dy = y - yL;
+            const bool want = !(dy > tol || dy < -tol);
+            const int32_t key = impl::stereoOrderedKey(y);
+            BINCV_CHECK((key >= lo && key <= hi) == want);
+            ++probes;
+        }
+    }
+
+    // A draw below `n`, as an index -- `next()` is 64 bits and `size_t` may be 32.
+    const auto pick = [&next](size_t n) { return static_cast<size_t>(next() % n); };
+    size_t calls = 0, gated = 0;
+    for (int trial = 0; trial < 300; ++trial) {
+        const size_t nl = 1 + pick(60), nr = pick(80);
+        std::vector<float> l(2 * nl), r(2 * nr);
+        for (size_t i = 0; i < nl; ++i) {
+            l[2 * i] = static_cast<float>(next() % 400u) + 64.0f;
+            l[2 * i + 1] = drawY();
+        }
+        for (size_t j = 0; j < nr; ++j) {
+            // Mostly near some left keypoint's row, so the gate passes often enough to
+            // matter; the rest anywhere.
+            const size_t i = pick(nl);
+            r[2 * j] = l[2 * i] - static_cast<float>(next() % 70u);
+            const int row = static_cast<int>(next() % 9u) - 4;
+            r[2 * j + 1] =
+                (next() % 4u) != 0u ? l[2 * i + 1] + static_cast<float>(row) : drawY();
+        }
+        if (trial % 10 == 3 && nr > 0) r[2 * pick(nr) + 1] = std::nanf("");
+        if (trial % 10 == 5) l[2 * pick(nl) + 1] = std::nanf("");
+        if (trial % 10 == 7) l[2 * pick(nl) + 1] = (next() & 1u) ? inf : -inf;
+        if (trial % 10 == 8 && nr > 0) r[2 * pick(nr) + 1] = (next() & 1u) ? inf : -inf;
+        std::vector<uint32_t> dl(nl * kWords), dr(nr * kWords);
+        for (auto& w : dl) w = static_cast<uint32_t>(next()) & 0x0F0F0F0Fu;
+        for (auto& w : dr) w = static_cast<uint32_t>(next()) & 0x0F0F0F0Fu;
+        StereoMatchParams p;
+        p.rowTolerance = static_cast<int>(next() % 4u);
+        p.minDisparity = static_cast<int>(next() % 5u);
+        p.maxDisparity = p.minDisparity + 1 + static_cast<int>(next() % 64u);
+        p.maxHamming = 256;
+        std::vector<StereoMatch> a(nl), b(nl);
+        impl::stereoIntegerRowGateEnabled() = false;
+        stereoDescriptorMatch<uint32_t>(l.data(), nl, dl.data(), r.data(), nr, dr.data(),
+                                        kWords, a.data(), p);
+        impl::stereoIntegerRowGateEnabled() = true;
+        stereoDescriptorMatch<uint32_t>(l.data(), nl, dl.data(), r.data(), nr, dr.data(),
+                                        kWords, b.data(), p);
+        for (size_t i = 0; i < nl; ++i) {
+            BINCV_CHECK(std::memcmp(&a[i].disparity, &b[i].disparity, sizeof(float)) == 0);
+            BINCV_CHECK(a[i].distance == b[i].distance);
+            BINCV_CHECK(a[i].rightIndex == b[i].rightIndex);
+            BINCV_CHECK(a[i].valid == b[i].valid);
+            gated += a[i].valid;
+        }
+        ++calls;
+    }
+    impl::stereoIntegerRowGateEnabled() = saved;
+    std::printf(" %zu row probes; %zu calls, %zu matches compared valid\n", probes, calls,
+                gated);
+    BINCV_CHECK(gated > 1000);
+}
+#endif
 
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(Stereo, AgreesWithCvStereoBMOnCleanGroundTruth) {

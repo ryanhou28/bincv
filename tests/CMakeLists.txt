@@ -264,6 +264,16 @@ target_compile_definitions(test_opticalflow PRIVATE BINCV_LK_WINDOW_COUNT=1)
 # The same for goodFeaturesToTrack's square-root table, compiled by default only on
 # M-profile: Corner.RootTable_EveryWindowCount holds it to the root everywhere.
 target_compile_definitions(test_corner PRIVATE BINCV_CORNER_ROOT_TABLE=1)
+# And for sparse stereo's staged refinement and integer row gate: Stereo.StagedArmIsBitExact
+# and Stereo.IntegerRowGateIsBitExact hold them to the published code everywhere.
+target_compile_definitions(test_stereo PRIVATE BINCV_STEREO_WINDOW_COUNT=1
+                                               BINCV_STEREO_INTEGER_ROW_GATE=1)
+# And for RANSAC's squared test: Essential.SquaredTest* hold it to the residual, and the
+# RANSAC suite compiles the driver's scoring for a model that has no squared test.
+target_compile_definitions(test_essential PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
+target_compile_definitions(test_ransac PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
+# And for cornerSubPix's reuse of an anchor's sums: SubPix.AnchorReuseIsBitExact.
+target_compile_definitions(test_subpix PRIVATE BINCV_SUBPIX_REUSE=1)
 
 # ---------------------------------------------------------------------------
 # A translation unit that MUST NOT COMPILE

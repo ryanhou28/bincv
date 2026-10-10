@@ -674,6 +674,42 @@ struct EssentialModel {
         if (!(den > 1e-30)) return 1e30f;
         return static_cast<float>(std::fabs(num) / std::sqrt(den));
     }
+
+#if BINCV_RANSAC_SQUARED_TEST
+    /// @brief `residual(e, a, b) < threshold`, decided on squares wherever the squares
+    /// decide it. **INTERNAL to the driver** (BINCV_RANSAC_SQUARED_TEST).
+    /// @note `num^2 < den * t^2` is the comparison without the root, but rounding the
+    /// residual to float can carry a value within 2^-24 of the threshold across it, so
+    /// the squares decide only outside a band of 2^-20 either side -- eight times the
+    /// rounding, after every double rounding on the way -- and inside it the residual
+    /// is taken exactly as `residual` takes it. A threshold whose square is not a
+    /// normal double never reaches the squares at all.
+    BINCV_HOST_DEVICE static bool isInlier(const EssentialMatrix& e, Point2f a, Point2f b,
+                                           float threshold) {
+        const double x1 = static_cast<double>(a.x), y1 = static_cast<double>(a.y);
+        const double x2 = static_cast<double>(b.x), y2 = static_cast<double>(b.y);
+
+        const double ex1 = e.m[0] * x1 + e.m[1] * y1 + e.m[2];
+        const double ey1 = e.m[3] * x1 + e.m[4] * y1 + e.m[5];
+        const double ez1 = e.m[6] * x1 + e.m[7] * y1 + e.m[8];
+
+        const double ex2 = e.m[0] * x2 + e.m[3] * y2 + e.m[6];
+        const double ey2 = e.m[1] * x2 + e.m[4] * y2 + e.m[7];
+
+        const double num = x2 * ex1 + y2 * ey1 + ez1;
+        const double den = ex1 * ex1 + ey1 * ey1 + ex2 * ex2 + ey2 * ey2;
+        if (!(den > 1e-30)) return 1e30f < threshold;
+        const double t = static_cast<double>(threshold);
+        if (t >= 1e-100 && t <= 1e100) {
+            constexpr double kBand = 1.0 / 1048576.0;   // 2^-20
+            const double t2 = t * t;
+            const double n2 = num * num;
+            if (n2 < den * (t2 * (1.0 - kBand))) return true;
+            if (n2 > den * (t2 * (1.0 + kBand))) return false;
+        }
+        return static_cast<float>(std::fabs(num) / std::sqrt(den)) < threshold;
+    }
+#endif
 };
 
 /// @brief `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role over caller-owned

@@ -19,6 +19,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <new>
 #include <vector>
 
@@ -282,6 +284,113 @@ BINCV_TEST(Essential, RansacSeparatesInliersFromOutliers) {
     std::printf(" essential: %d/%d scenes clean, mean inlier precision %.4f recall %.4f\n",
                 clean, kScenes, sumPrecision / kScenes, sumRecall / kScenes);
 }
+
+#if BINCV_RANSAC_SQUARED_TEST
+BINCV_TEST(Essential, SquaredTestDecidesAsTheResidual) {
+    // isInlier against `residual < threshold`, the comparison it replaces, with the
+    // threshold placed ON each residual and one float either side -- every one of those
+    // inside the band where the squares must not decide -- and at fixed thresholds,
+    // including ones whose square is not a normal double. The squared test compiles
+    // only on M-profile; this suite compiles it everywhere.
+    BINCV_CHECK(impl::ransacSquaredTestEnabled() == (BINCV_RANSAC_SQUARED_TEST_DEFAULT != 0));
+    Rng rng(0x5A0A2E);
+    size_t compared = 0, inliers = 0;
+    const float fixed[] = {0.002f,
+                           0.0005f,
+                           1e-30f,
+                           std::numeric_limits<float>::denorm_min(),
+                           1e30f,
+                           std::numeric_limits<float>::infinity(),
+                           std::numeric_limits<float>::quiet_NaN(),
+                           0.0f,
+                           -1.0f};
+    for (int scene = 0; scene < 200; ++scene) {
+        const Pose pose = makePose(rng, 0.4);
+        EssentialMatrix e;
+        for (int i = 0; i < 9; ++i) e.m[i] = pose.e[i];
+        for (int k = 0; k < 50; ++k) {
+            Point2f a, b;
+            project(pose, rng, a, b);
+            const double noise = (k % 3 == 0) ? 0.003 : (k % 3 == 1 ? 0.0005 : 0.2);
+            b.x += static_cast<float>(rng.uniform() * noise);
+            b.y += static_cast<float>(rng.uniform() * noise);
+            const float r = EssentialModel::residual(e, a, b);
+            const float ts[3] = {r, std::nextafter(r, 1e38f), std::nextafter(r, 0.0f)};
+            for (const float t : ts) {
+                const bool want = r < t;
+                BINCV_CHECK(EssentialModel::isInlier(e, a, b, t) == want);
+                inliers += want ? 1u : 0u;
+                ++compared;
+            }
+            for (const float t : fixed) {
+                BINCV_CHECK(EssentialModel::isInlier(e, a, b, t) ==
+                            (EssentialModel::residual(e, a, b) < t));
+                ++compared;
+            }
+        }
+    }
+    // The residual's own special cases: a vanishing denominator, and non-finite points.
+    EssentialMatrix zero;
+    for (double& v : zero.m) v = 0.0;
+    const float inf = fixed[5];
+    const float nan = fixed[6];
+    const Point2f odd[] = {{0.1f, 0.2f}, {inf, 0.0f}, {nan, 0.3f}, {1e30f, -1e30f}};
+    const Pose pose = makePose(rng, 0.4);
+    EssentialMatrix e;
+    for (int i = 0; i < 9; ++i) e.m[i] = pose.e[i];
+    for (const Point2f& a : odd) {
+        for (const Point2f& b : odd) {
+            for (const float t : fixed) {
+                BINCV_CHECK(EssentialModel::isInlier(e, a, b, t) ==
+                            (EssentialModel::residual(e, a, b) < t));
+                BINCV_CHECK(EssentialModel::isInlier(zero, a, b, t) ==
+                            (EssentialModel::residual(zero, a, b) < t));
+                compared += 2;
+            }
+        }
+    }
+    std::printf(" %zu decisions compared, %zu of the on-the-threshold ones inliers\n",
+                compared, inliers);
+}
+
+BINCV_TEST(Essential, SquaredTestScoringIsBitExact) {
+    // Whole estimations with the squared test off and on: the same iterations, the
+    // same support, the same model to the bit and the same mask.
+    const bool saved = impl::ransacSquaredTestEnabled();
+    Rng rng(0xB17E4AC7);
+    for (int scene = 0; scene < 20; ++scene) {
+        const Pose pose = makePose(rng, 0.4);
+        const size_t n = 100 + static_cast<size_t>(scene) * 37;
+        std::vector<Point2f> from(n), to(n);
+        for (size_t i = 0; i < n; ++i) {
+            project(pose, rng, from[i], to[i]);
+            const double noise = (i % 4 == 0) ? 0.4 : 0.002;
+            to[i].x += static_cast<float>(rng.uniform() * noise);
+            to[i].y += static_cast<float>(rng.uniform() * noise);
+        }
+        std::vector<uint32_t> flags(2 * ransacScratchWords(n));
+        const RansacScratch scratch{flags.data(), n};
+        RansacParams params;
+        params.threshold = 0.002;
+        params.maxIterations = 300;
+        params.seed = static_cast<uint64_t>(scene) + 1;
+        std::vector<uint8_t> maskA(n), maskB(n);
+        EssentialMatrix ea, eb;
+        impl::ransacSquaredTestEnabled() = false;
+        const RansacResult ra =
+            findEssentialMat(from.data(), to.data(), n, params, scratch, &ea, maskA.data());
+        impl::ransacSquaredTestEnabled() = true;
+        const RansacResult rb =
+            findEssentialMat(from.data(), to.data(), n, params, scratch, &eb, maskB.data());
+        BINCV_CHECK(ra.found == rb.found);
+        BINCV_CHECK(ra.inliers == rb.inliers);
+        BINCV_CHECK(ra.iterations == rb.iterations);
+        BINCV_CHECK(maskA == maskB);
+        BINCV_CHECK(std::memcmp(ea.m, eb.m, sizeof ea.m) == 0);
+    }
+    impl::ransacSquaredTestEnabled() = saved;
+}
+#endif
 
 BINCV_TEST(Essential, DeterministicAndDegenerate) {
     Rng rng(0xD00D);
