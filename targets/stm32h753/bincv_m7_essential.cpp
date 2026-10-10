@@ -5,8 +5,9 @@
 ///   ESSENTIAL       per scene: what the estimator found -- inliers, iterations, a digest
 ///                   of the model's bits and one of the inlier mask -- for the host's
 ///                   (m7_reference essential) to be held to; then cycles, median of 3,
-///                   with the published scoring and with the squared test (digests of
-///                   both, which must agree), and with the real-root solver; then the
+///                   scored by the residual, by the squared test and by the float
+///                   scorer (digests of each, which must agree), and with the real-root
+///                   solver; then the
 ///                   five-point solve alone, both solvers, over 200 samples
 ///   ESSENTIALDUMP   per scene: the model's nine doubles and the inlier mask, in full,
 ///                   from both solvers (E/M published, R/Q the real-root solver),
@@ -43,12 +44,13 @@ void cmdEssential(const char*) {
         const bincv::RansacParams p = params();
         bincv::EssentialMatrix model;
         bincv::RansacResult r;
-        uint32_t cycles[kRepeats], residualCycles[kRepeats];
-        uint32_t residualModel = 0, residualMask = 0;
+        uint32_t cycles[kRepeats], residualCycles[kRepeats], squaredCycles[kRepeats];
+        uint32_t residualModel = 0, residualMask = 0, squaredModel = 0, squaredMask = 0;
         size_t residualInliers = 0;
         for (size_t k = 0; k < kRepeats; ++k) {
-            // The published scoring, `residual < threshold` at every point, then the
-            // squared test, which this image runs by default.
+            // The published scoring, `residual < threshold` at every point; the squared
+            // test; and the single-precision scorer in front of it, which this image
+            // runs by default.
             bincv::impl::ransacSquaredTestEnabled() = false;
             uint32_t t0 = boardCycles();
             r = bincv::findEssentialMat(g_from, g_to, c.count, p, scratch, &model, g_mask);
@@ -57,6 +59,13 @@ void cmdEssential(const char*) {
             residualModel = fnv1a(kFnvSeed, model.m, sizeof model.m);
             residualMask = fnv1a(kFnvSeed, g_mask, c.count);
             bincv::impl::ransacSquaredTestEnabled() = true;
+            bincv::impl::ransacFloatScorerEnabled() = false;
+            t0 = boardCycles();
+            r = bincv::findEssentialMat(g_from, g_to, c.count, p, scratch, &model, g_mask);
+            squaredCycles[k] = boardCycles() - t0;
+            squaredModel = fnv1a(kFnvSeed, model.m, sizeof model.m);
+            squaredMask = fnv1a(kFnvSeed, g_mask, c.count);
+            bincv::impl::ransacFloatScorerEnabled() = true;
             t0 = boardCycles();
             r = bincv::findEssentialMat(g_from, g_to, c.count, p, scratch, &model, g_mask);
             cycles[k] = boardCycles() - t0;
@@ -83,9 +92,15 @@ void cmdEssential(const char*) {
         boardPutHex32(residualModel);
         boardPuts(", mask ");
         boardPutHex32(residualMask);
+        boardPuts("\n    squared test: model ");
+        boardPutHex32(squaredModel);
+        boardPuts(", mask ");
+        boardPutHex32(squaredMask);
         boardPuts("\n    cycles, residual scoring  ");
         boardPutU32(m7::medianOf(residualCycles, kRepeats));
         boardPuts(" cyc\n    cycles, squared test  ");
+        boardPutU32(m7::medianOf(squaredCycles, kRepeats));
+        boardPuts(" cyc\n    cycles, float scorer  ");
         boardPutU32(m7::medianOf(cycles, kRepeats));
         boardPuts(" cyc\n");
 
@@ -154,6 +169,13 @@ void cmdEssential(const char*) {
     for (size_t i = 0; i < kMaxCount; ++i)
         inSquared += bincv::EssentialModel::isInlier(e, g_from[i], g_to[i], threshold) ? 1u : 0u;
     const uint32_t squaredScore = boardCycles() - t0;
+    uint32_t inFloat = 0;
+    t0 = boardCycles();
+    {
+        const bincv::EssentialModel::Scorer score(e, threshold);
+        for (size_t i = 0; i < kMaxCount; ++i) inFloat += score(g_from[i], g_to[i]) ? 1u : 0u;
+    }
+    const uint32_t floatScore = boardCycles() - t0;
     boardPuts("-- scoring alone, 1000 correspondences against one model --\n  residual: ");
     boardPutU32(inResidual);
     boardPuts(" inliers, ");
@@ -162,6 +184,10 @@ void cmdEssential(const char*) {
     boardPutU32(inSquared);
     boardPuts(" inliers, ");
     boardPutU32(squaredScore / static_cast<uint32_t>(kMaxCount));
+    boardPuts(" cyc a point\n  float scorer: ");
+    boardPutU32(inFloat);
+    boardPuts(" inliers, ");
+    boardPutU32(floatScore / static_cast<uint32_t>(kMaxCount));
     boardPuts(" cyc a point\n");
     boardPuts("OK\n");
 }

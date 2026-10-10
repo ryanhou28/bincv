@@ -419,11 +419,24 @@ BINCV_TEST(Essential, SquaredTestDecidesAsTheResidual) {
     // inside the band where the squares must not decide -- and at fixed thresholds,
     // including ones whose square is not a normal double. The squared test compiles
     // only on M-profile; this suite compiles it everywhere.
+    // The single-precision Scorer is held to the same answers alongside, at the same
+    // thresholds and also on coordinates three hundred times larger, where its error
+    // bound is three hundred times wider -- and at thresholds either side of the range
+    // it decides in.
     BINCV_CHECK(impl::ransacSquaredTestEnabled() == (BINCV_RANSAC_SQUARED_TEST_DEFAULT != 0));
+    BINCV_CHECK(impl::ransacFloatScorerEnabled() == (BINCV_RANSAC_SQUARED_TEST_DEFAULT != 0));
     Rng rng(0x5A0A2E);
     size_t compared = 0, inliers = 0;
+    const auto scorer = [](const EssentialMatrix& m, Point2f a, Point2f b, float t) {
+        return EssentialModel::Scorer(m, t)(a, b);
+    };
     const float fixed[] = {0.002f,
                            0.0005f,
+                           3.0f,
+                           1e-6f,
+                           std::nextafter(1e-6f, 0.0f),
+                           1e6f,
+                           std::nextafter(1e6f, 1e38f),
                            1e-30f,
                            std::numeric_limits<float>::denorm_min(),
                            1e30f,
@@ -441,26 +454,108 @@ BINCV_TEST(Essential, SquaredTestDecidesAsTheResidual) {
             const double noise = (k % 3 == 0) ? 0.003 : (k % 3 == 1 ? 0.0005 : 0.2);
             b.x += static_cast<float>(rng.uniform() * noise);
             b.y += static_cast<float>(rng.uniform() * noise);
-            const float r = EssentialModel::residual(e, a, b);
-            const float ts[3] = {r, std::nextafter(r, 1e38f), std::nextafter(r, 0.0f)};
-            for (const float t : ts) {
-                const bool want = r < t;
-                BINCV_CHECK(EssentialModel::isInlier(e, a, b, t) == want);
-                inliers += want ? 1u : 0u;
-                ++compared;
-            }
-            for (const float t : fixed) {
-                BINCV_CHECK(EssentialModel::isInlier(e, a, b, t) ==
-                            (EssentialModel::residual(e, a, b) < t));
-                ++compared;
+            for (const float scale : {1.0f, 300.0f}) {
+                const Point2f sa{a.x * scale, a.y * scale}, sb{b.x * scale, b.y * scale};
+                const float r = EssentialModel::residual(e, sa, sb);
+                const float ts[3] = {r, std::nextafter(r, 1e38f), std::nextafter(r, 0.0f)};
+                for (const float t : ts) {
+                    const bool want = r < t;
+                    BINCV_CHECK(EssentialModel::isInlier(e, sa, sb, t) == want);
+                    BINCV_CHECK(scorer(e, sa, sb, t) == want);
+                    inliers += want ? 1u : 0u;
+                    ++compared;
+                }
+                for (const float t : fixed) {
+                    const bool want = r < t;
+                    BINCV_CHECK(EssentialModel::isInlier(e, sa, sb, t) == want);
+                    BINCV_CHECK(scorer(e, sa, sb, t) == want);
+                    ++compared;
+                }
             }
         }
     }
+    // Points near the epipoles, where E a and E^T b nearly vanish: the denominator is
+    // then small beside the magnitudes it is computed from, which is the case the
+    // Scorer's bound on it exists for.
+    for (int scene = 0; scene < 100; ++scene) {
+        const Pose pose = makePose(rng, 0.4);
+        EssentialMatrix e;
+        for (int i = 0; i < 9; ++i) e.m[i] = pose.e[i];
+        // E = [t]x R: E (R^T t) = 0 on the right, t^T E = 0 on the left.
+        double e1[3] = {0, 0, 0};
+        for (int i = 0; i < 3; ++i) {
+            for (int k = 0; k < 3; ++k) e1[i] += pose.r[k][i] * pose.t[k];
+        }
+        if (std::fabs(e1[2]) < 1e-3 || std::fabs(pose.t[2]) < 1e-3) continue;
+        for (const double off : {1e-2, 1e-4, 1e-6}) {
+            for (int k = 0; k < 4; ++k) {
+                const Point2f a{static_cast<float>(e1[0] / e1[2] + off * rng.uniform()),
+                                static_cast<float>(e1[1] / e1[2] + off * rng.uniform())};
+                const Point2f b{static_cast<float>(pose.t[0] / pose.t[2] + off * rng.uniform()),
+                                static_cast<float>(pose.t[1] / pose.t[2] + off * rng.uniform())};
+                const float r = EssentialModel::residual(e, a, b);
+                const float ts[4] = {r, std::nextafter(r, 1e38f), std::nextafter(r, 0.0f),
+                                     0.002f};
+                for (const float t : ts) {
+                    const bool want = r < t;
+                    BINCV_CHECK(EssentialModel::isInlier(e, a, b, t) == want);
+                    BINCV_CHECK(scorer(e, a, b, t) == want);
+                    compared += 2;
+                }
+            }
+        }
+    }
+
+    // And points where only the denominator nearly vanishes: E a close to (0, 0, c) and
+    // E^T b close to (0, 0, c'), so the numerator stays large and the residual is huge.
+    // An essential matrix has no such points -- (0, 0, c) is perpendicular to t only at
+    // c = 0, so they are its epipoles again -- but the Scorer must be exact for any
+    // hypothesis, and a poorly conditioned solve returns matrices that are not quite
+    // essential. So these are random matrices of unit norm. Thresholds placed on such a
+    // residual put the outlier test exactly where the denominator is least accurate.
+    for (int scene = 0; scene < 300; ++scene) {
+        EssentialMatrix e;
+        double norm = 0.0;
+        for (double& v : e.m) {
+            v = rng.uniform();
+            norm += v * v;
+        }
+        for (double& v : e.m) v /= std::sqrt(norm);
+        const auto solve2 = [](double a, double b, double c, double d, double r0, double r1,
+                               double& x, double& y) {
+            const double det = a * d - b * c;
+            if (std::fabs(det) < 1e-6) return false;
+            x = (r0 * d - b * r1) / det;
+            y = (a * r1 - c * r0) / det;
+            return std::fabs(x) < 50 && std::fabs(y) < 50;
+        };
+        double ax, ay, bx, by;
+        // Rows 0 and 1 of E against (ax, ay, 1); columns 0 and 1 against (bx, by, 1).
+        if (!solve2(e.m[0], e.m[1], e.m[3], e.m[4], -e.m[2], -e.m[5], ax, ay)) continue;
+        if (!solve2(e.m[0], e.m[3], e.m[1], e.m[4], -e.m[6], -e.m[7], bx, by)) continue;
+        for (const double off : {1e-2, 1e-3, 1e-4, 1e-5}) {
+            for (int k = 0; k < 4; ++k) {
+                const Point2f a{static_cast<float>(ax + off * rng.uniform()),
+                                static_cast<float>(ay + off * rng.uniform())};
+                const Point2f b{static_cast<float>(bx + off * rng.uniform()),
+                                static_cast<float>(by + off * rng.uniform())};
+                const float r = EssentialModel::residual(e, a, b);
+                const float ts[3] = {r, std::nextafter(r, 1e38f), std::nextafter(r, 0.0f)};
+                for (const float t : ts) {
+                    const bool want = r < t;
+                    BINCV_CHECK(EssentialModel::isInlier(e, a, b, t) == want);
+                    BINCV_CHECK(scorer(e, a, b, t) == want);
+                    compared += 2;
+                }
+            }
+        }
+    }
+
     // The residual's own special cases: a vanishing denominator, and non-finite points.
     EssentialMatrix zero;
     for (double& v : zero.m) v = 0.0;
-    const float inf = fixed[5];
-    const float nan = fixed[6];
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
     const Point2f odd[] = {{0.1f, 0.2f}, {inf, 0.0f}, {nan, 0.3f}, {1e30f, -1e30f}};
     const Pose pose = makePose(rng, 0.4);
     EssentialMatrix e;
@@ -472,7 +567,10 @@ BINCV_TEST(Essential, SquaredTestDecidesAsTheResidual) {
                             (EssentialModel::residual(e, a, b) < t));
                 BINCV_CHECK(EssentialModel::isInlier(zero, a, b, t) ==
                             (EssentialModel::residual(zero, a, b) < t));
-                compared += 2;
+                BINCV_CHECK(scorer(e, a, b, t) == (EssentialModel::residual(e, a, b) < t));
+                BINCV_CHECK(scorer(zero, a, b, t) ==
+                            (EssentialModel::residual(zero, a, b) < t));
+                compared += 4;
             }
         }
     }
@@ -481,9 +579,11 @@ BINCV_TEST(Essential, SquaredTestDecidesAsTheResidual) {
 }
 
 BINCV_TEST(Essential, SquaredTestScoringIsBitExact) {
-    // Whole estimations with the squared test off and on: the same iterations, the
-    // same support, the same model to the bit and the same mask.
+    // Whole estimations scored by the residual, by the squared test, and by the
+    // single-precision Scorer in front of it: the same iterations, the same support, the
+    // same model to the bit and the same mask.
     const bool saved = impl::ransacSquaredTestEnabled();
+    const bool savedFloat = impl::ransacFloatScorerEnabled();
     Rng rng(0xB17E4AC7);
     for (int scene = 0; scene < 20; ++scene) {
         const Pose pose = makePose(rng, 0.4);
@@ -501,21 +601,27 @@ BINCV_TEST(Essential, SquaredTestScoringIsBitExact) {
         params.threshold = 0.002;
         params.maxIterations = 300;
         params.seed = static_cast<uint64_t>(scene) + 1;
-        std::vector<uint8_t> maskA(n), maskB(n);
-        EssentialMatrix ea, eb;
+        std::vector<uint8_t> maskA(n), maskB(n), maskC(n);
+        EssentialMatrix ea, eb, ec;
         impl::ransacSquaredTestEnabled() = false;
         const RansacResult ra =
             findEssentialMat(from.data(), to.data(), n, params, scratch, &ea, maskA.data());
         impl::ransacSquaredTestEnabled() = true;
+        impl::ransacFloatScorerEnabled() = false;
         const RansacResult rb =
             findEssentialMat(from.data(), to.data(), n, params, scratch, &eb, maskB.data());
-        BINCV_CHECK(ra.found == rb.found);
-        BINCV_CHECK(ra.inliers == rb.inliers);
-        BINCV_CHECK(ra.iterations == rb.iterations);
-        BINCV_CHECK(maskA == maskB);
+        impl::ransacFloatScorerEnabled() = true;
+        const RansacResult rc =
+            findEssentialMat(from.data(), to.data(), n, params, scratch, &ec, maskC.data());
+        BINCV_CHECK(ra.found == rb.found && rb.found == rc.found);
+        BINCV_CHECK(ra.inliers == rb.inliers && rb.inliers == rc.inliers);
+        BINCV_CHECK(ra.iterations == rb.iterations && rb.iterations == rc.iterations);
+        BINCV_CHECK(maskA == maskB && maskB == maskC);
         BINCV_CHECK(std::memcmp(ea.m, eb.m, sizeof ea.m) == 0);
+        BINCV_CHECK(std::memcmp(eb.m, ec.m, sizeof eb.m) == 0);
     }
     impl::ransacSquaredTestEnabled() = saved;
+    impl::ransacFloatScorerEnabled() = savedFloat;
 }
 #endif
 

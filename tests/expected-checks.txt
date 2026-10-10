@@ -922,7 +922,7 @@ opencv	test_view_narrow	10	0
 opencv	test_occupancy	13697	0
 opencv	test_simd	10	0
 opencv	test_ransac	143	0
-opencv	test_essential	120997	0
+opencv	test_essential	719546	0
 opencv	test_orientation	832	0
 opencv	test_stereo	152517	0
 opencv	test_census	102	0
@@ -962,7 +962,7 @@ core	test_view_narrow	10	0
 core	test_occupancy	13697	0
 core	test_simd	10	0
 core	test_ransac	137	0
-core	test_essential	120953	0
+core	test_essential	719502	0
 core	test_orientation	832	0
 core	test_stereo	152393	0
 core	test_census	102	0
@@ -1000,7 +1000,7 @@ noexcept	test_view_narrow	10	0
 noexcept	test_occupancy	13697	0
 noexcept	test_simd	10	0
 noexcept	test_ransac	137	0
-noexcept	test_essential	120953	0
+noexcept	test_essential	719502	0
 noexcept	test_orientation	832	0
 noexcept	test_stereo	152393	0
 noexcept	test_census	102	0
@@ -1038,7 +1038,7 @@ debug	test_view_narrow	10	0
 debug	test_occupancy	13697	0
 debug	test_simd	10	0
 debug	test_ransac	137	0
-debug	test_essential	120953	0
+debug	test_essential	719502	0
 debug	test_orientation	832	0
 debug	test_stereo	152393	0
 debug	test_census	102	0

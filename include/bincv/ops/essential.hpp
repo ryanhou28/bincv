@@ -987,6 +987,72 @@ struct EssentialModel {
         }
         return static_cast<float>(std::fabs(num) / std::sqrt(den)) < threshold;
     }
+
+    /// @brief `isInlier` for every correspondence against one hypothesis, decided in
+    /// single precision wherever single precision's error provably cannot change the
+    /// answer. **INTERNAL to the driver** (BINCV_RANSAC_SQUARED_TEST).
+    /// @note THE BOUND. With E in float, `m` its largest magnitude, `L = |x| + |y| + 1`
+    /// per point and `u = 2^-24`: every float rounding the numerator and denominator
+    /// take -- fused or not -- plus E's own, keeps the float numerator within
+    /// `12 u m L1 L2` of the exact one and the denominator within `36 u m^2 (L1^2 +
+    /// L2^2)`. A point whose whole interval lies inside the threshold, with `2^-18` to
+    /// spare -- the squared test's band is `2^-20` -- is an inlier however the double
+    /// arithmetic would round; one wholly outside is an outlier; anything else is decided
+    /// by `isInlier` itself, and so is anything outside the range where the products
+    /// stay finite and normal: a threshold outside [1e-6, 1e6], a coordinate or entry
+    /// of E beyond 1e6, a denominator under 1e-20, any NaN. So every decision is
+    /// `isInlier`'s, and `residual`'s.
+    struct Scorer {
+        const EssentialMatrix* e;
+        float threshold;
+        float f[9];
+        float numBound = 0.0f, denBound = 0.0f, t2lo = 0.0f, t2hi = 0.0f;
+        bool usable = false;
+
+        BINCV_HOST_DEVICE Scorer(const EssentialMatrix& model, float t)
+            : e(&model), threshold(t) {
+            float mx = 0.0f;
+            for (int i = 0; i < 9; ++i) {
+                f[i] = static_cast<float>(model.m[i]);
+                const float a = std::fabs(f[i]);
+                mx = a > mx ? a : mx;
+            }
+            constexpr float kU = 1.0f / 16777216.0f;   // 2^-24
+            constexpr float kMargin = 1.0f / 262144.0f;  // 2^-18
+            mx *= 1.0f + 4.0f * kU;   // an upper bound on |E|, whatever the conversion did
+            // Bounds that keep every product below finite and above the normal range:
+            // `num^2` under 1e36, `den * t^2` between 1e-32 and 1e37.
+            usable = mx < 1e6f && t >= 1e-6f && t <= 1e6f;
+            numBound = 12.0f * kU * mx;
+            denBound = 36.0f * kU * mx * mx;
+            t2lo = t * t * (1.0f - kMargin);
+            t2hi = t * t * (1.0f + kMargin);
+        }
+
+        BINCV_HOST_DEVICE bool operator()(Point2f a, Point2f b) const {
+            if (usable) {
+                const float l1 = std::fabs(a.x) + std::fabs(a.y) + 1.0f;
+                const float l2 = std::fabs(b.x) + std::fabs(b.y) + 1.0f;
+                if (l1 < 1e6f && l2 < 1e6f) {
+                    const float ex1 = f[0] * a.x + f[1] * a.y + f[2];
+                    const float ey1 = f[3] * a.x + f[4] * a.y + f[5];
+                    const float ez1 = f[6] * a.x + f[7] * a.y + f[8];
+                    const float ex2 = f[0] * b.x + f[3] * b.y + f[6];
+                    const float ey2 = f[1] * b.x + f[4] * b.y + f[7];
+                    const float num = std::fabs(b.x * ex1 + b.y * ey1 + ez1);
+                    const float den = ex1 * ex1 + ey1 * ey1 + ex2 * ex2 + ey2 * ey2;
+                    const float bn = numBound * l1 * l2;
+                    const float bd = denBound * (l1 * l1 + l2 * l2);
+                    const float hi = num + bn;
+                    const float denLo = den - bd;
+                    if (denLo > 1e-20f && hi * hi < denLo * t2lo) return true;
+                    const float lo = num - bn;
+                    if (den > 1e-20f && lo > 0.0f && lo * lo > (den + bd) * t2hi) return false;
+                }
+            }
+            return isInlier(*e, a, b, threshold);
+        }
+    };
 #endif
 };
 

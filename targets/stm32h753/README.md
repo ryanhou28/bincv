@@ -616,14 +616,16 @@ Cycles for the whole estimation, median of 3:
 
 | | 200 at 30% | 500 at 30% | 1,000 at 50% |
 |---|---|---|---|
-| published, scoring by the residual | 78,484,471 | 139,771,909 | 374,419,731 |
-| published, the squared test | 78,048,703 | 138,679,383 | 364,232,738 |
-| **real-root solver**, the squared test | **15,524,872** | **22,436,018** | **175,261,378** |
-| ms at 480 MHz, squared test: published → real-root | 162.6 → **32.3** | 288.9 → **46.7** | 758.8 → **365.1** |
+| published, scoring by the residual | 78,473,363 | 139,759,973 | 374,341,838 |
+| published, the squared test | 78,139,173 | 138,909,783 | 366,574,063 |
+| published, the float scorer — this core's default | 76,968,176 | 135,939,432 | 336,601,925 |
+| **real-root solver**, the float scorer | **14,422,282** | **19,643,874** | **147,028,761** |
+| ms at 480 MHz, the defaults: published → real-root | 160.4 → **30.0** | 283.2 → **40.9** | 701.3 → **306.3** |
 
 And their parts, from the same log: a five-point solve, over 200 samples of the last scene
-drawn five at a time, costs 3,385,397 cycles published and **419,784** real-root — **8.06×**;
-scoring costs 244 cycles a correspondence by the residual and 193 by the squared test.
+drawn five at a time, costs 3,385,140 cycles published and **419,682** real-root — **8.07×**;
+scoring costs 238 cycles a correspondence by the residual, 191 by the squared test and 143 by
+the float scorer.
 
 **The published solver's cost is its root finder.** The solve's cost moves with the sample,
 because its root finder iterates until it converges, 92 to 208 passes a solve on these
@@ -668,10 +670,11 @@ construction the two share — and its code 20,896 bytes against 21,316, with no
 `sin` behind it. The published solver's own code is untouched: it compiles to the same
 instructions as before on x86-64 and aarch64.
 
-**With the solve cheap, scoring is what is left.** At 1,000 correspondences about 110 of the
-real-root estimation's 175 million cycles are scoring — 134 iterations, about 4.2 hypotheses
-each (848 solutions in the 200 samples above), 1,000 correspondences, 193 cycles a test —
-and 56 million the solves.
+**With the solve cheap, scoring is what is left** at large point counts: at 1,000
+correspondences about 81 of the real-root estimation's 147 million cycles are scoring — 134
+iterations, about 4.2 hypotheses each (848 solutions in the 200 samples above), 1,000
+correspondences, 143 cycles a test — and 56 million the solves. At 200 the solves are three
+quarters of it.
 
 **The squared test** (`BINCV_RANSAC_SQUARED_TEST`, M-profile, `impl::ransacSquaredTestEnabled`)
 decides each point's `residual < threshold` on squares wherever the squares decide it —
@@ -682,8 +685,24 @@ iterations and the models are identical with it on and off, and
 `Essential.SquaredTestDecidesAsTheResidual` holds it to the residual at thresholds placed on
 each residual and one float either side. Inside the band the residual is the published one
 to the bit only if the compiler fuses the two copies of it alike, and on this board it does:
-both are nine fused multiply-adds, seven multiplies and six adds. It is worth what scoring
-is worth: 0.6% at 200 correspondences, 2.8% at 1,000. 505 bytes of flash.
+both are nine fused multiply-adds, seven multiplies and six adds.
+
+**The float scorer** stands in front of it (same switch, and
+`impl::ransacFloatScorerEnabled`): per hypothesis E goes to single precision once, and per
+correspondence the residual's numerator and denominator are computed in float beside bounds
+on their error — every float rounding, fused or not, and E's own: `12 u m L1 L2` on the
+numerator and `36 u m² (L1² + L2²)` on the denominator, with `m` the largest entry of E,
+`L = |x| + |y| + 1` and `u = 2⁻²⁴`. A correspondence whose whole interval lies inside the
+threshold, with 2⁻¹⁸ to spare, is an inlier however the double arithmetic would round; one
+wholly outside is an outlier; anything else — and anything outside the range where the
+products stay finite and normal — goes to the squared test. So every decision is still the
+residual's: the tests hold it there at thresholds on each residual and one float either side,
+at coordinates 300 times larger, and on random matrices at the points where only the
+denominator vanishes, which is the case its bound exists for and which an essential matrix
+never presents. 143 cycles a correspondence against 191.
+
+Together the two are worth what scoring is worth — 1.02× at 200 correspondences and 1.11×
+at 1,000, on the published solver — for 1,914 bytes of flash.
 
 ## 7. Sub-pixel corner refinement
 

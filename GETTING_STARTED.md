@@ -207,12 +207,13 @@ Zbb; the rest are M-profile only:
 | `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table (M-profile) | detection 1.47× faster; 2,984 B of flash |
 | `BINCV_STEREO_WINDOW_COUNT` | sparse stereo's refinement reads its windows once and counts down them in byte lanes | refinement 6.28× faster; 1,137 B |
 | `BINCV_STEREO_INTEGER_ROW_GATE` | sparse stereo's descriptor stage tests rows on the coordinates' bit patterns (M-profile) | descriptor stage 2.89× faster; 2,209 B |
-| `BINCV_RANSAC_SQUARED_TEST` | RANSAC decides an inlier on squares, taking the root only near the threshold (M-profile) | 1.006× to 1.028× faster; 505 B |
+| `BINCV_RANSAC_SQUARED_TEST` | RANSAC decides an inlier in single precision under a proven error bound, then on squares, taking the root only near the threshold (M-profile) | scoring 1.66× faster, the estimation up to 1.11×; 1,914 B |
 | `BINCV_SUBPIX_REUSE` | `cornerSubPix` reuses the sums of an anchor it has already summed (M-profile) | 1.36× faster; 205 B |
 
 Each has a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTableEnabled`,
 `impl::stereoWindowCountEnabled`, `impl::stereoIntegerRowGateEnabled`,
-`impl::ransacSquaredTestEnabled`, `impl::subPixReuseEnabled`) so one image can time both
+`impl::ransacSquaredTestEnabled` and `impl::ransacFloatScorerEnabled`,
+`impl::subPixReuseEnabled`) so one image can time both
 arms, and each gives the published code's output bit for bit. They change inline bodies,
 so like `BINCV_NO_NEON` a define must be the same in every translation unit.
 
@@ -220,7 +221,7 @@ so like `BINCV_NO_NEON` a define must be the same in every translation unit.
 `findEssentialMatRealRoots` (`fivePointEssentialRealRoots`, `EssentialModelRealRoots`) finds
 only the real roots of the solver's degree-10 polynomial, isolating them between its
 derivative's, where `findEssentialMat` finds all ten complex ones together: on the Cortex-M7
-a solve is 8× faster, an estimation 2× to 6×, in the same stack. Its answers are not the
+a solve is 8× faster, an estimation 2× to 7×, in the same stack. Its answers are not the
 published solver's bit for bit — it is held to every accuracy bound that solver is, and on
 the measured scenes it finds the same inliers — so it is a separate name rather than an arm.
 

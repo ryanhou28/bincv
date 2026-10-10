@@ -127,6 +127,14 @@ inline bool& ransacSquaredTestEnabled() {
     return on;
 }
 
+/// @brief Whether the driver scores a hypothesis through the model's single-precision
+/// `Scorer`, where it has one. **INTERNAL.** On wherever the squared test is; the tests
+/// and the board flip it, as they flip that one.
+inline bool& ransacFloatScorerEnabled() {
+    static bool on = BINCV_RANSAC_SQUARED_TEST_DEFAULT != 0;
+    return on;
+}
+
 /// @brief Whether `Model` supplies `isInlier(model, from, to, threshold)`. **INTERNAL.**
 template <typename Model, typename = void>
 struct RansacHasIsInlier : std::false_type {};
@@ -135,6 +143,14 @@ struct RansacHasIsInlier<
     Model, decltype(static_cast<void>(Model::isInlier(
                std::declval<const typename Model::Type&>(), Point2f(), Point2f(), 0.0f)))>
     : std::true_type {};
+
+/// @brief Whether `Model` supplies `Scorer`: built once per hypothesis from the model
+/// and the threshold, then asked `isInlier`'s question of each correspondence.
+/// **INTERNAL.**
+template <typename Model, typename = void>
+struct RansacHasScorer : std::false_type {};
+template <typename Model>
+struct RansacHasScorer<Model, std::void_t<typename Model::Scorer>> : std::true_type {};
 
 } // namespace impl
 #endif
@@ -378,6 +394,7 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
     const float threshold = static_cast<float>(params.threshold);
 #if BINCV_RANSAC_SQUARED_TEST
     const bool squaredTest = impl::ransacSquaredTestEnabled();   // once a call, not a point
+    const bool floatScorer = squaredTest && impl::ransacFloatScorerEnabled();
 #endif
     const size_t words = ransacScratchWords(count);
     uint32_t* bestFlags = scratch.words;
@@ -409,8 +426,23 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
         for (size_t m = 0; m < produced; ++m) {
             for (size_t w = 0; w < words; ++w) candFlags[w] = 0;
             size_t support = 0;
-            for (size_t i = 0; i < count; ++i) {
 #if BINCV_RANSAC_SQUARED_TEST
+            // The single-precision scorer is its own loop, built once per hypothesis; the
+            // loop below is the squared test's and the residual's, as it was.
+            bool scored = false;
+            if constexpr (impl::RansacHasScorer<Model>::value) {
+                if (floatScorer) {
+                    const typename Model::Scorer score(models[m], threshold);
+                    for (size_t i = 0; i < count; ++i) {
+                        if (score(from[i], to[i])) {
+                            candFlags[i >> 5] |= static_cast<uint32_t>(1u) << (i & 31u);
+                            ++support;
+                        }
+                    }
+                    scored = true;
+                }
+            }
+            for (size_t i = 0; i < count && !scored; ++i) {
                 bool inlier;
                 if constexpr (impl::RansacHasIsInlier<Model>::value) {
                     inlier = squaredTest
@@ -420,13 +452,18 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                     inlier = Model::residual(models[m], from[i], to[i]) < threshold;
                 }
                 if (inlier) {
-#else
-                if (Model::residual(models[m], from[i], to[i]) < threshold) {
-#endif
                     candFlags[i >> 5] |= static_cast<uint32_t>(1u) << (i & 31u);
                     ++support;
                 }
             }
+#else
+            for (size_t i = 0; i < count; ++i) {
+                if (Model::residual(models[m], from[i], to[i]) < threshold) {
+                    candFlags[i >> 5] |= static_cast<uint32_t>(1u) << (i & 31u);
+                    ++support;
+                }
+            }
+#endif
             if (support <= bestInliers) continue;
 
             bestInliers = support;
