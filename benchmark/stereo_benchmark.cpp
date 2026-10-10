@@ -18,62 +18,24 @@
 #include "bincv/binMat.hpp"
 #include "bincv/ops/descriptor.hpp"
 #include "bincv/ops/shift.hpp"
+#include "stereo_scene.hpp"
 #include "bincv/ops/stereo.hpp"
 #include "bincv/ops/pack.hpp"
 #include "measure_util.hpp"
 
-namespace {
-
-constexpr size_t kBits = 256;
-constexpr size_t kWords = kBits / 32;
-constexpr int kW = 752, kH = 480;   // the reference frame size
-constexpr int kDisp = 21;
-constexpr size_t kKp = 500;
-
-std::vector<uint8_t> smoothFrame(size_t w, size_t h) {
-    std::vector<uint8_t> img(w * h);
-    uint64_t st = 0xFEEDFACEULL;
-    for (auto& v : img) {
-        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
-        v = static_cast<uint8_t>(st >> 40);
-    }
-    std::vector<uint8_t> tmp(w * h);
-    for (size_t y = 1; y + 1 < h; ++y)
-        for (size_t x = 1; x + 1 < w; ++x)
-            tmp[y * w + x] = static_cast<uint8_t>(
-                (img[y * w + x - 1] + 2u * img[y * w + x] + img[y * w + x + 1]) / 4u);
-    for (size_t y = 1; y + 1 < h; ++y)
-        for (size_t x = 1; x + 1 < w; ++x)
-            img[y * w + x] = static_cast<uint8_t>(
-                (tmp[(y - 1) * w + x] + 2u * tmp[y * w + x] + tmp[(y + 1) * w + x]) / 4u);
-    return img;
-}
-
-} // namespace
+using namespace stereoscene;  // the pair, built as bincv_m7_stereo builds it
 
 int main() {
-    const std::vector<uint8_t> lw = smoothFrame(kW, kH);
-    std::vector<uint8_t> rw(static_cast<size_t>(kW) * kH, 0);
-    for (size_t y = 0; y < kH; ++y)
-        for (size_t x = 0; x + kDisp < kW; ++x)
-            rw[y * kW + x] = lw[y * kW + x + kDisp];
-
+    std::vector<uint8_t> lw(kW * kH), rw(kW * kH), ring(3 * kW);
+    buildLeft(lw.data(), ring.data());
+    rw = lw;
+    shiftToRight(rw.data());
     bincv::BinMat<uint32_t> lb(kW, kH), rb(kW, kH);
-    bincv::packBits<bincv::PackRule::GreaterThan>(lw.data(), size_t{kW}, size_t{kH}, size_t{kW}, lb.view(), uint8_t{127});
-    bincv::packBits<bincv::PackRule::GreaterThan>(rw.data(), size_t{kW}, size_t{kH}, size_t{kW}, rb.view(), uint8_t{127});
+    pack(lw.data(), lb.view());
+    pack(rw.data(), rb.view());
 
     std::vector<float> kpL(kKp * 2), kpR(kKp * 2);
-    uint64_t st = 0x5EA15EEDULL;
-    for (size_t i = 0; i < kKp; ++i) {
-        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
-        const int x = 80 + static_cast<int>((st >> 33) % (kW - 160));
-        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
-        const int y = 40 + static_cast<int>((st >> 33) % (kH - 80));
-        kpL[2 * i] = static_cast<float>(x);
-        kpL[2 * i + 1] = static_cast<float>(y);
-        kpR[2 * i] = static_cast<float>(x - kDisp);
-        kpR[2 * i + 1] = static_cast<float>(y);
-    }
+    buildKeypoints(kpL.data(), kpR.data());
 
     bincv::BriefPattern<kBits> pat;
     bincv::makeBriefPattern<kBits>(pat);
@@ -88,7 +50,7 @@ int main() {
     std::vector<bincv::StereoMatch> m(kKp);
 
     std::printf("=== sparse rectified stereo ===\n");
-    std::printf(" %dx%d pair, %zu vs %zu keypoints, disparity range [0, %d],"
+    std::printf(" %zux%zu pair, %zu vs %zu keypoints, disparity range [0, %d],"
                 " %dx%d refine window\n\n",
                 kW, kH, kKp, kKp, params.maxDisparity, params.winWidth, params.winHeight);
 
@@ -135,6 +97,18 @@ int main() {
                 valid, kKp);
     std::printf(" no scratch; output is %zu B of StereoMatch records.\n",
                 kKp * sizeof(bincv::StereoMatch));
+    // The digests bincv_m7_stereo prints, for the board's to be held to, after both
+    // stages once more: the timed arms ran in an interleaved order, and the board
+    // digests what both stages leave.
+    bincv::stereoMatchRectified<uint32_t>(lb.constView(), rb.constView(), kpL.data(), kKp,
+                                          dl.data(), kpR.data(), kKp, dr.data(), kWords,
+                                          m.data(), params);
+    std::printf("\n-- digests, for the board's --\n");
+    std::printf("  left bits        %08x\n", digestBits(lb.constView()));
+    std::printf("  right bits       %08x\n", digestBits(rb.constView()));
+    std::printf("  left brief       %08x\n", fnv1a(kFnvSeed, dl.data(), dl.size() * 4));
+    std::printf("  right brief      %08x\n", fnv1a(kFnvSeed, dr.data(), dr.size() * 4));
+    std::printf("  matches          %08x\n", digestMatches(m.data(), kKp));
     std::printf(" sink %zu\n", static_cast<size_t>(measure::g_sink));
     return 0;
 }

@@ -114,7 +114,7 @@ level regardless of how small that level is. `1/1/1/1` is faster and less accura
 shipped ladder is the operating point that keeps keypoint yield up.
 
 **This is Lucas–Kanade against Lucas–Kanade.** Wired into a whole pipeline the end-to-end
-figure is 3.97× on x86-64 and 5.32× on aarch64
+figure is 3.97× on x86-64 and 5.41× on aarch64
 ([feature-tracking.md](feature-tracking.md#speed)); the stages around tracking do not have
 this ratio.
 
@@ -272,6 +272,29 @@ binCV), and on aarch64 it is 0.999× [0.999, 1.00] — the arm is x86-only by me
 the architecture its own gate excludes reports 1.00×, which is the check that the fast path
 is the one being timed. A ratio near 1.00× on x86-64 would mean it was not.
 
+### Detection on a grid
+
+`gridCorners` ([ops/gridCorners.hpp](../../include/bincv/ops/gridCorners.hpp), Tier 3) is a
+second detector, not a form of this one. It keeps the strongest corner or corners of each
+cell of a grid, from the same response and suppression, in one sweep and a few slots a cell
+instead of a candidate pool; the cell size, how many a cell keeps, a relative and an absolute
+threshold, a spacing across cells, a cap, which cells already hold features and a pixel mask
+are all the caller's. It returns different corners, so it has no ratio against OpenCV or
+against the row above. Side by side on 16 frames of the reference sequence, through the
+reference sensor stage, on the device
+([log](logs/grid_corners-aarch64-launches.log); aarch64 only):
+
+| detector | µs a frame | corners | holds, bytes |
+|---|---|---|---|
+| `goodFeaturesToTrackStreaming`, pool of 8,192 | 11,903 | 138 | 74,560 |
+| `gridCorners`, 34-pixel cells, one a cell | 5,629 | 194 | 11,784 |
+| `gridCorners`, 16-pixel cells, two a cell | 5,839 | 1,437 | 31,584 |
+
+The pool form sweeps 1.62 times a detection on these frames, and the grid once; "holds" is
+the three-row response ring plus the pool or the slots. On the Cortex-M7 the reference
+tracker detecting this way is in
+[targets/stm32h753/README.md](../../targets/stm32h753/README.md).
+
 ## Reproduce
 
 ```bash
@@ -281,9 +304,11 @@ BINCV_FORCE_ITERS=1 ./build/benchmark/lk_headtohead
 ./build/benchmark/fast_bitplane_benchmark        # FAST on a bit-plane
 ./build/benchmark/corner_opencv_benchmark        # goodFeaturesToTrack
 ./build/benchmark/corner_subpix_benchmark        # cornerSubPix
+./build/benchmark/grid_corners_benchmark <blob>  # gridCorners beside goodFeaturesToTrack
 ```
 
-All five binaries are self-contained. Each column above is
+The first five binaries are self-contained; the grid benchmark reads the reference sequence's
+8-bit blob (`scripts/make_sequence_blob.py`). Each column above is
 `./scripts/run_launches.sh -n <N> ./build/benchmark/<bench>` read back through
 `./scripts/aggregate_launches.py` — thirty launches on x86-64, ten on the device. Logs — the
 sweep behind each column, and the single launches also committed:
@@ -291,7 +316,8 @@ sweep behind each column, and the single launches also committed:
 [features](logs/features-x86_64-launches.log), [single](logs/features-x86_64.log), [aarch64](logs/feature-aarch64-launches.log), [single](logs/features-aarch64.log) ·
 [bit-plane FAST](logs/fast_bitplane-x86_64-launches.log), [single](logs/fast_bitplane-x86_64.log), [aarch64](logs/fast_bitplane-aarch64-launches.log), [single](logs/fast_bitplane-aarch64.log) ·
 [goodFeaturesToTrack](logs/goodfeatures-x86_64-launches.log), [earlier sweep](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64-launches.log), [earlier sweep](logs/goodfeatures-aarch64.log) ·
-[cornerSubPix](logs/corner_subpix-aarch64-launches.log) — aarch64 only.
+[cornerSubPix](logs/corner_subpix-aarch64-launches.log) — aarch64 only ·
+[gridCorners](logs/grid_corners-aarch64-launches.log) — aarch64 only.
 Logs marked stale in [expected-stale.txt](logs/expected-stale.txt) were taken before a
 bit-identical change to the code beneath them; the file records which files moved and why
 the figure stands.

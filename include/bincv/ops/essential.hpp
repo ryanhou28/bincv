@@ -227,12 +227,25 @@ BINCV_HOST_DEVICE inline double eDet6At(const EPolyZ3 m[6][6], double z) {
 /// under 3, and the coefficients are what the root finder consumes.
 /// @note Newton divided differences, then expanded to the monomial basis. Solving
 /// a Vandermonde system directly would be shorter and far worse conditioned.
+/// @note `Tabulated` takes the nodes from a table of the values the computed form gets
+/// -- `cos(pi (2i + 1) / 22)` as the expression below evaluates it -- so a solver that
+/// uses it links no trigonometry.
+template <bool Tabulated>
 BINCV_HOST_DEVICE inline void eDetPoly(const EPolyZ3 m[6][6], double* coeff) {
     constexpr int kN = 11;
     double node[kN], value[kN];
     for (int i = 0; i < kN; ++i) {
-        const double theta = 3.14159265358979323846 * (2.0 * i + 1.0) / (2.0 * kN);
-        node[i] = std::cos(theta);
+        if constexpr (Tabulated) {
+            const double table[kN] = {
+                0.9898214418809327,   0.9096319953545184,  0.7557495743542583,
+                0.5406408174555977,   0.2817325568414298,  2.83276944882399e-16,
+                -0.28173255684142967, -0.5406408174555972, -0.7557495743542582,
+                -0.9096319953545182,  -0.9898214418809327};
+            node[i] = table[i];
+        } else {
+            const double theta = 3.14159265358979323846 * (2.0 * i + 1.0) / (2.0 * kN);
+            node[i] = std::cos(theta);
+        }
         value[i] = eDet6At(m, node[i]);
     }
     // Divided differences, in place.
@@ -363,9 +376,220 @@ BINCV_HOST_DEVICE inline int eRealRoots(const double* c, int degree, double* out
     return found;
 }
 
+/// @brief `p(x)` and `p'(x)` of a polynomial of degree `n`, coefficients ascending.
+/// **INTERNAL.**
+BINCV_HOST_DEVICE inline void ePolyValueSlope(const double* p, int n, double x, double& v,
+                                              double& d) {
+    v = p[n];
+    d = 0.0;
+    for (int k = n - 1; k >= 0; --k) {
+        d = d * x + v;
+        v = v * x + p[k];
+    }
+}
+
+/// @brief The root of `p` (degree `n`) in `[lo, hi]`, where `p` is monotone and changes
+/// sign. **INTERNAL.** Newton's step where it stays inside the bracket and shrinks it
+/// fast enough, bisection where it does not, so it converges whatever the start --
+/// quadratically near the root, where the step is always Newton's.
+BINCV_HOST_DEVICE inline double eBracketedRoot(const double* p, int n, double lo, double hi,
+                                               double flo) {
+    double x = 0.5 * (lo + hi);
+    double width = hi - lo;
+    for (int it = 0; it < 100; ++it) {
+        double f, d;
+        ePolyValueSlope(p, n, x, f, d);
+        if (f == 0.0) return x;
+        if ((f < 0.0) == (flo < 0.0)) {
+            lo = x;
+        } else {
+            hi = x;
+        }
+        const double newton = x - f / d;
+        double next;
+        if (d != 0.0 && newton > lo && newton < hi && 2.0 * std::fabs(newton - x) < width) {
+            next = newton;
+        } else {
+            next = 0.5 * (lo + hi);
+        }
+        width = std::fabs(next - x);
+        if (width <= 4.0 * 2.2204460492503131e-16 * std::fabs(next) || next == x) return next;
+        x = next;
+    }
+    return x;
+}
+
+/// @brief Every real root of a real polynomial, by isolating them between its
+/// derivative's. **INTERNAL.** The finder `fivePointEssentialRealRoots` uses in place of
+/// `eRealRoots`.
+/// @note ROLLE, FROM THE TOP DOWN. Between two consecutive real roots of `p'`, `p` is
+/// monotone, so it has at most one root there and has one exactly when it changes sign.
+/// The highest derivative is linear; each lower one's roots are then bracketed by the
+/// roots of the one above, and the polynomial's own come last -- about 10 n^2
+/// operations for degree n, where finding all n complex roots by simultaneous iteration
+/// costs that per pass and takes a hundred passes or more. Every root of every
+/// derivative lies inside the polynomial's Cauchy bound (Gauss-Lucas), so the outermost
+/// brackets are fixed by it.
+/// @note A TANGENT ROOT CHANGES NO SIGN, so it is looked for where it must be, at a
+/// root of `p'`, and accepted by `eRealRoots`' own test translated: a near-double root
+/// that the simultaneous iteration resolves as the pair `c +- i e` is accepted there when
+/// `|e| < 1e-6 (1 + |c|)`, and `e^2 = 2 |p(c) / p''(c)|`.
+/// @note The same trim of vanishing leading coefficients as `eRealRoots`.
+BINCV_HOST_DEVICE inline int eRealRootsByDerivatives(const double* c, int degree, double* out,
+                                                     int maxOut) {
+    int n = degree;
+    while (n > 0 && std::fabs(c[n]) < 1e-14) --n;
+    if (n < 1) return 0;
+
+    // The derivatives, each made monic: dv[k] is p^(k) over its leading coefficient,
+    // degree n - k. Roots are unchanged by the scaling, and the factorials the
+    // derivatives would otherwise carry stay out of the arithmetic.
+    double dv[10][11];
+    for (int i = 0; i <= n; ++i) dv[0][i] = c[i] / c[n];
+    for (int k = 1; k < n; ++k) {
+        const int d = n - k;
+        for (int i = 0; i <= d; ++i) {
+            dv[k][i] =
+                dv[k - 1][i + 1] * static_cast<double>(i + 1) / static_cast<double>(d + 1);
+        }
+    }
+    double bound = 0.0;
+    for (int i = 0; i < n; ++i) {
+        if (std::fabs(dv[0][i]) > bound) bound = std::fabs(dv[0][i]);
+    }
+    bound += 1.0;
+
+    // `crit` holds the roots of the derivative above, ascending; each pass replaces them
+    // with the roots of the level below.
+    double crit[10], next[10];
+    int nc = 1;
+    crit[0] = -dv[n - 1][0];
+    for (int k = n - 2; k >= 0; --k) {
+        const int d = n - k;
+        const double* p = dv[k];
+        int nn = 0;
+        double a = -bound, fa, unused;
+        ePolyValueSlope(p, d, a, fa, unused);
+        for (int j = 0; j <= nc && nn < 10; ++j) {
+            const double b = (j < nc) ? crit[j] : bound;
+            if (!(b > a)) continue;   // equal critical points: an empty bracket
+            double fb;
+            ePolyValueSlope(p, d, b, fb, unused);
+            if (fa == 0.0) {
+                next[nn++] = a;
+            } else if (fb != 0.0 && (fa < 0.0) != (fb < 0.0)) {
+                next[nn++] = eBracketedRoot(p, d, a, b, fa);
+            }
+            a = b;
+            fa = fb;
+        }
+        if (k == 0) {
+            // Tangent roots of the polynomial itself, at critical points where it keeps its
+            // sign on both sides and comes within the near-real test of zero.
+            int nt = 0;
+            double tangent[10];
+            for (int j = 0; j < nc && nn + nt < 10; ++j) {
+                const double x = crit[j];
+                double v;
+                ePolyValueSlope(p, d, x, v, unused);
+                if (v == 0.0) continue;   // an exact root, found above
+                const double l = (j > 0) ? crit[j - 1] : -bound;
+                const double r = (j + 1 < nc) ? crit[j + 1] : bound;
+                double vl, vr;
+                ePolyValueSlope(p, d, l, vl, unused);
+                ePolyValueSlope(p, d, r, vr, unused);
+                if ((vl < 0.0) != (v < 0.0) || (vr < 0.0) != (v < 0.0)) continue;
+                double pdd = 0.0;   // p''(x), from the monic coefficients
+                for (int i = d; i >= 2; --i) {
+                    pdd = pdd * x + static_cast<double>(i) * static_cast<double>(i - 1) * p[i];
+                }
+                const double e = 1e-6 * (1.0 + std::fabs(x));
+                if (2.0 * std::fabs(v) <= std::fabs(pdd) * e * e) tangent[nt++] = x;
+            }
+            // Merge, keeping the roots ascending.
+            for (int t = 0; t < nt; ++t) {
+                int at = nn;
+                while (at > 0 && next[at - 1] > tangent[t]) {
+                    next[at] = next[at - 1];
+                    --at;
+                }
+                next[at] = tangent[t];
+                ++nn;
+            }
+        }
+        for (int i = 0; i < nn; ++i) crit[i] = next[i];
+        nc = nn;
+    }
+    int found = 0;
+    for (int i = 0; i < nc && found < maxOut; ++i) out[found++] = crit[i];
+    return found;
+}
+
+/// @brief The unit nullvector of the 6x6 `M(z)` at a root `z`, by Gaussian elimination
+/// with complete pivoting on `M(z)` itself. **INTERNAL.** False when five pivots cannot
+/// be found. What `fivePointEssentialRealRoots` uses where `fivePointEssential` takes
+/// the smallest eigenvector of `M^T M` by Jacobi sweeps: one elimination rather than
+/// several sweeps, and on `M`'s condition number rather than its square.
+BINCV_HOST_DEVICE inline bool eNullVector6(const EPolyZ3 m[6][6], double z, double v[6]) {
+    double a[6][6];
+    for (int i = 0; i < 6; ++i) {
+        for (int j = 0; j < 6; ++j) a[i][j] = ePolyZ3Eval(m[i][j], z);
+    }
+    int col[6] = {0, 1, 2, 3, 4, 5};
+    for (int k = 0; k < 5; ++k) {
+        int pr = k, pc = k;
+        double best = 0.0;
+        for (int i = k; i < 6; ++i) {
+            for (int j = k; j < 6; ++j) {
+                if (std::fabs(a[i][j]) > best) {
+                    best = std::fabs(a[i][j]);
+                    pr = i;
+                    pc = j;
+                }
+            }
+        }
+        if (!(best > 1e-300)) return false;
+        if (pr != k) {
+            for (int j = 0; j < 6; ++j) {
+                const double t = a[k][j];
+                a[k][j] = a[pr][j];
+                a[pr][j] = t;
+            }
+        }
+        if (pc != k) {
+            for (int i = 0; i < 6; ++i) {
+                const double t = a[i][k];
+                a[i][k] = a[i][pc];
+                a[i][pc] = t;
+            }
+            const int t = col[k];
+            col[k] = col[pc];
+            col[pc] = t;
+        }
+        const double inv = 1.0 / a[k][k];
+        for (int i = k + 1; i < 6; ++i) {
+            const double f = a[i][k] * inv;
+            if (f == 0.0) continue;
+            for (int j = k; j < 6; ++j) a[i][j] -= f * a[k][j];
+        }
+    }
+    double u[6];
+    u[5] = 1.0;
+    for (int k = 4; k >= 0; --k) {
+        double acc = 0.0;
+        for (int j = k + 1; j < 6; ++j) acc += a[k][j] * u[j];
+        u[k] = -acc / a[k][k];
+    }
+    double norm = 0.0;
+    for (int i = 0; i < 6; ++i) norm += u[i] * u[i];
+    norm = std::sqrt(norm);
+    for (int i = 0; i < 6; ++i) v[col[i]] = u[i] / norm;
+    return true;
+}
+
 } // namespace impl
 
-/// @brief Stack the five-point solver uses for one call, in bytes.
+/// @brief Stack either five-point solver uses for one call, in bytes.
 /// @note **API TIER 3** -- OpenCV has nothing to report here because it allocates.
 /// This is the number that decides whether the solver fits on a small part.
 /// @note **MEASURED, NOT ADDED UP.** Summing the sizes of the solver's arrays
@@ -380,21 +604,19 @@ BINCV_HOST_DEVICE inline int eRealRoots(const double* c, int degree, double* out
 /// margin, not the exact frame, because the frame moves with the compiler
 /// and the optimisation level.
 inline constexpr size_t essentialSolverStackBytes() {
-    return 5376;  // measured 5136 B with g++ 11.4 at -O2 on x86-64, rounded up
+    return 5376;  // measured 5136 B for each solver with g++ 11.4 at -O2 on x86-64, rounded up
 }
 
-/// @brief Up to ten essential matrices through five correspondences.
-/// **API TIER 2** -- `cv::findEssentialMat`'s minimal solver, standalone.
-/// @param from Five source points in NORMALISED camera coordinates.
-/// @param to Five destination points, paired by index.
-/// @param out Receives the solutions; room for ten.
-/// @return Solutions written, 0 to 10. Typically four to six on real geometry.
-/// @note **Normalised coordinates, not pixels.** Divide by the intrinsics first;
-/// this solver has no notion of focal length or principal point, exactly as
-/// `cv::findEssentialMat`'s five-point core does not.
-/// @note Never throws; allocates nothing. See `essentialSolverStackBytes()`.
-BINCV_HOST_DEVICE inline int fivePointEssential(const Point2f* from, const Point2f* to,
-                                                EssentialMatrix* out) {
+namespace impl {
+
+/// @brief The five-point solve, both ways. **INTERNAL.** `RealRoots == false` is
+/// `fivePointEssential`; `true` is `fivePointEssentialRealRoots`, which differs in the
+/// two steps that are nearly all of the cost -- how the roots of `det M(z)` are found
+/// and how each root's `(x, y)` is recovered -- and nowhere else. One body, so the
+/// system both solve cannot drift between them.
+template <bool RealRoots>
+BINCV_HOST_DEVICE inline int fivePointSolve(const Point2f* from, const Point2f* to,
+                                            EssentialMatrix* out) {
     BINCV_ASSERT(from != nullptr && to != nullptr && out != nullptr,
                  "essential: five-point needs five correspondences and somewhere to write");
 
@@ -570,8 +792,12 @@ BINCV_HOST_DEVICE inline int fivePointEssential(const Point2f* from, const Point
     int nroots = 0;
     {
         double detCoeff[11];
-        impl::eDetPoly(m, detCoeff);
-        nroots = impl::eRealRoots(detCoeff, 10, roots, 10);
+        impl::eDetPoly<RealRoots>(m, detCoeff);
+        if constexpr (RealRoots) {
+            nroots = impl::eRealRootsByDerivatives(detCoeff, 10, roots, 10);
+        } else {
+            nroots = impl::eRealRoots(detCoeff, 10, roots, 10);
+        }
     }
 
     // --- phase 5: at each root the nullvector of M gives x and y ----------------
@@ -579,7 +805,15 @@ BINCV_HOST_DEVICE inline int fivePointEssential(const Point2f* from, const Point
     for (int k = 0; k < nroots && found < 10; ++k) {
         const double z = roots[k];
         double x = 0.0, y = 0.0;
-        {
+        if constexpr (RealRoots) {
+            double v[6];
+            if (!impl::eNullVector6(m, z, v)) continue;
+            // The nullvector is [x^2 xy y^2 x y 1] up to scale, and the same test for a
+            // last component too small to divide by, on the same unit vector.
+            if (std::fabs(v[5]) < 1e-9) continue;
+            x = v[3] / v[5];
+            y = v[4] / v[5];
+        } else {
             double n[6][6];
             for (int i = 0; i < 6; ++i) {
                 for (int j = 0; j < 6; ++j) n[i][j] = impl::ePolyZ3Eval(m[i][j], z);
@@ -616,6 +850,50 @@ BINCV_HOST_DEVICE inline int fivePointEssential(const Point2f* from, const Point
         ++found;
     }
     return found;
+}
+
+} // namespace impl
+
+/// @brief Up to ten essential matrices through five correspondences.
+/// **API TIER 2** -- `cv::findEssentialMat`'s minimal solver, standalone.
+/// @param from Five source points in NORMALISED camera coordinates.
+/// @param to Five destination points, paired by index.
+/// @param out Receives the solutions; room for ten.
+/// @return Solutions written, 0 to 10. Typically four to six on real geometry.
+/// @note **Normalised coordinates, not pixels.** Divide by the intrinsics first;
+/// this solver has no notion of focal length or principal point, exactly as
+/// `cv::findEssentialMat`'s five-point core does not.
+/// @note Never throws; allocates nothing. See `essentialSolverStackBytes()`.
+BINCV_HOST_DEVICE inline int fivePointEssential(const Point2f* from, const Point2f* to,
+                                                EssentialMatrix* out) {
+    return impl::fivePointSolve<false>(from, to, out);
+}
+
+/// @brief Up to ten essential matrices through five correspondences, by a solver built
+/// for a small core. **API TIER 2** -- `fivePointEssential`'s role, with its own
+/// accuracy rather than its bits.
+/// @note THE SAME SYSTEM, SOLVED CHEAPLY. The nullspace, the cubics and `det M(z)` are
+/// `fivePointEssential`'s own, shared code. What differs is the two steps that are
+/// nearly all of its cost: the degree-10 polynomial's REAL roots are isolated between
+/// its derivatives' and polished by Newton (`impl::eRealRootsByDerivatives`), instead of
+/// all ten complex roots found together; and each root's `(x, y)` comes from one
+/// elimination on `M(z)` (`impl::eNullVector6`), instead of an eigendecomposition of
+/// `M^T M`. Its Chebyshev nodes are tabulated, so it links no trigonometry.
+/// @note **Its answers are not `fivePointEssential`'s bit for bit.** Where the problem is
+/// well conditioned the two agree to within 4.1e-9 on planted poses on x86-64 and 1.5e-7
+/// on aarch64 -- the published solver recovers `(x, y)` through `M^T M`, which squares
+/// `M`'s condition number --
+/// and where it is not, both answers are inaccurate and differ, 2.3% of solutions there.
+/// A root at the edge of either one's test for "real" can also be returned by one and
+/// not the other. Every accuracy case in `tests/test_essential.cpp` runs for both
+/// solvers at the same bounds, and `Essential.RealRootSolverAgreesWhereWellConditioned`
+/// holds the two to each other wherever the problem is well conditioned.
+/// @note Never throws; allocates nothing. Its stack is `fivePointEssential`'s -- the peak
+/// is the cubic construction both share -- and `essentialSolverStackBytes()` covers it.
+BINCV_HOST_DEVICE inline int fivePointEssentialRealRoots(const Point2f* from,
+                                                         const Point2f* to,
+                                                         EssentialMatrix* out) {
+    return impl::fivePointSolve<true>(from, to, out);
 }
 
 /// @brief The five-point model policy, for `bincv::ransac`. **API TIER 2.**
@@ -674,6 +952,108 @@ struct EssentialModel {
         if (!(den > 1e-30)) return 1e30f;
         return static_cast<float>(std::fabs(num) / std::sqrt(den));
     }
+
+#if BINCV_RANSAC_SQUARED_TEST
+    /// @brief `residual(e, a, b) < threshold`, decided on squares wherever the squares
+    /// decide it. **INTERNAL to the driver** (BINCV_RANSAC_SQUARED_TEST).
+    /// @note `num^2 < den * t^2` is the comparison without the root, but rounding the
+    /// residual to float can carry a value within 2^-24 of the threshold across it, so
+    /// the squares decide only outside a band of 2^-20 either side -- eight times the
+    /// rounding, after every double rounding on the way -- and inside it the residual
+    /// is taken exactly as `residual` takes it. A threshold whose square is not a
+    /// normal double never reaches the squares at all.
+    BINCV_HOST_DEVICE static bool isInlier(const EssentialMatrix& e, Point2f a, Point2f b,
+                                           float threshold) {
+        const double x1 = static_cast<double>(a.x), y1 = static_cast<double>(a.y);
+        const double x2 = static_cast<double>(b.x), y2 = static_cast<double>(b.y);
+
+        const double ex1 = e.m[0] * x1 + e.m[1] * y1 + e.m[2];
+        const double ey1 = e.m[3] * x1 + e.m[4] * y1 + e.m[5];
+        const double ez1 = e.m[6] * x1 + e.m[7] * y1 + e.m[8];
+
+        const double ex2 = e.m[0] * x2 + e.m[3] * y2 + e.m[6];
+        const double ey2 = e.m[1] * x2 + e.m[4] * y2 + e.m[7];
+
+        const double num = x2 * ex1 + y2 * ey1 + ez1;
+        const double den = ex1 * ex1 + ey1 * ey1 + ex2 * ex2 + ey2 * ey2;
+        if (!(den > 1e-30)) return 1e30f < threshold;
+        const double t = static_cast<double>(threshold);
+        if (t >= 1e-100 && t <= 1e100) {
+            constexpr double kBand = 1.0 / 1048576.0;   // 2^-20
+            const double t2 = t * t;
+            const double n2 = num * num;
+            if (n2 < den * (t2 * (1.0 - kBand))) return true;
+            if (n2 > den * (t2 * (1.0 + kBand))) return false;
+        }
+        return static_cast<float>(std::fabs(num) / std::sqrt(den)) < threshold;
+    }
+
+    /// @brief `isInlier` for every correspondence against one hypothesis, decided in
+    /// single precision wherever single precision's error provably cannot change the
+    /// answer. **INTERNAL to the driver** (BINCV_RANSAC_SQUARED_TEST).
+    /// @note THE BOUND. With E in float, `m` its largest magnitude, `L = |x| + |y| + 1`
+    /// per point and `u = 2^-24`: every float rounding the numerator and denominator
+    /// take -- fused or not -- plus E's own, keeps the float numerator within
+    /// `12 u m L1 L2` of the exact one and the denominator within `36 u m^2 (L1^2 +
+    /// L2^2)`. A point whose whole interval lies inside the threshold, with `2^-18` to
+    /// spare -- the squared test's band is `2^-20` -- is an inlier however the double
+    /// arithmetic would round; one wholly outside is an outlier; anything else is decided
+    /// by `isInlier` itself, and so is anything outside the range where the products
+    /// stay finite and normal: a threshold outside [1e-6, 1e6], a coordinate or entry
+    /// of E beyond 1e6, a denominator under 1e-20, any NaN. So every decision is
+    /// `isInlier`'s, and `residual`'s.
+    struct Scorer {
+        const EssentialMatrix* e;
+        float threshold;
+        float f[9];
+        float numBound = 0.0f, denBound = 0.0f, t2lo = 0.0f, t2hi = 0.0f;
+        bool usable = false;
+
+        BINCV_HOST_DEVICE Scorer(const EssentialMatrix& model, float t)
+            : e(&model), threshold(t) {
+            float mx = 0.0f;
+            for (int i = 0; i < 9; ++i) {
+                f[i] = static_cast<float>(model.m[i]);
+                const float a = std::fabs(f[i]);
+                mx = a > mx ? a : mx;
+            }
+            constexpr float kU = 1.0f / 16777216.0f;   // 2^-24
+            constexpr float kMargin = 1.0f / 262144.0f;  // 2^-18
+            mx *= 1.0f + 4.0f * kU;   // an upper bound on |E|, whatever the conversion did
+            // Bounds that keep every product below finite and above the normal range:
+            // `num^2` under 1e36, `den * t^2` between 1e-32 and 1e37.
+            usable = mx < 1e6f && t >= 1e-6f && t <= 1e6f;
+            numBound = 12.0f * kU * mx;
+            denBound = 36.0f * kU * mx * mx;
+            t2lo = t * t * (1.0f - kMargin);
+            t2hi = t * t * (1.0f + kMargin);
+        }
+
+        BINCV_HOST_DEVICE bool operator()(Point2f a, Point2f b) const {
+            if (usable) {
+                const float l1 = std::fabs(a.x) + std::fabs(a.y) + 1.0f;
+                const float l2 = std::fabs(b.x) + std::fabs(b.y) + 1.0f;
+                if (l1 < 1e6f && l2 < 1e6f) {
+                    const float ex1 = f[0] * a.x + f[1] * a.y + f[2];
+                    const float ey1 = f[3] * a.x + f[4] * a.y + f[5];
+                    const float ez1 = f[6] * a.x + f[7] * a.y + f[8];
+                    const float ex2 = f[0] * b.x + f[3] * b.y + f[6];
+                    const float ey2 = f[1] * b.x + f[4] * b.y + f[7];
+                    const float num = std::fabs(b.x * ex1 + b.y * ey1 + ez1);
+                    const float den = ex1 * ex1 + ey1 * ey1 + ex2 * ex2 + ey2 * ey2;
+                    const float bn = numBound * l1 * l2;
+                    const float bd = denBound * (l1 * l1 + l2 * l2);
+                    const float hi = num + bn;
+                    const float denLo = den - bd;
+                    if (denLo > 1e-20f && hi * hi < denLo * t2lo) return true;
+                    const float lo = num - bn;
+                    if (den > 1e-20f && lo > 0.0f && lo * lo > (den + bd) * t2hi) return false;
+                }
+            }
+            return isInlier(*e, a, b, threshold);
+        }
+    };
+#endif
 };
 
 /// @brief `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role over caller-owned
@@ -701,6 +1081,41 @@ inline RansacResult findEssentialMat(const Point2f* from, const Point2f* to, siz
                                      const RansacParams& params, EssentialMatrix* model,
                                      uint8_t* inlierMask = nullptr) {
     return ransac<EssentialModel>(from, to, count, params, model, inlierMask);
+}
+
+/// @brief The five-point model policy over `fivePointEssentialRealRoots`, for
+/// `bincv::ransac`. **API TIER 2.** Everything but the minimal solve is
+/// `EssentialModel`'s: the residual, the squared test, no refit.
+struct EssentialModelRealRoots : EssentialModel {
+    BINCV_HOST_DEVICE static size_t estimate(const Point2f* from, const Point2f* to,
+                                             const size_t* idx, EssentialMatrix* out) {
+        Point2f f[5], t[5];
+        for (int i = 0; i < 5; ++i) {
+            f[i] = from[idx[i]];
+            t[i] = to[idx[i]];
+        }
+        const int n = fivePointEssentialRealRoots(f, t, out);
+        return n < 0 ? 0u : static_cast<size_t>(n);
+    }
+};
+
+/// @brief `findEssentialMat` with the minimal solver built for a small core.
+/// **API TIER 2** -- `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role, held to the
+/// same agreement bounds as `findEssentialMat`; see `fivePointEssentialRealRoots`.
+inline RansacResult findEssentialMatRealRoots(const Point2f* from, const Point2f* to,
+                                              size_t count, const RansacParams& params,
+                                              RansacScratch scratch, EssentialMatrix* model,
+                                              uint8_t* inlierMask = nullptr) {
+    return ransac<EssentialModelRealRoots>(from, to, count, params, scratch, model,
+                                           inlierMask);
+}
+
+/// @brief `findEssentialMatRealRoots` with no scratch parameter. **API TIER 2.**
+inline RansacResult findEssentialMatRealRoots(const Point2f* from, const Point2f* to,
+                                              size_t count, const RansacParams& params,
+                                              EssentialMatrix* model,
+                                              uint8_t* inlierMask = nullptr) {
+    return ransac<EssentialModelRealRoots>(from, to, count, params, model, inlierMask);
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE

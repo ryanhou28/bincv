@@ -1,0 +1,51 @@
+# feature tracker on the board -- one run of a firmware image over a sequence
+# benchmark: bincv_m7_track_grid TRACK 1710 752 480
+# launches: 1
+# arch:     cortex-m7
+# host:     NUCLEO-H753ZI (STM32H753ZI)
+# compiler: arm-none-eabi-g++ (Arm GNU Toolchain 14.2.Rel1 (Build arm-14.52)) 14.2.1 20241119
+# commit:   8362c5f (dirty)
+# sources:  benchmark/frontend_pipeline.hpp=2b14a91c0a52 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/parallel.hpp=36791a71f6a2 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/impl/lkBatch_impl.hpp=5bc9214bf036 include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=273f10cd0fa0 include/bincv/ops/covariance.hpp=1a5212230810 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/edge.hpp=361fd538a5c0 include/bincv/ops/gridCorners.hpp=769f8989b62c include/bincv/ops/medianEdgeStream.hpp=42ea942cda04 include/bincv/ops/medianWide.hpp=ce1df9d13d48 include/bincv/ops/opticalFlow.hpp=8a5615c33c3a include/bincv/ops/opticalFlowOnDemand.hpp=c3b46bfdeb2f include/bincv/ops/pyramid.hpp=59388d95dccc include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/resample.hpp=d0db5aee157f include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6 targets/stm32h753/bincv_m7_track.cpp=b6a37dcd39ce targets/stm32h753/board.c=ab5621aa2813 targets/stm32h753/board.h=3967e62ac995 targets/stm32h753/m7_harness.cpp=a308cda46d25 targets/stm32h753/m7_harness.hpp=4ae6cf7e2678 targets/stm32h753/startup.c=db5771d4d7f2 targets/stm32h753/string.c=85ca2e9bf016 targets/stm32h753/syscalls.c=cc70640148f0
+# image:    targets/stm32h753/bincv_m7_track_grid.bin sha256 642ea279ffcd
+# board:    HELLO bincv-m7 image=track-grid proto=1 clock_hz=480000000 baud=4000000 stack_bytes=16384 caches=ID
+# clock:    CLOCK configured_hz=480000000 measured_hz=480360005
+# sequence: v1_02-752x480-8bit.bsq, 1710 frames of 752x480
+# reference: ref-grid.txt
+# settings: (image defaults)
+# date:     2026-10-10T09:14:26-07:00
+# per-frame F/P/T lines: full-grid.frames (not committed: ~3 KB a frame)
+
+-- per frame, mean cycles over 1709 frame pairs --
+  sensor stage  4273342 cyc
+  pyrDown  482253 cyc
+  derivatives  0 cyc
+  detect  462814 cyc
+  track  15039139 cyc
+  total  20257549 cyc
+-- tracking --
+detections               : 51 (34 truncated, 0 took more than one sweep, at most 1)
+tracks observed          : 9716
+median track lifetime    : 14 frames
+per-frame survival       : 0.96 of tracks tried
+-- working set, bytes --
+pyramids, two            : 152640
+derivative ladders       : 0
+response ring            : 9024
+  = the published figure : 161664
+gradient rows (on demand): 1152
+sensor stream rows       : 3760
+corner pool + kept       : 5160
+tracks                   : 4200
+  = everything held      : 175936
+receive buffer (harness) : 30080
+stack used               : 7724
+OK
+
+-- against the host reference --
+frames compared          : 1709
+integer digests equal    : 1709 of 1709
+points bit-identical     : 1709 of 1709 frames
+points that differ       : 0 of 199970, largest 0 px, status differs on 0
+
+# wall time 2695 s, mostly the link
+# done

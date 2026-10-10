@@ -189,6 +189,60 @@ parameters you provide. Container constructors and `wrap` validate their geometr
 not (`-fno-exceptions`, or `BINCV_NO_EXCEPTIONS`), so a core-only build has no exception
 path at all.
 
+**Check your C library's `memcpy` and `memset`.** Kernels call them on whole rows, and the
+compiler turns a kernel's own zero-filling loop into a `memset` call. newlib-nano
+(`--specs=nano.specs`) builds all three of `memcpy`, `memmove` and `memset` as byte loops;
+on the Cortex-M7 they made the streaming sensor stage 13% slower and dense disparity 14%.
+Link word-wide ones — full newlib's, your vendor's, or
+[targets/stm32h753/string.c](targets/stm32h753/string.c).
+
+**A microcontroller gets arms of its own**, chosen from the compiler's macros and compiled
+nowhere else, so the other targets' code is untouched. The ones that replace a population
+count are selected wherever that count is software — M-profile Arm, and RISC-V without
+Zbb; the rest are M-profile only:
+
+| | what it does | on the Cortex-M7 ([targets/stm32h753](targets/stm32h753/README.md)) |
+|---|---|---|
+| `BINCV_LK_WINDOW_COUNT` | Lucas–Kanade counts down the window in byte lanes | tracking 4.57× faster; 13,556 B of flash |
+| `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table (M-profile) | detection 1.47× faster; 2,984 B of flash |
+| `BINCV_STEREO_WINDOW_COUNT` | sparse stereo's refinement reads its windows once and counts down them in byte lanes | refinement 6.28× faster; 1,137 B |
+| `BINCV_STEREO_INTEGER_ROW_GATE` | sparse stereo's descriptor stage tests rows on the coordinates' bit patterns (M-profile) | descriptor stage 2.89× faster; 2,209 B |
+| `BINCV_RANSAC_SQUARED_TEST` | RANSAC decides an inlier in single precision under a proven error bound, then on squares, taking the root only near the threshold (M-profile) | scoring 1.66× faster, the estimation up to 1.11×; 1,914 B |
+| `BINCV_SUBPIX_REUSE` | `cornerSubPix` reuses the sums of an anchor it has already summed (M-profile) | 1.36× faster; 205 B |
+
+Each has a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTableEnabled`,
+`impl::stereoWindowCountEnabled`, `impl::stereoIntegerRowGateEnabled`,
+`impl::ransacSquaredTestEnabled` and `impl::ransacFloatScorerEnabled`,
+`impl::subPixReuseEnabled`) so one image can time both
+arms, and each gives the published code's output bit for bit. They change inline bodies,
+so like `BINCV_NO_NEON` a define must be the same in every translation unit.
+
+**RANSAC's five-point solver has a second form built for such a part.**
+`findEssentialMatRealRoots` (`fivePointEssentialRealRoots`, `EssentialModelRealRoots`) finds
+only the real roots of the solver's degree-10 polynomial, isolating them between its
+derivative's, where `findEssentialMat` finds all ten complex ones together: on the Cortex-M7
+a solve is 8× faster, an estimation 2× to 7×, in the same stack. Its answers are not the
+published solver's bit for bit — it is held to every accuracy bound that solver is, and on
+the measured scenes it finds the same inliers — so it is a separate name rather than an arm.
+
+**A detector that needs no candidate pool.** `gridCorners` (`ops/gridCorners.hpp`) keeps the
+strongest corner or corners of each cell of a grid in one sweep, in a few eight-byte slots a
+cell — the cell size, the count, the thresholds, spacing, a cap, the cells that already hold
+features and a mask are all arguments. It answers a different question from
+`goodFeaturesToTrack`, so it is a separate operation rather than a mode of it.
+
+**Three things exist for a frame that does not fit.** `MedianEdgeStream`
+(`ops/medianEdgeStream.hpp`) runs the sensor stage on rows as a camera delivers them, in
+a few rows of scratch instead of two whole 8-bit frames. `goodFeaturesToTrackStreaming`
+takes a candidate pool of the size you choose and returns the same corners an
+unbounded one would, sweeping again when the pool is outrun. And the derivative planes
+need not be stored at all: `LKLevelOnDemand` / `LKLevelsOnDemand`
+(`ops/opticalFlowOnDemand.hpp`) track from the two pyramids alone, computing each
+window's derivatives as they stage it, and `goodFeaturesToTrackStreaming` over a
+`GradientSource` derives the detector's gradient row by row. Both give the stored
+form's output bit for bit; on the Cortex-M7 tracker they remove 275,040 of 512,600
+bytes at no measurable cost in time ([targets/stm32h753](targets/stm32h753/README.md)).
+
 ### Building for Cortex-M7
 
 The bare-metal target under `targets/stm32h753/` (NUCLEO-H753ZI) builds with an
@@ -199,11 +253,11 @@ cmake -S . -B build-m7 \
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-cortex-m7.cmake \
       -DBINCV_BUILD_EMBEDDED=ON -DBINCV_BUILD_TESTS=OFF \
       -DBINCV_USE_OPENCV=OFF -DBINCV_BUILD_BENCHMARKS=OFF
-cmake --build build-m7 --target bincv_m7
+cmake --build build-m7
 ```
 
-[targets/stm32h753/README.md](targets/stm32h753/README.md) says how to flash the image and
-read its report, and what was measured on that part. `scripts/verify_cortex_m.sh` is the
+[targets/stm32h753/README.md](targets/stm32h753/README.md) says how to flash an image and
+drive it with `scripts/m7_host.py`, and what was measured on that part. `scripts/verify_cortex_m.sh` is the
 compile-only gate for that architecture.
 
 ## Conventions

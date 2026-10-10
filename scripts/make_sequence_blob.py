@@ -134,6 +134,10 @@ def main():
                         help="packed mode's edge threshold (default 17, the reference's)")
     parser.add_argument("--max-frames", type=int, default=0,
                         help="stop after this many frames (0 = all)")
+    parser.add_argument("--bin", type=int, choices=(1, 2), default=1,
+                        help="average each 2x2 block into one pixel first, as a sensor's "
+                             "2x2 binning would: (a+b+c+d+2)//4, an odd last row or "
+                             "column dropped. 752x480 becomes 376x240 (default 1: off)")
     args = parser.parse_args()
 
     files = sorted(p for p in args.frame_dir.iterdir()
@@ -150,6 +154,13 @@ def main():
         gray = load_gray(path)
         if gray is None:
             sys.exit(f"error: cannot read {path}")
+        if args.bin == 2:
+            # Integer arithmetic with the rounding written down, so the frames a
+            # small target is measured on have one definition however they are
+            # produced again.
+            g = gray[: gray.shape[0] // 2 * 2, : gray.shape[1] // 2 * 2].astype(np.uint16)
+            gray = ((g[0::2, 0::2] + g[0::2, 1::2] + g[1::2, 0::2] + g[1::2, 1::2] + 2)
+                    // 4).astype(np.uint8)
         if width is None:
             height, width = gray.shape
         elif gray.shape != (height, width):
@@ -175,7 +186,8 @@ def main():
     print(f"wrote {args.output}")
     print(f"  mode        {args.mode} ({mode})"
           + (f", threshold {args.threshold}" if mode == MODE_PACKED else ""))
-    print(f"  frames      {len(bodies)} of {width}x{height}")
+    print(f"  frames      {len(bodies)} of {width}x{height}"
+          + (" (2x2-binned)" if args.bin == 2 else ""))
     print(f"  bytes/frame {per_frame}")
     print(f"  total       {total} bytes (32-byte header + bodies)")
 

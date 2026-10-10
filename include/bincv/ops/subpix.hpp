@@ -51,6 +51,22 @@
 #include "../core/types.hpp"
 #include "../impl/kernel_util.hpp"
 
+// An iteration that anchors where the previous one did reuses its sums: selected, and
+// COMPILED, only on M-profile, where the window's double-precision arithmetic is the
+// cost, so every other target compiles the loop it always has. It changes inline
+// bodies, so like BINCV_LK_WINDOW_COUNT it must be the same in every translation unit.
+#if defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
+#define BINCV_SUBPIX_REUSE_DEFAULT 1
+#else
+#define BINCV_SUBPIX_REUSE_DEFAULT 0
+#endif
+#if !defined(BINCV_SUBPIX_REUSE)
+#define BINCV_SUBPIX_REUSE BINCV_SUBPIX_REUSE_DEFAULT
+#endif
+#if BINCV_SUBPIX_REUSE_DEFAULT && !BINCV_SUBPIX_REUSE
+#error "BINCV_SUBPIX_REUSE=0 on a target whose default selects it"
+#endif
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
@@ -144,6 +160,16 @@ inline size_t ctzWord(unsigned long long v) {
 #endif
 }
 
+#if BINCV_SUBPIX_REUSE
+/// @brief Whether `cornerSubPix` reuses an anchor's sums. **INTERNAL.** Exists where it
+/// is compiled (BINCV_SUBPIX_REUSE); on by default on M-profile. The tests and the board
+/// flip it to hold the two to each other and to time them.
+inline bool& subPixReuseEnabled() {
+    static bool on = BINCV_SUBPIX_REUSE_DEFAULT != 0;
+    return on;
+}
+#endif
+
 }  // namespace impl
 
 /// @brief Refines corner positions to sub-pixel accuracy. **API TIER 2.**
@@ -182,12 +208,28 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
     const size_t width = dx.getWidth();
     const size_t height = dx.getHeight();
     const double eps2 = params.epsilon * params.epsilon;
+#if BINCV_SUBPIX_REUSE
+    // THE SUMS ARE A FUNCTION OF THE ANCHOR ALONE -- the window, the mask and the
+    // offsets all hang off the rounded position -- so an iteration that rounds to the
+    // previous one's anchor would recompute the same five doubles bit for bit. It
+    // reuses them. On real convergence that is the last iteration of nearly every
+    // corner: the step that proves convergence is the one that moved less than half a
+    // pixel. And with no zero zone every weight is at least exp(-2), so the per-pixel
+    // test for a zero weight cannot fire and is not made.
+    const bool reuse = impl::subPixReuseEnabled();
+    const bool weightTest = !reuse || params.zeroHalf >= 0;
+#endif
 
     for (size_t c = 0; c < count; ++c) {
         const double startX = static_cast<double>(corners[c].x);
         const double startY = static_cast<double>(corners[c].y);
         double cx = startX;
         double cy = startY;
+#if BINCV_SUBPIX_REUSE
+        bool havePrev = false;
+        long long prevX = 0, prevY = 0;
+        double pgxx = 0.0, pgxy = 0.0, pgyy = 0.0, pbx = 0.0, pby = 0.0;
+#endif
 
         for (int it = 0; it < params.maxIterations; ++it) {
             // THE WINDOW IS ANCHORED ON THE ROUNDED POSITION, AND THAT IS A DEVIATION.
@@ -206,81 +248,107 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
             }
 
             double gxx = 0.0, gxy = 0.0, gyy = 0.0, bx = 0.0, by = 0.0;
-            constexpr size_t kBits = impl::bitsPerWord<WordType>();
-            const size_t xLo = static_cast<size_t>(ix0 - winHalf);
-            const size_t xHi = static_cast<size_t>(ix0 + winHalf);   // inclusive
+#if BINCV_SUBPIX_REUSE
+            if (reuse && havePrev && ix0 == prevX && iy0 == prevY) {
+                gxx = pgxx;
+                gxy = pgxy;
+                gyy = pgyy;
+                bx = pbx;
+                by = pby;
+            } else
+#endif
+            {
+                constexpr size_t kBits = impl::bitsPerWord<WordType>();
+                const size_t xLo = static_cast<size_t>(ix0 - winHalf);
+                const size_t xHi = static_cast<size_t>(ix0 + winHalf);   // inclusive
 
-            for (int wy = -winHalf; wy <= winHalf; ++wy) {
-                const size_t y = static_cast<size_t>(iy0 + wy);
-                const double* mrow = mask + (wy + winHalf) * side;
+                for (int wy = -winHalf; wy <= winHalf; ++wy) {
+                    const size_t y = static_cast<size_t>(iy0 + wy);
+                    const double* mrow = mask + (wy + winHalf) * side;
 
-                const WordType* mx[N];
-                const WordType* my[N];
-                for (size_t j = 0; j < N; ++j) {
-                    mx[j] = dx.constMagnitude(j).row(y);
-                    my[j] = dy.constMagnitude(j).row(y);
-                }
-                const WordType* sx = dx.constSign().row(y);
-                const WordType* sy = dy.constSign().row(y);
-
-                for (size_t wi = xLo / kBits; wi <= xHi / kBits; ++wi) {
-                    // WHICH PIXELS IN THIS WORD CAN CONTRIBUTE AT ALL, A WORD AT A
-                    // TIME. A pixel with zero gradient in both axes adds nothing to any
-                    // of the five sums, and on a binarized edge map most of a 31x31
-                    // window is exactly that. This is what bit-planes buy in an
-                    // operation that cannot be reduced to popcounts.
-                    WordType nz = 0;
+                    const WordType* mx[N];
+                    const WordType* my[N];
                     for (size_t j = 0; j < N; ++j) {
-                        nz = static_cast<WordType>(nz | mx[j][wi] | my[j][wi]);
+                        mx[j] = dx.constMagnitude(j).row(y);
+                        my[j] = dy.constMagnitude(j).row(y);
                     }
-                    // Trim to the window's columns; `wi` may span either end.
-                    const size_t lo = (wi * kBits > xLo) ? 0 : (xLo - wi * kBits);
-                    const size_t hiExcl =
-                        (xHi >= (wi + 1) * kBits) ? kBits : (xHi - wi * kBits + 1);
-                    if (lo != 0) {
-                        nz = static_cast<WordType>(nz & ~impl::lowBitsMask<WordType>(lo));
-                    }
-                    if (hiExcl < kBits) {
-                        nz = static_cast<WordType>(nz & impl::lowBitsMask<WordType>(hiExcl));
-                    }
+                    const WordType* sx = dx.constSign().row(y);
+                    const WordType* sy = dy.constSign().row(y);
 
-                    while (nz != 0) {
-                        const size_t b =
-                            impl::ctzWord(static_cast<unsigned long long>(nz));
-                        nz = static_cast<WordType>(nz & (nz - 1));
-                        const size_t x = wi * kBits + b;
-                        const int wx = static_cast<int>(static_cast<long long>(x) - ix0);
-                        const double w = mrow[wx + winHalf];
-                        if (w == 0.0) continue;   // the zero zone
-
-                        // The signed value, assembled from the planes already loaded --
-                        // `at` would re-derive the row pointers for every pixel.
-                        const WordType bit = static_cast<WordType>(WordType{1} << b);
-                        long long vx = 0, vy = 0;
+                    for (size_t wi = xLo / kBits; wi <= xHi / kBits; ++wi) {
+                        // WHICH PIXELS IN THIS WORD CAN CONTRIBUTE AT ALL, A WORD AT A
+                        // TIME. A pixel with zero gradient in both axes adds nothing to any
+                        // of the five sums, and on a binarized edge map most of a 31x31
+                        // window is exactly that. This is what bit-planes buy in an
+                        // operation that cannot be reduced to popcounts.
+                        WordType nz = 0;
                         for (size_t j = 0; j < N; ++j) {
-                            if (mx[j][wi] & bit) vx |= (1LL << j);
-                            if (my[j][wi] & bit) vy |= (1LL << j);
+                            nz = static_cast<WordType>(nz | mx[j][wi] | my[j][wi]);
                         }
-                        if (sx[wi] & bit) vx = -vx;
-                        if (sy[wi] & bit) vy = -vy;
+                        // Trim to the window's columns; `wi` may span either end.
+                        const size_t lo = (wi * kBits > xLo) ? 0 : (xLo - wi * kBits);
+                        const size_t hiExcl =
+                            (xHi >= (wi + 1) * kBits) ? kBits : (xHi - wi * kBits + 1);
+                        if (lo != 0) {
+                            nz = static_cast<WordType>(nz & ~impl::lowBitsMask<WordType>(lo));
+                        }
+                        if (hiExcl < kBits) {
+                            nz = static_cast<WordType>(
+                                nz & impl::lowBitsMask<WordType>(hiExcl));
+                        }
 
-                        const double gx = static_cast<double>(vx);
-                        const double gy = static_cast<double>(vy);
-                        const double xx = w * gx * gx;
-                        const double xy = w * gx * gy;
-                        const double yy = w * gy * gy;
-                        // `p` is the sample's offset from the window center, so the
-                        // solve returns an offset and nothing large is accumulated.
-                        const double px = static_cast<double>(wx);
-                        const double py = static_cast<double>(wy);
-                        gxx += xx;
-                        gxy += xy;
-                        gyy += yy;
-                        bx += xx * px + xy * py;
-                        by += xy * px + yy * py;
+                        while (nz != 0) {
+                            const size_t b =
+                                impl::ctzWord(static_cast<unsigned long long>(nz));
+                            nz = static_cast<WordType>(nz & (nz - 1));
+                            const size_t x = wi * kBits + b;
+                            const int wx = static_cast<int>(static_cast<long long>(x) - ix0);
+                            const double w = mrow[wx + winHalf];
+#if BINCV_SUBPIX_REUSE
+                            if (weightTest && w == 0.0) continue;   // the zero zone
+#else
+                            if (w == 0.0) continue;   // the zero zone
+#endif
+
+                            // The signed value, assembled from the planes already loaded --
+                            // `at` would re-derive the row pointers for every pixel.
+                            const WordType bit = static_cast<WordType>(WordType{1} << b);
+                            long long vx = 0, vy = 0;
+                            for (size_t j = 0; j < N; ++j) {
+                                if (mx[j][wi] & bit) vx |= (1LL << j);
+                                if (my[j][wi] & bit) vy |= (1LL << j);
+                            }
+                            if (sx[wi] & bit) vx = -vx;
+                            if (sy[wi] & bit) vy = -vy;
+
+                            const double gx = static_cast<double>(vx);
+                            const double gy = static_cast<double>(vy);
+                            const double xx = w * gx * gx;
+                            const double xy = w * gx * gy;
+                            const double yy = w * gy * gy;
+                            // `p` is the sample's offset from the window center, so the
+                            // solve returns an offset and nothing large is accumulated.
+                            const double px = static_cast<double>(wx);
+                            const double py = static_cast<double>(wy);
+                            gxx += xx;
+                            gxy += xy;
+                            gyy += yy;
+                            bx += xx * px + xy * py;
+                            by += xy * px + yy * py;
+                        }
                     }
                 }
             }
+#if BINCV_SUBPIX_REUSE
+            havePrev = true;
+            prevX = ix0;
+            prevY = iy0;
+            pgxx = gxx;
+            pgxy = gxy;
+            pgyy = gyy;
+            pbx = bx;
+            pby = by;
+#endif
 
             const double det = gxx * gyy - gxy * gxy;
             if (det == 0.0) {

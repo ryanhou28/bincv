@@ -68,6 +68,18 @@ SECTIONS
     _eframes = .;
   } > RAM_D1
 
+  /* The 288 KB D2 SRAM (SRAM1-3, contiguous), for a working set larger than the AXI
+   * SRAM alone: the tracker keeps its pyramids and derivatives in AXI SRAM and its
+   * corner candidates here. Its clocks are off out of reset; boardEnableSram()
+   * turns them on before anything touches it. */
+  .sram2 (NOLOAD) : ALIGN(32)
+  {
+    _ssram2 = .;
+    *(.sram2 .sram2.*)
+    . = ALIGN(4);
+    _esram2 = .;
+  } > RAM_D2
+
   .heap (NOLOAD) : ALIGN(8)
   {
     _sheap = .;

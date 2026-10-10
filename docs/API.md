@@ -22,20 +22,23 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/bitslice.hpp`](#opsbitslicehpp) — 5 entries
 - [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 4 entries
 - [`ops/census.hpp`](#opscensushpp) — 5 entries
-- [`ops/corner.hpp`](#opscornerhpp) — 11 entries
+- [`ops/corner.hpp`](#opscornerhpp) — 14 entries
 - [`ops/covariance.hpp`](#opscovariancehpp) — 2 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 1 entries
 - [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 7 entries
 - [`ops/derivative.hpp`](#opsderivativehpp) — 4 entries
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 14 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 4 entries
-- [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
+- [`ops/essential.hpp`](#opsessentialhpp) — 10 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 2 entries
+- [`ops/gridCorners.hpp`](#opsgridCornershpp) — 5 entries
 - [`ops/logic.hpp`](#opslogichpp) — 4 entries
+- [`ops/medianEdgeStream.hpp`](#opsmedianEdgeStreamhpp) — 5 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 3 entries
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 17 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 10 entries
+- [`ops/opticalFlowOnDemand.hpp`](#opsopticalFlowOnDemandhpp) — 4 entries
 - [`ops/orbPattern.hpp`](#opsorbPatternhpp) — 1 entries
 - [`ops/orientation.hpp`](#opsorientationhpp) — 1 entries
 - [`ops/pack.hpp`](#opspackhpp) — 10 entries
@@ -181,12 +184,15 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `Corner` *(struct)* | 2 | One detected corner: integer pixel coordinates and its response |
 | `GoodFeaturesParams` *(struct)* | 2 | The four parameters `goodFeaturesToTrack` takes, defaulted to the values the reference pipeline actually runs |
 | `CornerResult` *(struct)* | 3 | What `goodFeaturesToTrack` / `selectGoodFeatures` report back |
+| `CornerCandidate` *(struct)* | 3 | A candidate in the bounded-pool form's pool: eight bytes, where a `Corner` is twelve |
 | `cornerMinEigenVal` | 2 | The minimum-eigenvalue corner response at every pixel, from binarized ternary derivatives |
 | `selectGoodFeatures` | 2 | The quality threshold, 3x3 non-maximum suppression and minimum-distance spacing filter `cv::goodFeaturesToTrack` performs, over an existing response map |
 | `goodFeaturesToTrack` | 2 | `goodFeaturesToTrack` over a binarized ternary derivative pair: the response map, then the selection |
 | `kResponseRingRows` *(constant)* | 3 | Rows the streaming form's ring must have |
 | `cornerMinEigenValRow` | 2 | One ROW of the minimum-eigenvalue response map |
 | `goodFeaturesToTrackStreaming` | 2 | `goodFeaturesToTrack` over a THREE-ROW ring instead of a frame-sized response map |
+| `GradientSource` *(struct)* | 3 | The image a detection takes its gradient from, and the border the gradient is taken with -- `derivativeX` and `derivativeY`'s, defaulting as they do |
+| `gradientRowWords` | 3 | Words of scratch the on-demand detector needs at this width: three rows of both derivatives, `N + 1` planes each |
 
 ## `ops/covariance.hpp`
 
@@ -269,12 +275,15 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `EssentialMatrix` *(struct)* | 2 | A 3x3 essential matrix, row-major |
-| `essentialSolverStackBytes` | 3 | Stack the five-point solver uses for one call, in bytes |
+| `essentialSolverStackBytes` | 3 | Stack either five-point solver uses for one call, in bytes |
 | `fivePointEssential` | 2 | Up to ten essential matrices through five correspondences |
+| `fivePointEssentialRealRoots` | 2 | Up to ten essential matrices through five correspondences, by a solver built for a small core |
 | `EssentialModel` *(struct)* | 2 | The five-point model policy, for `bincv::ransac` |
 | `refine` | — | No refit |
 | `residual` | — | Sampson distance -- the first-order approximation of geometric reprojection error, which is what `cv::findEssentialMat`'s threshold is in |
 | `findEssentialMat` | 2 | `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role over caller-owned scratch |
+| `EssentialModelRealRoots` *(struct)* | 2 | The five-point model policy over `fivePointEssentialRealRoots`, for `bincv::ransac` |
+| `findEssentialMatRealRoots` | 2 | `findEssentialMat` with the minimal solver built for a small core |
 
 ## `ops/fast.hpp`
 
@@ -284,6 +293,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `FastCorner` *(struct)* | 2 | One detected corner |
 | `detectFast` | 2 | Detects FAST corners |
+
+## `ops/gridCorners.hpp`
+
+[`include/bincv/ops/gridCorners.hpp`](../include/bincv/ops/gridCorners.hpp)
+
+| | tier | |
+|---|---|---|
+| `GridCornerParams` *(struct)* | 3 | What `gridCorners` keeps, and where |
+| `gridCellsAcross` | 3 | Cells across a frame `width` pixels wide |
+| `gridCellsDown` | 3 | Cells down a frame `height` pixels tall |
+| `gridCornerSlots` | 3 | The slots `gridCorners` needs: `perCell` for every cell |
+| `gridCorners` | 3 | The corners of each cell of a grid, over stored derivative planes |
 
 ## `ops/logic.hpp`
 
@@ -295,6 +316,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `bitwiseOr` | 1 | dst = a | b, pixel for pixel |
 | `bitwiseXor` | 1 | dst = a ^ b, pixel for pixel |
 | `bitwiseNot` | 1 | dst = ~src, pixel for pixel |
+
+## `ops/medianEdgeStream.hpp`
+
+[`include/bincv/ops/medianEdgeStream.hpp`](../include/bincv/ops/medianEdgeStream.hpp)
+
+| | tier | |
+|---|---|---|
+| `MedianEdgeStream` *(class)* | 3 | `medianWide` then `edgeThreshold`, row by row |
+| `scratchElements` | — | Scratch elements (of `SrcT`) a stream of this width and pattern needs |
+| `reset` | — | Starts a new frame; `dst` is written again from row 0 |
+| `push` | — | Feeds the next `count` input rows, `srcStride` elements apart, and writes every edge row they complete |
+| `rowsDone` | — | Edge rows of `dst` written so far, from row 0 |
 
 ## `ops/medianWide.hpp`
 
@@ -359,6 +392,17 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `lkPathName` | 3 | Which residual kernel this level type will actually run, as a string |
 | `LKLevels` *(struct)* | 2 | A tracking ladder whose levels have DIFFERENT bit depths, level 0 first |
 | `stagingStackBytes` | 3 | Stack bytes the tracker's staging buffers occupy at `(N, WordType)` |
+
+## `ops/opticalFlowOnDemand.hpp`
+
+[`include/bincv/ops/opticalFlowOnDemand.hpp`](../include/bincv/ops/opticalFlowOnDemand.hpp)
+
+| | tier | |
+|---|---|---|
+| `LKLevelOnDemand` *(struct)* | 2 | One pyramid level at N bits per pixel for the on-demand tracker: both frames' bit-planes and the border the derivative is taken with |
+| `lkLevelOnDemand` | 2 | An on-demand level over two `QuantMat` frames |
+| `calcOpticalFlowPyrLK` | 2 | Pyramidal Lucas–Kanade over on-demand levels of one depth, level 0 first |
+| `LKLevelsOnDemand` *(struct)* | 2 | A ladder of on-demand levels of different depths, level 0 first: `LKLevels` without the derivative planes |
 
 ## `ops/orbPattern.hpp`
 

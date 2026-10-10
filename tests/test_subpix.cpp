@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "bincv/ops/derivative.hpp"
@@ -234,6 +235,74 @@ BINCV_TEST(SubPix, MatchesDenseOracle_TheWordWiseSkipDropsNothing) {
     BINCV_CHECK(worst < 1e-5);
     BINCV_CHECK(r.refined > 0);
 }
+
+#if BINCV_SUBPIX_REUSE
+BINCV_TEST(SubPix, AnchorReuseIsBitExact) {
+    // Reusing an anchor's sums against recomputing them: every point to the bit and
+    // every count, across window sizes, zero zones, iteration caps and tolerances, with
+    // seeds scattered to the frame's edges. The reuse compiles only on M-profile; this
+    // suite compiles it everywhere.
+    BINCV_CHECK(bincv::impl::subPixReuseEnabled() == (BINCV_SUBPIX_REUSE_DEFAULT != 0));
+    const bool saved = bincv::impl::subPixReuseEnabled();
+    constexpr int W = 157, H = 101;
+    bincv::BinMat<uint32_t> img(W, H);
+    uint64_t st = 0x5B9;
+    const auto next = [&st]() {
+        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+        return st >> 33;
+    };
+    // Blobs over a sparse speckle: straight edges, corners and isolated pixels.
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) img.set(y, x, next() % 23u == 0u ? 1u : 0u);
+    for (int b = 0; b < 40; ++b) {
+        const int x0 = static_cast<int>(next() % W), y0 = static_cast<int>(next() % H);
+        const int w = 3 + static_cast<int>(next() % 20), h = 3 + static_cast<int>(next() % 20);
+        for (int y = y0; y < y0 + h && y < H; ++y)
+            for (int x = x0; x < x0 + w && x < W; ++x) img.set(y, x, 1u);
+    }
+    bincv::SignedQuantMat<1, uint32_t> dx(W, H), dy(W, H);
+    bincv::derivativeX(img, dx);
+    bincv::derivativeY(img, dy);
+
+    std::vector<Point2f> seeds(300);
+    for (Point2f& p : seeds) {
+        p.x = static_cast<float>(next() % (W * 4)) / 4.0f;
+        p.y = static_cast<float>(next() % (H * 4)) / 4.0f;
+    }
+    size_t cases = 0, refined = 0;
+    for (const int winHalf : {1, 3, 5, 8, 15}) {
+        for (const int zeroHalf : {-1, 0, 2}) {
+            for (const int maxIterations : {1, 2, 5, 40}) {
+                for (const double epsilon : {0.001, 0.0, 1e-9}) {
+                    bincv::SubPixParams p;
+                    p.winHalf = winHalf;
+                    p.zeroHalf = zeroHalf;
+                    p.maxIterations = maxIterations;
+                    p.epsilon = epsilon;
+                    std::vector<Point2f> a = seeds, b = seeds;
+                    bincv::impl::subPixReuseEnabled() = false;
+                    const bincv::SubPixResult ra =
+                        bincv::cornerSubPix<1, uint32_t>(dx, dy, a.data(), a.size(), p);
+                    bincv::impl::subPixReuseEnabled() = true;
+                    const bincv::SubPixResult rb =
+                        bincv::cornerSubPix<1, uint32_t>(dx, dy, b.data(), b.size(), p);
+                    BINCV_CHECK(ra.refined == rb.refined);
+                    BINCV_CHECK(ra.singular == rb.singular);
+                    BINCV_CHECK(ra.clamped == rb.clamped);
+                    BINCV_CHECK(ra.diverged == rb.diverged);
+                    BINCV_CHECK(
+                        std::memcmp(a.data(), b.data(), a.size() * sizeof(Point2f)) == 0);
+                    refined += ra.refined;
+                    ++cases;
+                }
+            }
+        }
+    }
+    bincv::impl::subPixReuseEnabled() = saved;
+    std::printf(" %zu parameter sets, %zu corners refined across them\n", cases, refined);
+    BINCV_CHECK(refined > 10000);
+}
+#endif
 
 BINCV_TEST(SubPix, ActuallyRefines_TowardsAKnownCorner) {
     // A quadrant corner sits exactly at (32, 27). Start off it and check the refinement

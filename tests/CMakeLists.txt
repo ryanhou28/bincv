@@ -235,9 +235,11 @@ set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_erro
                      test_logic test_shift test_reduce test_bitslice
                      test_denoise test_threshold test_morphology test_resample
                      test_pyramid test_derivative test_covariance test_corner
-                     test_opticalflow test_pack test_sequence test_edge test_median_wide test_descriptor test_fast
+                     test_opticalflow test_pack test_sequence test_edge test_median_wide
+                     test_median_edge_stream test_descriptor test_fast
                      test_subpix test_view_narrow test_occupancy test_simd test_ransac test_essential
-                     test_orientation test_stereo test_census test_dense_disparity)
+                     test_orientation test_stereo test_census test_dense_disparity
+                     test_grid_corners)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -255,6 +257,24 @@ foreach(TEST_NAME ${BINCV_CORE_TESTS})
     bincv_add_test_target(${TEST_NAME} ${TEST_NAME}.cpp)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endforeach()
+# Lucas-Kanade's window-count arm is compiled only where it is the default -- a core
+# whose population count is software -- so this suite compiles it everywhere, and
+# Flow.WindowCountArmIsBitExact holds it to the other arm on whatever runs the tests.
+# Switched off by default here as anywhere else, so every other case is unchanged.
+target_compile_definitions(test_opticalflow PRIVATE BINCV_LK_WINDOW_COUNT=1)
+# The same for goodFeaturesToTrack's square-root table, compiled by default only on
+# M-profile: Corner.RootTable_EveryWindowCount holds it to the root everywhere.
+target_compile_definitions(test_corner PRIVATE BINCV_CORNER_ROOT_TABLE=1)
+# And for sparse stereo's staged refinement and integer row gate: Stereo.StagedArmIsBitExact
+# and Stereo.IntegerRowGateIsBitExact hold them to the published code everywhere.
+target_compile_definitions(test_stereo PRIVATE BINCV_STEREO_WINDOW_COUNT=1
+                                               BINCV_STEREO_INTEGER_ROW_GATE=1)
+# And for RANSAC's squared test: Essential.SquaredTest* hold it to the residual, and the
+# RANSAC suite compiles the driver's scoring for a model that has no squared test.
+target_compile_definitions(test_essential PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
+target_compile_definitions(test_ransac PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
+# And for cornerSubPix's reuse of an anchor's sums: SubPix.AnchorReuseIsBitExact.
+target_compile_definitions(test_subpix PRIVATE BINCV_SUBPIX_REUSE=1)
 
 # ---------------------------------------------------------------------------
 # A translation unit that MUST NOT COMPILE

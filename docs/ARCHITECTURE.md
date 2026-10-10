@@ -250,7 +250,7 @@ differ in what they make expensive.
 |---|---|
 | **x86-64** — desktop, laptops | `POPCNT` is required. AVX2 is selected at run time, so the baseline ISA is unchanged and one binary runs everywhere |
 | **aarch64 Cortex-A** — mobile, single-board | NEON throughout. Population count is a vector instruction, which is why reductions are bulk-only |
-| **Cortex-M** — microcontrollers | No population count and no NEON, so the software path is the only path. Built and run on a Cortex-M7 |
+| **Cortex-M** — microcontrollers | No population count and no NEON. The DSP extension's four byte lanes carry the sensor stage, and kernels that count many short words are shaped for a software count. Built and run on a Cortex-M7 |
 | **RISC-V** | Population count is in an optional extension, so it is the Cortex-M question on a target where it may go either way |
 
 x86-64 and aarch64 are measured throughout these notes. **Cortex-M is built, run and
@@ -279,8 +279,15 @@ caller-installed backend, so a target with no threads never installs one.
 drags in enough of newlib's stdio to want `_sbrk` at link time. No kernel allocates,
 throws or does I/O, so neither reaches one.
 
-**What is NOT measured there:** any OpenCV comparison, any pipeline or tracker timing, and
-anything at the part's full clock — the reductions were timed at the 64 MHz reset default.
+**Measured there:** the assembled feature tracker at 752×480, bit-identical to the x86-64
+run on every frame, in 512,600 bytes split across two RAM banks, or 238,712 with its
+derivatives made where they are read and 175,936 detecting on a grid; the reductions and
+dense disparity; sparse stereo and sub-pixel corner refinement, bit-identical to the host,
+and the five-point RANSAC, identical in its masks and within 5e-11 in its model, the
+difference being the compiler's fused multiply-adds, with a real-root solver built for the
+part that solves 8× faster; all at the part's full 480 MHz, with the clock checked against
+the board's 32.768 kHz crystal rather than assumed. **Not measured there:** any comparison
+against OpenCV or another library.
 
 **The stack was expected to be the binding constraint. On the first real part it was
 not.** The tracker stages each window into stack buffers whose size grows with the bit
@@ -441,7 +448,7 @@ An integrator with an existing pool installs theirs and binCV never spawns anyth
 
 ## 10. Vector paths
 
-Vector arms exist for both measured architectures, and three rules govern them.
+Vector arms exist for every measured architecture — AVX2 and NEON, and on Cortex-M the DSP extension's byte lanes — and three rules govern them.
 
 **Every vector arm is switchable off**, so a benchmark can time both and a test can hold
 them to producing identical results. A vector kernel that is faster and different is not

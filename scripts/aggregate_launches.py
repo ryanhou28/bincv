@@ -140,12 +140,13 @@ BENCH_NS = re.compile(r'\[BENCH\]\s*(.*?)\s{2,}(\d+(?:\.\d+)?)\s+'
 BENCH_AVG = re.compile(r'\[BENCH\]\s*(.*?)\s+-\s+Avg:\s*([\d.eE+-]+)\s+ms')
 RULE = re.compile(r'^[-=\s]+$')
 # `<label>  <value> ms` with no table around it: the LK head-to-head and the
-# feature-tracking profile print their stage times that way. Two or more spaces
-# before the number and a TIME unit right after it are what keep this off
-# `binCV :   436704 B` and the rest of the prose.
+# feature-tracking profile print their stage times that way, and the Cortex-M7
+# images print core cycles the same way (`cyc`), since a cycle count is the time
+# the board measures. Two or more spaces before the number and a TIME unit right
+# after it are what keep this off `binCV :   436704 B` and the rest of the prose.
 INLINE = re.compile(r'^\s{0,6}(?P<label>\S.*?)\s{2,}'
                     r'(?P<v>\d+(?:\.\d+)?)\s*'
-                    r'(?:ns|us|ms|s)\b(?:/\S+)?')
+                    r'(?:ns|us|ms|s|cyc)\b(?:/\S+)?')
 
 
 def _number(cell):

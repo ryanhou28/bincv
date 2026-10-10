@@ -77,6 +77,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 #include <string>
 #include <type_traits>
@@ -1938,6 +1939,158 @@ BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint32_t) { rowKernelSuite<uint3
 BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint64_t) { rowKernelSuite<uint64_t>("uint64_t"); }
 
 // ---------------------------------------------------------------------------
+// The on-demand gradient (`GradientSource`): the bounded-pool detector deriving the
+// gradient as it sweeps, against the same detector reading stored derivative planes
+// of the same image with the same border. Every frame, border and selection setting
+// the bounded-pool suite runs, pools that force several sweeps, a mask, and a two-bit
+// source. Count, positions, responses and sweep count must all be the same.
+// ---------------------------------------------------------------------------
+namespace {
+
+template <size_t N>
+size_t onDemandCornerMismatches(const bincv::QuantMat<N, uint32_t>& src, BorderType border,
+                                const SelectionParams& sp, size_t poolSize,
+                                const bincv::BinMatConstView<uint32_t>& mask, size_t& cells,
+                                size_t& multiPass) {
+    const int w = static_cast<int>(src.getWidth()), h = static_cast<int>(src.getHeight());
+    bincv::SignedQuantMat<N, uint32_t> dx(w, h), dy(w, h);
+    bincv::derivativeX(src, dx, border);
+    bincv::derivativeY(src, dy, border);
+    GoodFeaturesParams params;
+    params.blockSize = 3;
+    params.maxCorners = sp.maxCorners;
+    params.qualityLevel = sp.qualityLevel;
+    params.minDistance = sp.minDistance;
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(w));
+    const ResponseMap ring{ringStorage.data(), static_cast<size_t>(w), bincv::kResponseRingRows,
+                           static_cast<size_t>(w)};
+    const size_t cap = static_cast<size_t>(w) * static_cast<size_t>(h) + 1;
+    std::vector<bincv::CornerCandidate> pool(poolSize);
+    std::vector<Corner> a(cap), b(cap);
+    const CornerResult ra = bincv::goodFeaturesToTrackStreaming<uint32_t>(
+        dx.constMagnitude(0), dy.constMagnitude(0), dx.constSign(), dy.constSign(), params, ring,
+        pool.data(), pool.size(), a.data(), a.size(), mask);
+    bincv::GradientSource<N, uint32_t> gs;
+    for (size_t p = 0; p < N; ++p) gs.planes[p] = src.constPlane(p);
+    gs.border = border;
+    std::vector<uint32_t> scratch(bincv::gradientRowWords<N, uint32_t>(static_cast<size_t>(w)));
+    const CornerResult rb = bincv::goodFeaturesToTrackStreaming(
+        gs, params, ring, scratch.data(), scratch.size(), pool.data(), pool.size(), b.data(),
+        b.size(), mask);
+    ++cells;
+    multiPass += rb.passes > 1;
+    size_t bad = (ra.count != rb.count || ra.passes != rb.passes ||
+                  ra.candidatesRanked != rb.candidatesRanked)
+                     ? 1
+                     : 0;
+    for (size_t i = 0; bad == 0 && i < ra.count; ++i) {
+        if (a[i].x != b[i].x || a[i].y != b[i].y ||
+            std::memcmp(&a[i].response, &b[i].response, sizeof(float)) != 0)
+            bad = 1;
+    }
+    return bad;
+}
+
+} // namespace
+
+BINCV_TEST(Corner, OnDemandGradient_IdenticalToStoredDerivatives) {
+    const Frame frames[] = {
+        checkerboardFrame(kWideW, kWideH, 1), checkerboardFrame(kWideW, kWideH, 4),
+        stripeFrame(kWideW, kWideH, 3),       uniformFrame(kNarrowW, kNarrowH, 1),
+        dotFrame(kWideW, kWideH),             diagonalFrame(kWideW, kWideH),
+        randomFrame(kWideW, kWideH, 0x51ED5EEDULL), randomFrame(kNarrowW, kNarrowH, 0xC0FFEEULL),
+    };
+    const BorderType borders[] = {bincv::BORDER_REFLECT_101, bincv::BORDER_REPLICATE,
+                                  bincv::BORDER_CONSTANT, bincv::BORDER_WRAP};
+    size_t bad = 0, cells = 0, multiPass = 0;
+    for (const Frame& f : frames) {
+        const BinMat<uint32_t> bits = pack<uint32_t>(f);
+        for (BorderType border : borders) {
+            for (const SelectionParams& sp : kStreamParams) {
+                for (size_t poolSize : {size_t{3}, size_t{17}, size_t{4096}}) {
+                    bad += onDemandCornerMismatches<1>(bits, border, sp, poolSize, {}, cells,
+                                                       multiPass);
+                }
+            }
+        }
+        // A mask over the left half, and a two-bit source built from two frames.
+        BinMat<uint32_t> mask(f.width, f.height);
+        for (int y = 0; y < f.height; ++y)
+            for (int x = 0; x < f.width / 2; ++x) mask.set(y, x, 1u);
+        bad += onDemandCornerMismatches<1>(bits, bincv::BORDER_REFLECT_101, kStreamParams[0], 64,
+                                           mask.constView(), cells, multiPass);
+        bincv::QuantMat<2, uint32_t> two(f.width, f.height);
+        for (int y = 0; y < f.height; ++y)
+            for (int x = 0; x < f.width; ++x)
+                two.set(y, x, static_cast<unsigned>(f.at(y, x)) + static_cast<unsigned>((x / 5 + y / 3) % 2) * 2u);
+        bad += onDemandCornerMismatches<2>(two, bincv::BORDER_REFLECT_101, kStreamParams[0], 64,
+                                           {}, cells, multiPass);
+    }
+    std::printf(" on-demand gradient == stored derivatives: %zu cells (%zu multi-sweep), "
+                "%zu differ\n",
+                cells, multiPass, bad);
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+    BINCV_CHECK(multiPass > 0);
+}
+
+// ---------------------------------------------------------------------------
+// The 3x3 response's square root from a table (`impl::minEigenValue3x3`) against
+// `minEigenValue`'s own root. A 3x3 window's counts are xx, yy in [0, 9] and xy in
+// [-9, 9], so every input there is is checked here, bit for bit -- which reaches
+// every one of the table's hundred entries -- and then whole response rows with the
+// switch on and off. Compiled where the table is (tests/CMakeLists.txt asks for it).
+// ---------------------------------------------------------------------------
+BINCV_TEST(Corner, RootTable_EveryWindowCount) {
+    size_t differing = 0, inputs = 0;
+    for (int xx = 0; xx <= 9; ++xx) {
+        for (int yy = 0; yy <= 9; ++yy) {
+            for (int xy = -9; xy <= 9; ++xy) {
+                const float table = bincv::impl::minEigenValue3x3(xx, yy, xy);
+                const float root = bincv::impl::minEigenValue(xx, yy, xy);
+                if (std::memcmp(&table, &root, sizeof(float)) != 0) ++differing;
+                ++inputs;
+            }
+        }
+    }
+    BINCV_CHECK_EQ(inputs, static_cast<size_t>(1900));
+    BINCV_CHECK_EQ(differing, static_cast<size_t>(0));
+    std::printf(" every 3x3 window count: %zu inputs, %zu differ\n", inputs, differing);
+
+#if BINCV_CORNER_ROOT_TABLE
+    bool& sw = bincv::impl::cornerRootTableEnabled();
+    const bool saved = sw;
+    const Frame frames[] = {checkerboardFrame(kWideW, kWideH, 4), diagonalFrame(kWideW, kWideH),
+                            randomFrame(kWideW, kWideH, 0x5EED5EEDULL),
+                            randomFrame(kNarrowW, kNarrowH, 0x9911ULL)};
+    size_t rowDiffering = 0, positions = 0, live = 0;
+    for (const Frame& f : frames) {
+        const Derived<uint32_t> d(f, BORDER_REFLECT_101);
+        std::vector<float> on(static_cast<size_t>(f.width)), off(static_cast<size_t>(f.width));
+        for (int y = 0; y < f.height; ++y) {
+            sw = true;
+            bincv::cornerMinEigenValRow<uint32_t>(d.dx.constMagnitude(0), d.dy.constMagnitude(0),
+                                                  d.dx.constSign(), d.dy.constSign(), 3, y,
+                                                  on.data());
+            sw = false;
+            bincv::cornerMinEigenValRow<uint32_t>(d.dx.constMagnitude(0), d.dy.constMagnitude(0),
+                                                  d.dx.constSign(), d.dy.constSign(), 3, y,
+                                                  off.data());
+            rowDiffering += static_cast<size_t>(
+                std::memcmp(on.data(), off.data(), on.size() * sizeof(float)) != 0);
+            for (float v : off) live += v != 0.0f;
+            positions += on.size();
+        }
+    }
+    sw = saved;
+    BINCV_CHECK_EQ(rowDiffering, static_cast<size_t>(0));
+    BINCV_CHECK(live > 0);
+    std::printf(" response rows, table against root: %zu positions (%zu non-zero), %zu rows "
+                "differ\n",
+                positions, live, rowDiffering);
+#endif
+}
+
+// ---------------------------------------------------------------------------
 // 12d. DEGENERATE SHAPES AND NO HEAP, FOR THE STREAMING FORM TOO
 //
 // A frame shorter than the ring has no NMS row at all, and the one-pass form's
@@ -2438,3 +2591,101 @@ BINCV_TEST(Corner, SpacingFilterMatchesExhaustive) {
 }
 
 BINCV_TEST_MAIN("test_corner")
+
+// ---------------------------------------------------------------------------
+// 12c. THE BOUNDED POOL: AN UNBOUNDED POOL'S CORNERS, IN ANY MEMORY
+//
+// The pool form's contract is that the pool's size changes the cost and never
+// the answer: whatever the caller gives it, down to one entry, it must return the
+// corners an unbounded pool returns, in the same order. So each cell is run with
+// a pool that cannot truncate (the reference) and then with pools from one entry
+// up past the survivor count, on the tie-dominated frames especially -- a pass
+// boundary falling inside a run of equal responses is exactly where a wrong
+// "strictly weaker than every one walked" would drop or repeat a candidate.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct PoolTally {
+    size_t cells = 0;
+    size_t mismatches = 0;
+    size_t multiPass = 0;   ///< runs that needed more than one sweep
+    size_t maxPasses = 0;
+};
+
+template <typename WordType>
+void comparePool(const Frame& f, int blockSize, const SelectionParams& sp, PoolTally& t) {
+    const Derived<WordType> d(f, BORDER_REFLECT_101);
+    GoodFeaturesParams params;
+    params.blockSize = blockSize;
+    params.maxCorners = sp.maxCorners;
+    params.qualityLevel = sp.qualityLevel;
+    params.minDistance = sp.minDistance;
+
+    const size_t pixels = static_cast<size_t>(f.width) * static_cast<size_t>(f.height);
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(f.width));
+    ResponseMap ring;
+    ring.data = ringStorage.data();
+    ring.width = static_cast<size_t>(f.width);
+    ring.height = bincv::kResponseRingRows;
+    ring.stride = static_cast<size_t>(f.width);
+
+    std::vector<Corner> ref(pixels + 1);
+    const CornerResult ra = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, params, ring,
+                                                                ref.data(), ref.size());
+    BINCV_CHECK_EQ(ra.candidatesTruncated, false);
+    const size_t survivors = ra.candidatesRanked;
+    const size_t outCap = pixels + 1;
+
+    const size_t pools[] = {1, 2, 3, 7, survivors / 3 + 1, survivors / 2 + 1,
+                            survivors > 1 ? survivors - 1 : 1, survivors + 1, survivors + 8};
+    for (size_t poolSize : pools) {
+        // A one- or two-entry pool is a sweep per corner walked; worth it where the
+        // walk is short, and only time where it is long.
+        if (poolSize < 3 && survivors > 64) continue;
+        std::vector<bincv::CornerCandidate> pool(poolSize);
+        std::vector<Corner> out(outCap);
+        const CornerResult rb = bincv::goodFeaturesToTrackStreaming(
+            d.dx.constMagnitude(0), d.dy.constMagnitude(0), d.dx.constSign(), d.dy.constSign(),
+            params, ring, pool.data(), pool.size(), out.data(), out.size());
+        ++t.cells;
+        if (rb.passes > 1) ++t.multiPass;
+        if (rb.passes > t.maxPasses) t.maxPasses = rb.passes;
+        bool bad = rb.count != ra.count || rb.candidatesTruncated;
+        for (size_t i = 0; !bad && i < ra.count; ++i) {
+            if (out[i].x != ref[i].x || out[i].y != ref[i].y || out[i].response != ref[i].response)
+                bad = true;
+        }
+        if (bad) {
+            ++t.mismatches;
+            std::printf(" MISMATCH %s block %d %s pool %zu: unbounded %zu corners, pool %zu "
+                        "corners in %zu passes\n",
+                        f.name.c_str(), blockSize, sp.name, poolSize, ra.count, rb.count,
+                        rb.passes);
+        }
+    }
+}
+
+} // namespace
+
+BINCV_TEST(Corner, BoundedPool_IdenticalCornersAtEveryPoolSize) {
+    const Frame frames[] = {
+        checkerboardFrame(kWideW, kWideH, 1),
+        checkerboardFrame(kWideW, kWideH, 4),
+        stripeFrame(kWideW, kWideH, 3),
+        uniformFrame(kNarrowW, kNarrowH, 1),
+        dotFrame(kWideW, kWideH),
+        diagonalFrame(kWideW, kWideH),
+        randomFrame(kWideW, kWideH, 0x51ED5EEDULL),
+        randomFrame(kNarrowW, kNarrowH, 0xC0FFEEULL),
+    };
+    PoolTally t;
+    for (const Frame& f : frames)
+        for (int blockSize : kStreamBlockSizes)
+            for (const SelectionParams& sp : kStreamParams) comparePool<uint32_t>(f, blockSize, sp, t);
+    BINCV_CHECK_EQ(t.mismatches, static_cast<size_t>(0));
+    BINCV_CHECK(t.cells > 0);
+    BINCV_CHECK(t.multiPass > 0);   // the pass loop was entered, not just the one-pass case
+    std::printf(" bounded pool == unbounded: %zu cells, %zu needed more than one sweep "
+                "(at most %zu)\n",
+                t.cells, t.multiPass, t.maxPasses);
+}

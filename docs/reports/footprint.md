@@ -183,7 +183,7 @@ reproducible claim. The decision is the point: the layout was 1.45× on the extr
 built for and would have taken the pipeline from about 1.52× to 1.65× against OpenCV — for
 92,160 additional bytes on a 436,704-byte peak, taking the footprint result from 6.23× to
 5.15×. A 1.21× larger footprint for a 1.08× faster pipeline is not a trade this library
-makes. (The 1.52× baseline is an older pipeline figure; the current ones are 3.97× and 5.32×
+makes. (The 1.52× baseline is an older pipeline figure; the current ones are 3.97× and 5.41×
 in [feature-tracking.md](feature-tracking.md), and the proportions are what the decision
 turned on.)
 

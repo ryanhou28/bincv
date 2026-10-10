@@ -249,8 +249,8 @@ struct PackTraits<uint16_t> {
     }
 };
 
-/// @brief One pixel by the scalar rule, border included. The device twin of
-/// `impl::med3Scalar`, and the ONE place "out of range reads as zero" is
+/// @brief One pixel by the scalar rule, border included. The device twin of the
+/// checked sample in `impl::medianRow`, and the ONE place "out of range reads as zero" is
 /// written on this side of the bus -- both arms call it.
 template <size_t K, typename T>
 __device__ __forceinline__ void medianWidePixel(DeviceImageConstView<T> src,

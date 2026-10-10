@@ -229,23 +229,25 @@ if cmake -S "${SRC_DIR}" -B "${FW_DIR}" \
         # check above is: grep -q closes the pipe on its first match, strings takes
         # SIGPIPE on a multi-megabyte ELF, and pipefail turns that into a failure --
         # here a FALSE red, reporting a correct image as claiming a fast path.
-        ELF="${FW_DIR}/targets/stm32h753/bincv_m7.elf"
-        simd_ok=0
-        if grep -q 'scalar only' "${ELF}" 2>/dev/null; then
-            simd_ok=1
-        else
-            elf_strings="$(strings "${ELF}" 2>/dev/null || true)"
-            case "${elf_strings}" in *'scalar only'*) simd_ok=1 ;; esac
-        fi
-        if [[ ${simd_ok} -eq 1 ]]; then
-            echo "    ok -- image links, and its SIMD status reports 'scalar only'"
-        else
-            echo "    FAILED: the image links but does not carry the 'scalar only' status"
-            echo "            string, so simdStatusString may be claiming a fast path here."
-            failed=$((failed + 1))
-        fi
-        size_line="$("${CXX%g++}size" "${ELF}" 2>/dev/null | tail -1)"
-        [[ -n "${size_line}" ]] && echo "    size (text/data/bss): ${size_line}"
+        # Every image, since each is what a figure on the board is taken from.
+        for ELF in "${FW_DIR}"/targets/stm32h753/bincv_m7_*.elf; do
+            simd_ok=0
+            if grep -q 'scalar only' "${ELF}" 2>/dev/null; then
+                simd_ok=1
+            else
+                elf_strings="$(strings "${ELF}" 2>/dev/null || true)"
+                case "${elf_strings}" in *'scalar only'*) simd_ok=1 ;; esac
+            fi
+            if [[ ${simd_ok} -eq 1 ]]; then
+                echo "    ok -- $(basename "${ELF}") links, and its SIMD status reports 'scalar only'"
+            else
+                echo "    FAILED: $(basename "${ELF}") links but does not carry the 'scalar only'"
+                echo "            status string, so simdStatusString may be claiming a fast path."
+                failed=$((failed + 1))
+            fi
+            size_line="$("${CXX%g++}size" "${ELF}" 2>/dev/null | tail -1)"
+            [[ -n "${size_line}" ]] && echo "    size (text/data/bss): ${size_line}"
+        done
     else
         echo "    FAILED to build:"
         grep -E 'error:|Error' "${TMP_DIR}/fw-build.log" | head -5 | sed 's/^/      /'

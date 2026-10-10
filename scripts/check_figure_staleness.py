@@ -140,8 +140,13 @@ INCLUDE_DIRS = ('include', os.path.join('backends', 'cuda', 'include'), 'benchma
 SOURCE_DIRS = ('benchmark', 'tests', 'examples',
                os.path.join('backends', 'cuda', 'benchmark'),
                os.path.join('backends', 'cuda', 'tests'),
-               os.path.join('backends', 'cuda', 'examples'))
+               os.path.join('backends', 'cuda', 'examples'),
+               os.path.join('targets', 'stm32h753'))
 SOURCE_EXTS = ('.cpp', '.cc', '.cu')
+# What an add_executable may link besides the benchmark's own unit: a firmware image
+# (targets/stm32h753) also links its C startup and board support, and a figure
+# timed on the board moves when its clock bring-up does.
+LINKED_EXTS = SOURCE_EXTS + ('.c',)
 
 # The backend's declaration/definition split: the caller includes the .hpp, the
 # kernel is compiled from the .cu of the same name. self_check() holds this to
@@ -156,7 +161,8 @@ CUDA_SRC_DIR = os.path.join('backends', 'cuda', 'src')
 LINK_LISTS = (os.path.join('benchmark', 'CMakeLists.txt'),
               os.path.join('tests', 'CMakeLists.txt'),
               os.path.join('backends', 'cuda', 'benchmark', 'CMakeLists.txt'),
-              os.path.join('backends', 'cuda', 'tests', 'CMakeLists.txt'))
+              os.path.join('backends', 'cuda', 'tests', 'CMakeLists.txt'),
+              os.path.join('targets', 'stm32h753', 'CMakeLists.txt'))
 TARGET_RE = re.compile(r'\b(?:add_executable|bincv_add_test_target)\s*\(([^)]*)\)')
 
 
@@ -435,9 +441,9 @@ def deps_for(binary, rev=None):
             if roots:
                 roots.append(cand)
             break
-    if not roots:
-        return None
-    # the other translation units the build links into this binary
+    # the other translation units the build links into this binary -- and, for a
+    # target with no unit named after it (one source built twice under different
+    # definitions, as a firmware image's variants are), every unit it names
     for rel in LINK_LISTS:
         text = _text(rel, rev)
         if text is None:
@@ -448,8 +454,10 @@ def deps_for(binary, rev=None):
             if words and words[0] == stem:
                 for w in words[1:]:
                     c = os.path.normpath(os.path.join(here, w))
-                    if w.endswith(SOURCE_EXTS) and _text(c, rev) is not None and c not in roots:
+                    if w.endswith(LINKED_EXTS) and _text(c, rev) is not None and c not in roots:
                         roots.append(c)
+    if not roots:
+        return None
     seen = set()
 
     def walk(rel):
@@ -825,12 +833,28 @@ def main():
             fresh.append((name, verdict[1], len(verdict[2])))
 
     if args.update_baseline:
+        # The comment block at the top of the baseline is the record of WHY each
+        # batch of stale logs was accepted. It is kept, and a --note is appended to
+        # it rather than written in its place: rewriting the header here once
+        # erased every earlier reason in one call.
+        kept = []
+        if os.path.isfile(BASELINE):
+            for line in open(BASELINE, encoding='utf-8'):
+                if line.startswith('#') or not line.strip():
+                    kept.append(line.rstrip('\n'))
+                else:
+                    break
+        while kept and kept[-1].strip() in ('', '#'):
+            kept.pop()
         with open(BASELINE, 'w', encoding='utf-8') as fh:
-            fh.write('# Logs whose measured code has moved since they were taken.\n'
-                     '# Written by scripts/check_figure_staleness.py --update-baseline.\n'
-                     '# A log leaves this list by being RE-TAKEN, not by being edited.\n'
-                     '# Adding a line here is a decision to publish a figure that is known\n'
-                     '# not to describe the current code, and belongs in review.\n')
+            if kept:
+                fh.write('\n'.join(kept) + '\n')
+            else:
+                fh.write('# Logs whose measured code has moved since they were taken.\n'
+                         '# Written by scripts/check_figure_staleness.py --update-baseline.\n'
+                         '# A log leaves this list by being RE-TAKEN, not by being edited.\n'
+                         '# Adding a line here is a decision to publish a figure that is known\n'
+                         '# not to describe the current code, and belongs in review.\n')
             if args.note:
                 fh.write('#\n')
                 for chunk in args.note.split('|'):
