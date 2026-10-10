@@ -31,6 +31,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/edge.hpp`](#opsedgehpp) — 4 entries
 - [`ops/essential.hpp`](#opsessentialhpp) — 10 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 2 entries
+- [`ops/gridCorners.hpp`](#opsgridCornershpp) — 5 entries
 - [`ops/logic.hpp`](#opslogichpp) — 4 entries
 - [`ops/medianEdgeStream.hpp`](#opsmedianEdgeStreamhpp) — 5 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 3 entries
@@ -292,6 +293,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `FastCorner` *(struct)* | 2 | One detected corner |
 | `detectFast` | 2 | Detects FAST corners |
+
+## `ops/gridCorners.hpp`
+
+[`include/bincv/ops/gridCorners.hpp`](../include/bincv/ops/gridCorners.hpp)
+
+| | tier | |
+|---|---|---|
+| `GridCornerParams` *(struct)* | 3 | What `gridCorners` keeps, and where |
+| `gridCellsAcross` | 3 | Cells across a frame `width` pixels wide |
+| `gridCellsDown` | 3 | Cells down a frame `height` pixels tall |
+| `gridCornerSlots` | 3 | The slots `gridCorners` needs: `perCell` for every cell |
+| `gridCorners` | 3 | The corners of each cell of a grid, over stored derivative planes |
 
 ## `ops/logic.hpp`
 

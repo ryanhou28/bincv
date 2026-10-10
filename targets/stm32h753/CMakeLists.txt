@@ -80,6 +80,11 @@ add_executable(bincv_m7_track_ondemand startup.c board.c syscalls.c string.c m7_
 bincv_m7_image(bincv_m7_track_ondemand)
 target_compile_definitions(bincv_m7_track_ondemand PRIVATE BINCV_M7_DERIVATIVES_ON_DEMAND)
 
+# The same tracker detecting by gridCorners, its derivatives made where they are read.
+add_executable(bincv_m7_track_grid startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_track.cpp)
+bincv_m7_image(bincv_m7_track_grid)
+target_compile_definitions(bincv_m7_track_grid PRIVATE BINCV_M7_DERIVATIVES_ON_DEMAND BINCV_M7_GRID)
+
 # DIAGNOSTIC, never a published figure: the tracker with opticalFlow.hpp's stage
 # timers on, reading the board's cycle counter. It answers where `track` goes.
 add_executable(bincv_m7_lkstages startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_track.cpp)

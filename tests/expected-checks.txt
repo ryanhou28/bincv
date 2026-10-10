@@ -927,6 +927,7 @@ opencv	test_orientation	832	0
 opencv	test_stereo	152517	0
 opencv	test_census	102	0
 opencv	test_dense_disparity	27	0
+opencv	test_grid_corners	74695	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0
@@ -967,6 +968,7 @@ core	test_orientation	832	0
 core	test_stereo	152393	0
 core	test_census	102	0
 core	test_dense_disparity	24	0
+core	test_grid_corners	74695	0
 core	test_harness	8	0
 
 noexcept	test_parallel	14	0
@@ -1005,6 +1007,7 @@ noexcept	test_orientation	832	0
 noexcept	test_stereo	152393	0
 noexcept	test_census	102	0
 noexcept	test_dense_disparity	24	0
+noexcept	test_grid_corners	74695	0
 noexcept	test_harness	8	0
 
 debug	test_parallel	14	0
@@ -1043,5 +1046,6 @@ debug	test_orientation	832	0
 debug	test_stereo	152393	0
 debug	test_census	102	0
 debug	test_dense_disparity	24	0
+debug	test_grid_corners	74695	0
 debug	test_harness	8	0
 

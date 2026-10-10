@@ -35,11 +35,21 @@ namespace {
 using W = uint32_t;
 
 constexpr size_t kMaxW = 752, kMaxH = 480;
+/// Detection by gridCorners over frontend::gridParams instead of
+/// goodFeaturesToTrackStreaming: the image bincv_m7_track_grid is this source built with
+/// BINCV_M7_GRID (and BINCV_M7_DERIVATIVES_ON_DEMAND).
+#if defined(BINCV_M7_GRID)
+constexpr bool kGrid = true;
+#else
+constexpr bool kGrid = false;
+#endif
 /// Candidate pool entries, 8 bytes each. The pool's size is a cost in response
 /// sweeps, never a difference in the corners (goodFeaturesToTrackStreaming's
 /// bounded-pool form); on the reference sequence 8,192 sweeps once for most
-/// detections and at most three times.
-constexpr size_t kPoolCapacity = 8192;
+/// detections and at most three times. A grid detector needs one slot a cell instead.
+constexpr size_t kPoolCapacity =
+    kGrid ? bincv::gridCornerSlots(752, 480, frontend::gridParams(bincv::GoodFeaturesParams{}))
+          : 8192;
 constexpr size_t kMaxTracks = 200;
 /// Rows per request: large enough that the round trip is amortized, small enough that
 /// the buffer fits what the D2 SRAM has left.
@@ -52,7 +62,7 @@ constexpr size_t kMaxAge = 2048;
 /// bincv_m7_track_ondemand is this source built with BINCV_M7_DERIVATIVES_ON_DEMAND.
 #if defined(BINCV_M7_DERIVATIVES_ON_DEMAND)
 constexpr bool kOnDemand = true;
-constexpr const char* kImageName = "track-ondemand";
+constexpr const char* kImageName = kGrid ? "track-grid" : "track-ondemand";
 #else
 constexpr bool kOnDemand = false;
 constexpr const char* kImageName = "track";
@@ -174,8 +184,8 @@ void cmdTrack(const char* args) {
     mem.age = g_age;
     std::memset(g_lifetimes, 0, sizeof g_lifetimes);
 
-    frontend::Tracker<W, CycleClock, kOnDemand> tr(L, mem, CycleClock{}, &recordLifetime,
-                                                   nullptr);
+    frontend::Tracker<W, CycleClock, kOnDemand, kGrid> tr(L, mem, CycleClock{},
+                                                          &recordLifetime, nullptr);
     tr.clear();
     boardStackPaint();
 

@@ -25,7 +25,10 @@
 // No OpenCV: frames come from a BSQ1 blob (io/sequence.hpp), which
 // scripts/make_sequence_blob.py writes.
 //
-//   ./frontend_sequence <blob.bsq> [frames] [--pool N] [--out FILE] [--on-demand]
+//   ./frontend_sequence <blob.bsq> [frames] [--pool N] [--out FILE] [--on-demand] [--grid]
+//
+// --grid detects with gridCorners over frontend::gridParams -- the reference's
+// detection gridded -- instead of goodFeaturesToTrackStreaming; --pool is then ignored.
 
 #include <algorithm>
 #include <chrono>
@@ -75,16 +78,19 @@ void writePoints(std::FILE* f, size_t frame, const bincv::Point2f* pts, const ui
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::printf("usage: frontend_sequence <blob.bsq> [frames] [--pool N] [--out FILE] "
-                    "[--on-demand]\n");
+                    "[--on-demand] [--grid]\n");
         return 2;
     }
     // The corner pool, in 8-byte entries: a cost in sweeps, never in the corners.
     size_t maxFrames = 0, poolCap = 8192;
     const char* outPath = nullptr;
     bool onDemand = false;  // derivatives computed where they are read, never stored
+    bool grid = false;      // gridCorners instead of goodFeaturesToTrackStreaming
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--on-demand") == 0) {
             onDemand = true;
+        } else if (std::strcmp(argv[i], "--grid") == 0) {
+            grid = true;
         } else if (std::strcmp(argv[i], "--pool") == 0 && i + 1 < argc) {
             poolCap = static_cast<size_t>(std::atol(argv[++i]));
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
@@ -112,6 +118,10 @@ int main(int argc, char** argv) {
     size_t frames = sh.frameCount;
     if (maxFrames && maxFrames < frames) frames = maxFrames;
 
+    if (grid) {
+        poolCap = bincv::gridCornerSlots(sh.width, sh.height,
+                                         frontend::gridParams(bincv::GoodFeaturesParams{}));
+    }
     const frontend::Layout<W> L(sh.width, sh.height, poolCap,
                                 static_cast<size_t>(bincv::GoodFeaturesParams{}.maxCorners),
                                 onDemand);
@@ -139,11 +149,13 @@ int main(int argc, char** argv) {
     mem.age = age.data();
 
     std::vector<int> lifetimes;
-    // The pipeline takes its derivative form as a template argument, so each run
-    // instantiates one; the flag picks which.
-    const auto run = [&](auto mode) -> int {
+    // The pipeline takes its derivative form and its detector as template arguments, so
+    // each run instantiates one of each; the flags pick which.
+    const auto run = [&](auto mode, auto detector) -> int {
         constexpr bool kOnDemand = decltype(mode)::value;
-        frontend::Tracker<W, NanoClock, kOnDemand> tr(L, mem, NanoClock{}, &collect, &lifetimes);
+        constexpr bool kGrid = decltype(detector)::value;
+        frontend::Tracker<W, NanoClock, kOnDemand, kGrid> tr(L, mem, NanoClock{}, &collect,
+                                                             &lifetimes);
         tr.clear();
 
         std::FILE* out = outPath ? std::fopen(outPath, "w") : nullptr;
@@ -154,9 +166,9 @@ int main(int argc, char** argv) {
 
         std::printf("%s\n", bincv::simdStatusString());
         std::printf("LK residual kernel: %s\n", bincv::lkPathName<bincv::LKLevelN<2, W>>());
-        std::printf("=== the frontend over %zu frames, %zux%zu, corner pool %zu, derivatives %s ===\n\n",
-                    frames, sh.width, sh.height, L.poolCapacity,
-                    L.derivativesOnDemand ? "on demand" : "stored");
+        std::printf("=== the frontend over %zu frames, %zux%zu, %s %zu, derivatives %s ===\n\n",
+                    frames, sh.width, sh.height, kGrid ? "grid slots" : "corner pool",
+                    L.poolCapacity, L.derivativesOnDemand ? "on demand" : "stored");
 
         const bincv::GoodFeaturesParams gftt;
         const bincv::LKParams lk;
@@ -226,5 +238,10 @@ int main(int argc, char** argv) {
         std::printf("  = everything held      : %zu\n", L.bytes());
         return 0;
     };
-    return onDemand ? run(std::true_type{}) : run(std::false_type{});
+    if (grid) {
+        return onDemand ? run(std::true_type{}, std::true_type{})
+                        : run(std::false_type{}, std::true_type{});
+    }
+    return onDemand ? run(std::true_type{}, std::false_type{})
+                    : run(std::false_type{}, std::false_type{});
 }

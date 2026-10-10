@@ -127,6 +127,13 @@
 # cuda_role_benchmark's and cuda_sparse_benchmark's host code is identical -- only nvcc's
 # generated stub names differ. corner_subpix-aarch64 was already listed with subpix.hpp.
 #
+# 11. The reference pipeline (benchmark/frontend_pipeline.hpp) and the board's tracker
+# source (targets/stm32h753/bincv_m7_track.cpp) gained a grid-detection mode -- a template
+# argument and a define -- and the pipeline now includes ops/gridCorners.hpp. Neither
+# published image compiles any of it: bincv_m7_track.bin and bincv_m7_track_ondemand.bin
+# are byte-identical before and after (md5 ba8f5f0a2c16..., 36bd24ec7b10...), so the six
+# board tracker logs describe exactly the binaries these sources build.
+#
 bitwidth_crossover-x86_64-launches.log	80ff0a8	benchmark/crossover_sweep.sh,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
 corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp,include/bincv/ops/subpix.hpp
 cuda_role-x86_64-cuda-launches.log	7c8055f	backends/cuda/benchmark/cuda_bench_util.hpp,backends/cuda/benchmark/cuda_role_benchmark.cpp,backends/cuda/include/bincv/cuda/orientation.hpp,backends/cuda/src/census.cu,backends/cuda/src/corner.cu,backends/cuda/src/covariance.cu,backends/cuda/src/denseDisparity.cu,backends/cuda/src/descriptor.cu,backends/cuda/src/fast.cu,backends/cuda/src/opticalFlow.cu,backends/cuda/src/orientation.cu,backends/cuda/src/pack.cu,include/bincv/core/parallel.hpp,include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp,include/bincv/impl/lkBatch_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/denseDisparity.hpp,include/bincv/ops/edge.hpp,include/bincv/ops/medianWide.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pack.hpp,include/bincv/ops/pyramid.hpp,include/bincv/ops/stereo.hpp
@@ -154,6 +161,12 @@ lk_memorybound-x86_64-launches.log	80ff0a8	include/bincv/core/parallel.hpp,inclu
 logic-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 logic-x86_64-launches-repeat.log	0b9b73c	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 logic-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
+m7-track-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
+m7-track-lkwc0-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
+m7-track-lkwc1-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
+m7-track-ondemand-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
+m7-track-rt0-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
+m7-track-rt1-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
 morphology-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 morphology-x86_64-launches-repeat.log	a152536	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 morphology-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp

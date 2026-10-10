@@ -225,6 +225,12 @@ a solve is 8× faster, an estimation 2× to 7×, in the same stack. Its answers 
 published solver's bit for bit — it is held to every accuracy bound that solver is, and on
 the measured scenes it finds the same inliers — so it is a separate name rather than an arm.
 
+**A detector that needs no candidate pool.** `gridCorners` (`ops/gridCorners.hpp`) keeps the
+strongest corner or corners of each cell of a grid in one sweep, in a few eight-byte slots a
+cell — the cell size, the count, the thresholds, spacing, a cap, the cells that already hold
+features and a mask are all arguments. It answers a different question from
+`goodFeaturesToTrack`, so it is a separate operation rather than a mode of it.
+
 **Three things exist for a frame that does not fit.** `MedianEdgeStream`
 (`ops/medianEdgeStream.hpp`) runs the sensor stage on rows as a camera delivers them, in
 a few rows of scratch instead of two whole 8-bit frames. `goodFeaturesToTrackStreaming`

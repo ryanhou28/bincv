@@ -31,6 +31,7 @@
 
 #include "bincv/ops/corner.hpp"
 #include "bincv/ops/derivative.hpp"
+#include "bincv/ops/gridCorners.hpp"
 #include "bincv/ops/medianEdgeStream.hpp"
 #include "bincv/ops/opticalFlow.hpp"
 #include "bincv/ops/pyramid.hpp"
@@ -44,6 +45,22 @@ inline constexpr size_t kMinTracks = 60;
 inline constexpr size_t kLevels = 4;
 inline constexpr size_t kLevelBits[kLevels] = {1, 2, 2, 2};
 
+/// The grid detector's parameters for this pipeline: the reference's detection,
+/// gridded -- one corner a cell, cells the reference spacing wide, the same quality
+/// level, window and cap.
+constexpr bincv::GridCornerParams gridParams(const bincv::GoodFeaturesParams& g) {
+    bincv::GridCornerParams p;
+    const int whole = static_cast<int>(g.minDistance);
+    const int cell = static_cast<double>(whole) < g.minDistance ? whole + 1 : whole;
+    p.cellWidth = cell > 0 ? cell : 1;
+    p.cellHeight = p.cellWidth;
+    p.perCell = 1;
+    p.qualityLevel = g.qualityLevel;
+    p.maxCorners = g.maxCorners;
+    p.blockSize = g.blockSize;
+    return p;
+}
+
 /// Where every buffer goes, for a frame of `w` x `h`, and how big each is. Strides
 /// are whole words with no row alignment beyond that, which is a `QuantMat`'s
 /// default and so the same bytes the published footprint counts.
@@ -53,7 +70,7 @@ struct Layout {
 
     size_t w = 0, h = 0;
     size_t lw[kLevels] = {}, lh[kLevels] = {}, stride[kLevels] = {};
-    size_t poolCapacity = 0;   ///< candidate pool entries (8 bytes each)
+    size_t poolCapacity = 0;   ///< candidate pool entries, or the grid's slots (8 bytes each)
     size_t maxTracks = 0;
     /// Derivatives computed where they are read (ops/opticalFlowOnDemand.hpp and the
     /// `GradientSource` detector) instead of stored: no derivative planes, three
@@ -177,8 +194,10 @@ inline constexpr uint32_t kFnvSeed = 2166136261u;
 using LifetimeSink = void (*)(void* ctx, int frames);
 
 /// `OnDemand` selects the derivatives' handling at compile time, so an image carries
-/// one form's code; the layout must have been made for the same one.
-template <typename W, typename Clock, bool OnDemand = false>
+/// one form's code; the layout must have been made for the same one. `Grid` detects
+/// with `gridCorners` over `gridParams` instead of `goodFeaturesToTrackStreaming`, the
+/// pool then holding the grid's slots; the lifecycle is the same.
+template <typename W, typename Clock, bool OnDemand = false, bool Grid = false>
 class Tracker {
 public:
     Tracker(const Layout<W>& layout, const Memory<W>& mem, Clock clock,
@@ -248,7 +267,20 @@ public:
         if (count_ < kMinTracks) {
             bincv::ResponseMap ring{m_.ring, L_.w, bincv::kResponseRingRows, L_.w};
             bincv::CornerResult cr;
-            if constexpr (OnDemand) {
+            if constexpr (Grid) {
+                const bincv::GridCornerParams gp = gridParams(gftt);
+                if constexpr (OnDemand) {
+                    bincv::GradientSource<1, W> gs;
+                    gs.planes[0] = plane(prev_, 0, 0);
+                    cr = bincv::gridCorners(gs, gp, ring, m_.gradientRows, L_.gradientWords(),
+                                            m_.pool, L_.poolCapacity, m_.corners, L_.maxTracks);
+                } else {
+                    cr = bincv::gridCorners<W>(derivMag(0, 0, 0), derivMag(1, 0, 0),
+                                               derivSign(0, 0), derivSign(1, 0), gp, ring,
+                                               m_.pool, L_.poolCapacity, m_.corners,
+                                               L_.maxTracks);
+                }
+            } else if constexpr (OnDemand) {
                 bincv::GradientSource<1, W> gs;
                 gs.planes[0] = plane(prev_, 0, 0);
                 cr = bincv::goodFeaturesToTrackStreaming(gs, gftt, ring, m_.gradientRows,

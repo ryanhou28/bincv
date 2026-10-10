@@ -6,7 +6,7 @@ harness; binCV itself is `bincv_core`, the same headers every other target compi
 
 **The assembled feature tracker runs here at the reference sequence's full 752×480,
 bit-identical to the x86-64 host on every frame, in 512,600 bytes — or 238,712 with its
-derivatives made where they are read** — section 3. Sparse stereo, the five-point RANSAC
+derivatives made where they are read, 175,936 detecting on a grid** — section 3. Sparse stereo, the five-point RANSAC
 and sub-pixel corner refinement run here too, each against the host's output (sections 5
 to 7).
 
@@ -34,6 +34,7 @@ changes, and one image compiling every kernel would age every figure on every ed
 | `bincv_m7_dense` | `DENSE` | dense disparity at both word types (section 2) |
 | `bincv_m7_track` | `TRACK`, `SET lkwc`, `SET rt` | the assembled feature tracker over a sequence (section 3) |
 | `bincv_m7_track_ondemand` | `TRACK`, `SET lkwc`, `SET rt` | the same tracker, its derivatives made where they are read (section 3) |
+| `bincv_m7_track_grid` | `TRACK`, `SET lkwc`, `SET rt` | the on-demand tracker detecting on a grid (section 3) |
 | `bincv_m7_sensor` | `SENSOR` | the sensor stage by part, DSP arms on and off (section 4) |
 | `bincv_m7_stereo` | `STEREO` | sparse stereo by stage, its arms off and on (section 5) |
 | `bincv_m7_essential` | `ESSENTIAL`, `ESSENTIALDUMP` | the five-point RANSAC, scoring both ways; the models and masks in full (section 6) |
@@ -113,7 +114,7 @@ its sensitivity to the bus.)
 2. **Dense disparity at 32-bit pointer width** — the binary dense kernel on an M-profile
    core, at `uint32` against `uint64`.
 3. **The assembled feature tracker** at 752×480, against the host frame by frame, with its
-   derivatives stored and made where they are read.
+   derivatives stored and made where they are read, and detecting on a grid.
 4. **The sensor stage**, by part, with and without the DSP extension.
 5. **Sparse stereo**: BRIEF, the descriptor stage and the window refinement.
 6. **The five-point essential matrix under RANSAC.**
@@ -480,6 +481,33 @@ cycles a frame between them — against the 453,340 the derivative stage no long
 the frame is no slower for holding less than half: 1,152 bytes of gradient rows replace
 275,040 of ladders, and the measured stack is smaller too, 7,716 bytes against 8,428. The
 window must stage — a word wide and `kStagedMaxRows` tall — or every point is reported lost.
+
+### Detection on a grid
+
+`bincv_m7_track_grid` is the on-demand tracker detecting with `gridCorners`
+([ops/gridCorners.hpp](../../include/bincv/ops/gridCorners.hpp)) instead of
+`goodFeaturesToTrackStreaming`: the reference's detection gridded — one corner in each cell
+the reference spacing wide (34 pixels), the same quality level, window and cap of 200
+(`frontend::gridParams`) — over the same 1,709 frames, with the same lifecycle
+([log](../../docs/reports/logs/m7-track-grid-cortex-m7.log)). It is a different detector, so
+it is a different tracker; the table is what a caller choosing between them weighs:
+
+| | `goodFeaturesToTrackStreaming` | `gridCorners` |
+|---|---|---|
+| everything the pipeline holds, bytes | 238,712 | **175,936** |
+| detections | 82 | 51 |
+| cycles a detection | 25.3 M, 1 to 3 sweeps | **15.5 M, one sweep** |
+| detect, cycles per frame | 1,214,612 | 462,814 |
+| points tracked over the sequence | 159,510 | 199,970 |
+| track, cycles per frame | 12,090,307 | 15,039,139 |
+| **the frame** | **18,078,375** (37.7 ms) | **20,257,549** (42.2 ms) |
+| tracks observed, median lifetime, survival | 10,286, 11 frames, 96.5% | 9,716, 14 frames, 96.6% |
+| integer digests, points | equal, bit-identical | equal, bit-identical |
+
+The grid drops the 64 KB pool for 2,760 bytes of slots, never sweeps twice, and its tracks
+live longer, so it detects less often. Its frame costs more because each detection fills the
+cap — 200 corners where the spacing walk often finds fewer — so a quarter more points are
+tracked; per point tracked the cost is the same, 129 thousand cycles either way.
 
 ### What this does not claim
 
