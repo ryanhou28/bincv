@@ -213,7 +213,18 @@ public:
     void clear() {
         std::memset(m_.pyramidA, 0, L_.pyramidWords() * sizeof(W));
         std::memset(m_.pyramidB, 0, L_.pyramidWords() * sizeof(W));
+        // On demand there are none, and an image may pass a one-word placeholder. GCC 13
+        // does not prove the guard and reports this memset as overflowing it. Silenced
+        // rather than restated on the template argument: that would be the same code,
+        // but GCC would inline the board images differently around it.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
         if (L_.derivativeWords() > 0) std::memset(m_.derivatives, 0, L_.derivativeWords() * sizeof(W));
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
         std::memset(m_.ring, 0, L_.ringBytes());
         prev_ = m_.pyramidA;
         next_ = m_.pyramidB;
