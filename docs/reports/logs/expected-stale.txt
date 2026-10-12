@@ -166,13 +166,6 @@ lk_memorybound-x86_64-launches.log	80ff0a8	include/bincv/core/parallel.hpp,inclu
 logic-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 logic-x86_64-launches-repeat.log	0b9b73c	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 logic-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
-m7-track-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
-m7-track-grid-cortex-m7.log	8362c5f	benchmark/frontend_pipeline.hpp
-m7-track-lkwc0-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
-m7-track-lkwc1-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
-m7-track-ondemand-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
-m7-track-rt0-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
-m7-track-rt1-cortex-m7.log	564c6b3	benchmark/frontend_pipeline.hpp,include/bincv/ops/gridCorners.hpp,targets/stm32h753/bincv_m7_track.cpp
 morphology-aarch64-launches.log	80ff0a8	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 morphology-x86_64-launches-repeat.log	a152536	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp
 morphology-x86_64-launches.log	ac33cf1	include/bincv/core/view.hpp,include/bincv/impl/binMat_impl.hpp

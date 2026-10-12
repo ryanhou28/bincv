@@ -51,7 +51,7 @@ pipeline.
 
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| the assembled pipeline, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.65 | 4.376 | 5.41× [5.39, 5.42] |
+| the assembled pipeline, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.56 | 4.382 | 5.37× [5.35, 5.40] |
 
 Each ratio is the ratio of the two medians, with a percentile bootstrap over the same
 launches; the per-launch ratio is above 1.00 in 30 of 30 launches on x86-64 and 10 of 10 on
@@ -80,11 +80,11 @@ total:
 
 | stage | time, x86-64 (ms/frame) | share of the x86-64 pipeline | time, aarch64 (ms/frame) | share of the aarch64 pipeline |
 |---|---|---|---|---|
-| track (Lucas–Kanade) | 0.7365 | 73.0% | 3.279 | 74.9% |
-| build (pyramid + derivatives) | 0.1995 | 19.8% | 0.796 | 18.2% |
-| — sensor stage | 0.098 | 9.7% | 0.452 | 10.3% |
+| track (Lucas–Kanade) | 0.7365 | 73.0% | 3.287 | 75.0% |
+| build (pyramid + derivatives) | 0.1995 | 19.8% | 0.789 | 18.0% |
+| — sensor stage | 0.098 | 9.7% | 0.446 | 10.2% |
 | — `pyrDown` | 0.059 | 5.8% | 0.190 | 4.3% |
-| — derivatives | 0.042 | 4.2% | 0.152 | 3.5% |
+| — derivatives | 0.042 | 4.2% | 0.151 | 3.4% |
 | detect | 0.073 | 7.2% | 0.297 | 6.8% |
 
 Tracking dominates on both, so the operations that move this number are the ones inside the
@@ -98,8 +98,8 @@ bottlenecked on anything architecture-specific.
 **The Lucas–Kanade row varies between sweeps more than within one.** Across independent
 device sweeps of code that did not change, the track stage has read 3.307 ms/frame (one
 launch, `25065d7`), 3.791 (five launches at `80ff0a8`, interval 0.4%,
-[log](logs/feature-tracking-spotcheck-aarch64-launches.log)) and 3.279 here (ten launches,
-interval 0.2%) — a 1.16× swing between sweeps whose own intervals are under 1%, on an
+[log](logs/feature-tracking-spotcheck-aarch64-launches.log)) and 3.287 here (ten launches,
+interval 0.5%) — a 1.16× swing between sweeps whose own intervals are under 1%, on an
 identical workload (1710 frames, 1709 pairs, 82 re-detections, the same track lifetimes, the
 same 436,704 B peak). A difference in that row smaller than that swing should not be read
 from two sweeps.
@@ -221,3 +221,4 @@ the figure stands.
 | 2026-09-29 | aarch64 column | 23.61 / 4.435 ms, 5.32× [5.31, 5.34]; track 3.279 | 23.65 / 4.434 ms, 5.34× [5.32, 5.35]; track 3.287 | re-taken at `4c4b3bf` after the NEON covariance off-switch; every cell inside the previous interval |
 | 2026-10-09 | aarch64 column | 23.65 / 4.434 ms, 5.34× [5.32, 5.35]; sensor stage 0.503 | 23.64 / 4.383 ms, 5.39× [5.38, 5.40]; sensor stage 0.452 | re-taken at `0a28578` after the sensor stage became one row body per operation, which the stream and the whole-frame calls share: the portable median now auto-vectorizes. Track (3.287) and detect (0.298) are where they were |
 | 2026-10-09 | aarch64 column | 23.64 / 4.383 ms, 5.39× [5.38, 5.40]; track 3.287 | 23.65 / 4.376 ms, 5.41× [5.39, 5.42]; track 3.279 | re-taken after derivatives on demand became a second entry point beside this one; the two intervals overlap, so nothing here moved |
+| 2026-10-12 | aarch64 column | 23.65 / 4.376 ms, 5.41× [5.39, 5.42]; track 3.279 | 23.56 / 4.382 ms, 5.37× [5.35, 5.40]; track 3.287 | re-taken after the corner sweep took its admit test as a policy and the microcontroller-only conversion arm was added beside Lucas–Kanade. binCV's time is inside its previous interval and the ratio moved with OpenCV's: an interleaved old-against-new sweep in the same session put every binCV row within the drift of the OpenCV denominator, whose code is the same in both, and Lucas–Kanade's aarch64 instructions are unchanged |

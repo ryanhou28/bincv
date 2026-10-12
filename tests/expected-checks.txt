@@ -909,7 +909,7 @@ opencv	test_pyramid	262480	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
 opencv	test_corner	3918	0
-opencv	test_opticalflow	352	0
+opencv	test_opticalflow	431	0
 opencv	test_pack	72	0
 opencv	test_sequence	73	0
 opencv	test_edge	31	0
@@ -923,11 +923,12 @@ opencv	test_occupancy	13697	0
 opencv	test_simd	10	0
 opencv	test_ransac	143	0
 opencv	test_essential	719546	0
+opencv	test_essential_known_rotation	4278	0
 opencv	test_orientation	832	0
 opencv	test_stereo	152517	0
 opencv	test_census	102	0
 opencv	test_dense_disparity	27	0
-opencv	test_grid_corners	74695	0
+opencv	test_grid_corners	74697	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0
@@ -950,7 +951,7 @@ core	test_pyramid	236587	0
 core	test_derivative	47675	0
 core	test_covariance	17704	0
 core	test_corner	3918	0
-core	test_opticalflow	260	0
+core	test_opticalflow	339	0
 core	test_pack	72	0
 core	test_sequence	73	0
 core	test_edge	30	0
@@ -964,11 +965,12 @@ core	test_occupancy	13697	0
 core	test_simd	10	0
 core	test_ransac	137	0
 core	test_essential	719502	0
+core	test_essential_known_rotation	4278	0
 core	test_orientation	832	0
 core	test_stereo	152393	0
 core	test_census	102	0
 core	test_dense_disparity	24	0
-core	test_grid_corners	74695	0
+core	test_grid_corners	74697	0
 core	test_harness	8	0
 
 noexcept	test_parallel	14	0
@@ -989,7 +991,7 @@ noexcept	test_pyramid	236587	0
 noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
 noexcept	test_corner	3918	0
-noexcept	test_opticalflow	260	0
+noexcept	test_opticalflow	339	0
 noexcept	test_pack	72	0
 noexcept	test_sequence	73	0
 noexcept	test_edge	30	0
@@ -1003,11 +1005,12 @@ noexcept	test_occupancy	13697	0
 noexcept	test_simd	10	0
 noexcept	test_ransac	137	0
 noexcept	test_essential	719502	0
+noexcept	test_essential_known_rotation	4278	0
 noexcept	test_orientation	832	0
 noexcept	test_stereo	152393	0
 noexcept	test_census	102	0
 noexcept	test_dense_disparity	24	0
-noexcept	test_grid_corners	74695	0
+noexcept	test_grid_corners	74697	0
 noexcept	test_harness	8	0
 
 debug	test_parallel	14	0
@@ -1028,7 +1031,7 @@ debug	test_pyramid	236587	0
 debug	test_derivative	47675	0
 debug	test_covariance	17704	0
 debug	test_corner	3918	0
-debug	test_opticalflow	259	0
+debug	test_opticalflow	338	0
 debug	test_pack	72	0
 debug	test_sequence	73	0
 debug	test_edge	30	0
@@ -1042,10 +1045,11 @@ debug	test_occupancy	13697	0
 debug	test_simd	10	0
 debug	test_ransac	137	0
 debug	test_essential	719502	0
+debug	test_essential_known_rotation	4278	0
 debug	test_orientation	832	0
 debug	test_stereo	152393	0
 debug	test_census	102	0
 debug	test_dense_disparity	24	0
-debug	test_grid_corners	74695	0
+debug	test_grid_corners	74697	0
 debug	test_harness	8	0
 

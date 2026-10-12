@@ -10,9 +10,14 @@
 ///                   solver; then the
 ///                   five-point solve alone, both solvers, over 200 samples
 ///   ESSENTIALDUMP   per scene: the model's nine doubles and the inlier mask, in full,
-///                   from both solvers (E/M published, R/Q the real-root solver),
-///                   for a difference from the host's to be measured rather than only
-///                   detected (m7_reference essential --dump prints the same lines)
+///                   from both solvers (E/M published, R/Q the real-root solver) and
+///                   the known-rotation estimator (K/L), for a difference from the
+///                   host's to be measured rather than only detected (m7_reference
+///                   essential --dump prints the same lines)
+///   KNOWNROT        per scene, the same scenes handed their planted rotation: what
+///                   essentialFromKnownRotation found, as ESSENTIAL reports it, and
+///                   cycles, median of 3, with the refit and without; then the two-point
+///                   solve alone over 200 samples
 ///
 /// Double precision throughout, on the M7's double-precision FPU. Nothing is allocated:
 /// the inlier flags are the caller's scratch, the solver's working set is stack.
@@ -192,6 +197,95 @@ void cmdEssential(const char*) {
     boardPuts("OK\n");
 }
 
+void putDoubles(const char* tag, size_t count, const double* m) {
+    boardPuts(tag);
+    boardPutU32(static_cast<uint32_t>(count));
+    for (size_t i = 0; i < 9; ++i) {
+        uint64_t b;
+        std::memcpy(&b, &m[i], sizeof b);
+        boardPuts(" ");
+        boardPutHex32(static_cast<uint32_t>(b >> 32));
+        boardPutHex32(static_cast<uint32_t>(b));
+    }
+    boardPuts("\n");
+}
+
+void putMask(const char* tag, size_t count) {
+    boardPuts(tag);
+    boardPutU32(static_cast<uint32_t>(count));
+    boardPuts(" ");
+    for (size_t i = 0; i < count; ++i) boardPutc(g_mask[i] ? '1' : '0');
+    boardPuts("\n");
+}
+
+void cmdKnownRotation(const char*) {
+    boardPuts("-- known rotation, two-point RANSAC, normalised coordinates, threshold 0.002, "
+              "cap 500 --\n");
+    double rotation[9];
+    for (const Case& c : kCases) {
+        const size_t planted = build(g_from, g_to, c.count, c.outlierPct, c.seed, rotation);
+        const bincv::RansacScratch scratch{g_flags, c.count};
+        bincv::RansacParams p = params();
+        bincv::EssentialMatrix model;
+        bincv::RansacResult res;
+        uint32_t refit[kRepeats], minimal[kRepeats];
+        for (size_t k = 0; k < kRepeats; ++k) {
+            p.refine = false;
+            uint32_t t0 = boardCycles();
+            res = bincv::essentialFromKnownRotation(g_from, g_to, c.count, rotation, p, scratch, &model,
+                                                    g_mask);
+            minimal[k] = boardCycles() - t0;
+            p.refine = true;
+            t0 = boardCycles();
+            res = bincv::essentialFromKnownRotation(g_from, g_to, c.count, rotation, p, scratch, &model,
+                                                    g_mask);
+            refit[k] = boardCycles() - t0;
+        }
+        boardPuts("  ");
+        boardPutU32(static_cast<uint32_t>(c.count));
+        boardPuts(" correspondences, ");
+        boardPutU32(static_cast<uint32_t>(c.outlierPct));
+        boardPuts("% outliers: found ");
+        boardPutU32(res.found ? 1u : 0u);
+        boardPuts(" inliers ");
+        boardPutU32(static_cast<uint32_t>(res.inliers));
+        boardPuts(" of ");
+        boardPutU32(static_cast<uint32_t>(planted));
+        boardPuts(" planted, iterations ");
+        boardPutU32(static_cast<uint32_t>(res.iterations));
+        boardPuts(", refined ");
+        boardPutU32(res.refined ? 1u : 0u);
+        boardPuts(", model ");
+        boardPutHex32(fnv1a(kFnvSeed, model.m, sizeof model.m));
+        boardPuts(", mask ");
+        boardPutHex32(fnv1a(kFnvSeed, g_mask, c.count));
+        boardPuts("\n    cycles, refit  ");
+        boardPutU32(m7::medianOf(refit, kRepeats));
+        boardPuts(" cyc\n    cycles, no refit  ");
+        boardPutU32(m7::medianOf(minimal, kRepeats));
+        boardPuts(" cyc\n");
+    }
+
+    // The minimal solve alone: the last scene's correspondences two at a time, outliers
+    // included, as RANSAC draws them.
+    constexpr size_t kSamples = 200;
+    const bincv::KnownRotationEssentialModel model(rotation);
+    bincv::EssentialMatrix e;
+    uint32_t solutions = 0;
+    const uint32_t t0 = boardCycles();
+    for (size_t k = 0; k < kSamples; ++k) {
+        const size_t idx[2] = {2 * k, 2 * k + 1};
+        solutions += static_cast<uint32_t>(model.estimate(g_from, g_to, idx, &e));
+    }
+    const uint32_t solveCycles = boardCycles() - t0;
+    boardPuts("-- the two-point solve alone, 200 samples of the last scene --\n  ");
+    boardPutU32(solutions);
+    boardPuts(" solutions, ");
+    boardPutU32(solveCycles / kSamples);
+    boardPuts(" cyc a solve\n");
+    boardPuts("OK\n");
+}
+
 void cmdEssentialDump(const char*) {
     for (const Case& c : kCases) {
         build(g_from, g_to, c.count, c.outlierPct, c.seed);
@@ -228,12 +322,19 @@ void cmdEssentialDump(const char*) {
         boardPuts(" ");
         for (size_t i = 0; i < c.count; ++i) boardPutc(g_mask[i] ? '1' : '0');
         boardPuts("\n");
+        double rotation[9];
+        build(g_from, g_to, c.count, c.outlierPct, c.seed, rotation);
+        bincv::essentialFromKnownRotation(g_from, g_to, c.count, rotation, params(), scratch,
+                                          &model, g_mask);
+        putDoubles("K ", c.count, model.m);
+        putMask("L ", c.count);
     }
     boardPuts("OK\n");
 }
 
 const m7::Command kCommands[] = {{"ESSENTIAL", &cmdEssential},
-                                 {"ESSENTIALDUMP", &cmdEssentialDump}};
+                                 {"ESSENTIALDUMP", &cmdEssentialDump},
+                                 {"KNOWNROT", &cmdKnownRotation}};
 
 }  // namespace
 

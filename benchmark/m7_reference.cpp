@@ -3,8 +3,9 @@
 // the board image does.
 //
 //   ./m7_reference essential [--dump]   the digests bincv_m7_essential prints, both
-//                                        solvers, or with --dump the lines its
-//                                        ESSENTIALDUMP prints
+//                                        solvers and the known-rotation estimator
+//                                        (ESSENTIAL, KNOWNROT), or with --dump the lines
+//                                        its ESSENTIALDUMP prints
 //   ./m7_reference subpix [--dump]      the same for bincv_m7_subpix and SUBPIXDUMP
 //
 // (The sparse stereo digests come from stereo_benchmark, which builds its pair from the
@@ -55,6 +56,19 @@ int essential(bool dump) {
             std::printf("\nQ %zu ", c.count);
             for (size_t i = 0; i < c.count; ++i) std::putchar(mask[i] ? '1' : '0');
             std::printf("\n");
+            double rotation[9];
+            build(from.data(), to.data(), c.count, c.outlierPct, c.seed, rotation);
+            bincv::essentialFromKnownRotation(from.data(), to.data(), c.count, rotation,
+                                              params(), scratch, &model, mask.data());
+            std::printf("K %zu", c.count);
+            for (const double v : model.m) {
+                uint64_t b;
+                std::memcpy(&b, &v, sizeof b);
+                std::printf(" %016llx", static_cast<unsigned long long>(b));
+            }
+            std::printf("\nL %zu ", c.count);
+            for (size_t i = 0; i < c.count; ++i) std::putchar(mask[i] ? '1' : '0');
+            std::printf("\n");
             continue;
         }
         std::printf("  %zu correspondences, %d%% outliers: found %u inliers %zu of %zu planted, "
@@ -66,6 +80,23 @@ int essential(bool dump) {
         std::printf("    real-root solver: found %u inliers %zu, iterations %d, model %08x, mask %08x\n",
                     rr.found ? 1u : 0u, rr.inliers, rr.iterations,
                     fnv1a(kFnvSeed, model.m, sizeof model.m), fnv1a(kFnvSeed, mask.data(), c.count));
+    }
+    if (dump) return 0;
+    std::printf("-- known rotation, two-point RANSAC, normalised coordinates, threshold 0.002, "
+                "cap 500 --\n");
+    for (const Case& c : kCases) {
+        double rotation[9];
+        const size_t planted =
+            build(from.data(), to.data(), c.count, c.outlierPct, c.seed, rotation);
+        const bincv::RansacScratch scratch{flags.data(), c.count};
+        bincv::EssentialMatrix model;
+        const bincv::RansacResult r = bincv::essentialFromKnownRotation(
+            from.data(), to.data(), c.count, rotation, params(), scratch, &model, mask.data());
+        std::printf("  %zu correspondences, %d%% outliers: found %u inliers %zu of %zu planted, "
+                    "iterations %d, refined %u, model %08x, mask %08x\n",
+                    c.count, c.outlierPct, r.found ? 1u : 0u, r.inliers, planted, r.iterations,
+                    r.refined ? 1u : 0u, fnv1a(kFnvSeed, model.m, sizeof model.m),
+                    fnv1a(kFnvSeed, mask.data(), c.count));
     }
     return 0;
 }

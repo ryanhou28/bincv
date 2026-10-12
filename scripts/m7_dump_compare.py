@@ -16,6 +16,7 @@ SUBPIXDUMP, or `m7_host.py run` output); HOST is what `m7_reference essential --
     E <count> <nine doubles as 16 hex digits>     the essential matrix, per scene
     M <count> <one 0/1 per correspondence>        its inlier mask
     R <count> ..., Q <count> ...                  the same from the real-root solver
+    K <count> ..., L <count> ...                  the same from the known-rotation estimator
     S <x,y float bits, 16 hex digits each ...>    cornerSubPix's seeds
     P <x,y float bits, 16 hex digits each ...>    the refined points
 
@@ -37,10 +38,10 @@ def load(path):
     with open(path) as fh:
         for line in fh:
             t = line.split()
-            if len(t) < 2 or t[0] not in ('E', 'M', 'R', 'Q', 'S', 'P'):
+            if len(t) < 2 or t[0] not in ('E', 'M', 'R', 'Q', 'K', 'L', 'S', 'P'):
                 continue
-            key = (t[0], int(t[1])) if t[0] in ('E', 'M', 'R', 'Q') else (t[0], 0)
-            fields = t[2:] if t[0] in ('E', 'M', 'R', 'Q') else t[1:]
+            key = (t[0], int(t[1])) if t[0] in ('E', 'M', 'R', 'Q', 'K', 'L') else (t[0], 0)
+            fields = t[2:] if t[0] in ('E', 'M', 'R', 'Q', 'K', 'L') else t[1:]
             out.setdefault(key, []).append(fields)
     return out
 
@@ -65,13 +66,13 @@ def main():
     for key in sorted(set(host) & set(board)):
         want = host[key][0]
         for n, got in enumerate(board[key], 1):
-            tag = f'{key[0]} {key[1]:>5}' if key[0] in ('E', 'M', 'R', 'Q') else f'{key[0]}      '
+            tag = f'{key[0]} {key[1]:>5}' if key[0] in ('E', 'M', 'R', 'Q', 'K', 'L') else f'{key[0]}      '
             tag += f' (launch {n})' if len(board[key]) > 1 else ''
-            if key[0] in ('E', 'R'):
+            if key[0] in ('E', 'R', 'K'):
                 same = sum(1 for a, b in zip(got, want) if a == b)
                 diff = max(abs(double(a) - double(b)) for a, b in zip(got, want))
                 print(f'{tag}: {same} of 9 entries bit-equal, largest difference {diff:.3e}')
-            elif key[0] in ('M', 'Q'):
+            elif key[0] in ('M', 'Q', 'L'):
                 a, b = got[0], want[0]
                 differ = sum(1 for x, y in zip(a, b) if x != y)
                 print(f'{tag}: masks {"equal" if a == b else f"differ on {differ}"}, '

@@ -42,6 +42,12 @@
 /// one too. The spacing filter, when on, then walks every kept corner strongest first,
 /// as `goodFeaturesToTrack`'s does; a corner it drops is not replaced by its cell's
 /// next one, because the cell kept only `perCell`. Nothing allocates.
+///
+/// With `skipFullCells`, a full cell is what a mask leaving it out would make it, and
+/// the corners are exactly the ones the same call returns given that mask instead. The
+/// on-demand form then clears the gradient more than two pixels from any open cell, so
+/// a full cell's responses are computed only where an open neighbour's suppression
+/// reads them.
 
 #include <algorithm>
 #include <cmath>
@@ -66,6 +72,14 @@ struct GridCornerParams {
     double minDistance = 0.0;    ///< below 1: no spacing; else as `goodFeaturesToTrack`'s
     int maxCorners = 0;          ///< at most this many in all, strongest first; <= 0: no cap
     int blockSize = 3;           ///< the covariance window, as `goodFeaturesToTrack`'s
+    /// A cell `existing` says is full is left out of the search altogether: none of its
+    /// pixels can be a corner or counts toward the frame's strongest response, exactly
+    /// as if the mask left the cell out -- so `qualityLevel` is then a fraction of the
+    /// strongest response among the cells that can still take a corner. The form that
+    /// derives its gradient also computes a full cell's responses only where a
+    /// neighbouring cell's suppression reads them. Off, a full cell only takes no new
+    /// corner. No effect without `existing`.
+    bool skipFullCells = false;
 };
 
 /// @brief Cells across a frame `width` pixels wide. **API TIER 3.**
@@ -88,6 +102,88 @@ constexpr size_t gridCornerSlots(size_t width, size_t height, const GridCornerPa
 }
 
 namespace impl {
+
+/// @brief The pixels of the cells that can still take a corner, under an optional pixel
+/// mask: the sweep's admit policy when `skipFullCells` is on. **INTERNAL.**
+template <typename WordType>
+struct AdmitOpenCells {
+    BinMatConstView<WordType> mask;
+    const uint8_t* existing;
+    size_t perCell, cellWidth, cellHeight, across, width;
+
+    bool open(size_t cx, size_t cy) const { return existing[cy * across + cx] < perCell; }
+
+    bool operator()(int x, int y) const {
+        if (!open(static_cast<size_t>(x) / cellWidth, static_cast<size_t>(y) / cellHeight))
+            return false;
+        return mask.empty() || AdmitMasked<WordType>{mask}(x, y);
+    }
+
+    /// Every maximal run `[x0, x1)` of admitted pixels in row `y`, to `fn`: runs of open
+    /// cells, split where the mask is clear.
+    template <typename Fn>
+    void runs(size_t y, Fn&& fn) const {
+        constexpr size_t kBits = bitsPerWord<WordType>();
+        const size_t cy = y / cellHeight;
+        size_t x = 0;
+        while (x < width) {
+            const size_t cx = x / cellWidth;
+            const size_t cellEnd = (cx + 1) * cellWidth < width ? (cx + 1) * cellWidth : width;
+            if (!open(cx, cy)) {
+                x = cellEnd;
+                continue;
+            }
+            size_t end = cellEnd;
+            while (end < width && open(end / cellWidth, cy))
+                end = end + cellWidth < width ? end + cellWidth : width;
+            if (mask.empty()) {
+                fn(x, end);
+            } else {
+                const WordType* row = mask.row(y);
+                size_t start = end;
+                for (size_t i = x; i < end; ++i) {
+                    const bool set = ((row[i / kBits] >> (i % kBits)) & WordType{1}) != 0;
+                    if (set && start == end) start = i;
+                    if (!set && start != end) {
+                        fn(start, i);
+                        start = end;
+                    }
+                }
+                if (start != end) fn(start, end);
+            }
+            x = end;
+        }
+    }
+
+    /// Which pixels of word `w` lie within two pixels of an open cell in rows `cr0`..`cr1`
+    /// of cells: the gradient a sweep over open cells can read, through a suppression
+    /// one pixel out and a 3x3 window one pixel beyond that.
+    WordType keep(size_t cr0, size_t cr1, size_t w) const {
+        constexpr size_t kBits = bitsPerWord<WordType>();
+        constexpr WordType kAll = static_cast<WordType>(~WordType{0});
+        const long long base = static_cast<long long>(w * kBits);
+        const long long lo = base - 2;
+        const size_t hi = w * kBits + kBits + 1 < width ? w * kBits + kBits + 1 : width - 1;
+        const size_t c0 = lo < 0 ? 0 : static_cast<size_t>(lo) / cellWidth;
+        const size_t c1 = hi / cellWidth;
+        WordType out = 0;
+        for (size_t cy = cr0; cy <= cr1; ++cy) {
+            for (size_t cx = c0; cx <= c1; ++cx) {
+                if (!open(cx, cy)) continue;
+                long long a = static_cast<long long>(cx * cellWidth) - 2 - base;
+                long long b = static_cast<long long>((cx + 1) * cellWidth) + 1 - base;
+                if (a < 0) a = 0;
+                if (b > static_cast<long long>(kBits) - 1) b = static_cast<long long>(kBits) - 1;
+                if (a > b) continue;
+                const WordType upTo =
+                    static_cast<WordType>(kAll >> (kBits - 1 - static_cast<size_t>(b)));
+                out = static_cast<WordType>(out | (upTo & static_cast<WordType>(
+                                                              kAll << static_cast<size_t>(a))));
+            }
+        }
+        return out;
+    }
+};
 
 /// @brief The selection, over any response sweep. **INTERNAL.** `sweep(onCandidate)`
 /// runs `sweepCornerResponses` with the caller's row source and returns the frame's
@@ -261,7 +357,8 @@ inline GoodFeaturesParams gridSweepParams(const GridCornerParams& params) {
 /// @param corners Where the corners go, strongest first; `capacity` entries.
 /// @param existing Optional: one byte per cell, cells in row order -- how many features
 /// the caller already has there. A cell keeps at most `perCell - existing` new ones, so
-/// a full cell is skipped. Null: every cell is empty.
+/// a full cell takes none -- and with `params.skipFullCells` is not searched at all.
+/// Null: every cell is empty.
 /// @param mask Optional pixel mask, as `goodFeaturesToTrack`'s: only set pixels can be
 /// corners, and the relative threshold is a fraction of their strongest response.
 /// @note `count` is how many corners were written; `candidatesRanked` how many cells'
@@ -282,6 +379,23 @@ inline CornerResult gridCorners(BinMatConstView<WordType> magX, BinMatConstView<
                  "gridCorners: the four derivative planes must have the same dimensions");
     impl::checkGridCornerArgs(magX.width, magX.height, params, slots, corners, capacity);
     const GoodFeaturesParams sweepParams = impl::gridSweepParams(params);
+    if (params.skipFullCells && existing != nullptr) {
+        const impl::AdmitOpenCells<WordType> open{
+            mask,
+            existing,
+            static_cast<size_t>(params.perCell),
+            static_cast<size_t>(params.cellWidth),
+            static_cast<size_t>(params.cellHeight),
+            gridCellsAcross(magX.width, params),
+            magX.width};
+        return impl::selectPerCell(
+            magX.width, magX.height, params,
+            [&](auto&& onCandidate) {
+                return impl::sweepCornerCandidates<WordType>(magX, magY, signX, signY,
+                                                             sweepParams, ring, open, onCandidate);
+            },
+            slots, slotCount, corners, capacity, existing);
+    }
     return impl::selectPerCell(
         magX.width, magX.height, params,
         [&](auto&& onCandidate) {
@@ -344,6 +458,14 @@ inline CornerResult gridCorners(const GradientSource<N, WordType>& src,
         return gradientRows + ((slot * 2 + axis) * (N + 1) + plane) * words;
     };
     size_t derived = 0;
+    const bool skip = params.skipFullCells && existing != nullptr;
+    const impl::AdmitOpenCells<WordType> open{mask,
+                                              existing,
+                                              static_cast<size_t>(params.perCell),
+                                              static_cast<size_t>(params.cellWidth),
+                                              static_cast<size_t>(params.cellHeight),
+                                              gridCellsAcross(width, params),
+                                              width};
     const auto derive = [&](size_t r) {
         const size_t slot = r % kResponseRingRows;
         const WordType* srcRow[N];
@@ -363,6 +485,18 @@ inline CornerResult gridCorners(const GradientSource<N, WordType>& src,
         impl::gradientRow<N, WordType>(srcRow, rowA, rowB, width, leftSrc, rightSrc,
                                        src.borderValue, magX, rowOf(slot, 0, N), magY,
                                        rowOf(slot, 1, N));
+        if (!skip) return;
+        // The gradient no sweep over open cells reads, cleared: a group of eight with
+        // none left is then skipped as empty, and every response the sweep reads -- an
+        // admitted pixel's, and its suppression's neighbours' -- is the unmasked one.
+        const size_t cr0 = (r >= 2 ? r - 2 : 0) / static_cast<size_t>(params.cellHeight);
+        const size_t cr1 = (r + 2 < height ? r + 2 : height - 1) /
+                           static_cast<size_t>(params.cellHeight);
+        for (size_t w = 0; w < words; ++w) {
+            const WordType k = open.keep(cr0, cr1, w);
+            magX[0][w] = static_cast<WordType>(magX[0][w] & k);
+            magY[0][w] = static_cast<WordType>(magY[0][w] & k);
+        }
     };
     const auto rowAt = [&](int yi, float* dst) {
         const size_t y = static_cast<size_t>(yi);
@@ -384,6 +518,15 @@ inline CornerResult gridCorners(const GradientSource<N, WordType>& src,
                                                        y > 0 && y + 1 < height, dst);
     };
     const GoodFeaturesParams sweepParams = impl::gridSweepParams(params);
+    if (skip) {
+        return impl::selectPerCell(
+            width, height, params,
+            [&](auto&& onCandidate) {
+                return impl::sweepCornerResponses<WordType>(width, height, sweepParams, ring,
+                                                            open, rowAt, onCandidate);
+            },
+            slots, slotCount, corners, capacity, existing);
+    }
     return impl::selectPerCell(
         width, height, params,
         [&](auto&& onCandidate) {

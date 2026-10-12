@@ -238,6 +238,7 @@ set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_erro
                      test_opticalflow test_pack test_sequence test_edge test_median_wide
                      test_median_edge_stream test_descriptor test_fast
                      test_subpix test_view_narrow test_occupancy test_simd test_ransac test_essential
+                     test_essential_known_rotation
                      test_orientation test_stereo test_census test_dense_disparity
                      test_grid_corners)
 
@@ -260,8 +261,10 @@ endforeach()
 # Lucas-Kanade's window-count arm is compiled only where it is the default -- a core
 # whose population count is software -- so this suite compiles it everywhere, and
 # Flow.WindowCountArmIsBitExact holds it to the other arm on whatever runs the tests.
+# The same for its narrowed conversions, M-profile's: Flow.NarrowConvertIsBitExact.
 # Switched off by default here as anywhere else, so every other case is unchanged.
-target_compile_definitions(test_opticalflow PRIVATE BINCV_LK_WINDOW_COUNT=1)
+target_compile_definitions(test_opticalflow PRIVATE BINCV_LK_WINDOW_COUNT=1
+                                                    BINCV_LK_NARROW_CONVERT=1)
 # The same for goodFeaturesToTrack's square-root table, compiled by default only on
 # M-profile: Corner.RootTable_EveryWindowCount holds it to the root everywhere.
 target_compile_definitions(test_corner PRIVATE BINCV_CORNER_ROOT_TABLE=1)
@@ -273,6 +276,7 @@ target_compile_definitions(test_stereo PRIVATE BINCV_STEREO_WINDOW_COUNT=1
 # RANSAC suite compiles the driver's scoring for a model that has no squared test.
 target_compile_definitions(test_essential PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
 target_compile_definitions(test_ransac PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
+target_compile_definitions(test_essential_known_rotation PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
 # And for cornerSubPix's reuse of an anchor's sums: SubPix.AnchorReuseIsBitExact.
 target_compile_definitions(test_subpix PRIVATE BINCV_SUBPIX_REUSE=1)
 

@@ -291,4 +291,128 @@ BINCV_TEST(GridCorners, EmptyFramesAndFullCells) {
     std::printf(" %zu corners on the scene, none blank, masked out or full\n", some.count);
 }
 
+BINCV_TEST(GridCorners, SkipFullCellsIsTheMaskOfOpenCells) {
+    // `skipFullCells` leaves a full cell out exactly as a mask leaving it out would: the
+    // same call with that mask -- AND the caller's, when there is one -- and the switch
+    // off must return the same corners, counts and flags. Both forms; cell sizes that do
+    // and do not divide a word; occupancy from sparse to nearly full; a cell that keeps
+    // one corner and one that keeps three, partly filled.
+    struct Shape {
+        int w, h, cw, ch;
+    };
+    const Shape shapes[] = {{160, 120, 32, 32}, {131, 77, 12, 10}, {97, 61, 7, 9},
+                            {200, 33, 64, 8}};
+    size_t cases = 0, compared = 0, differ = 0;
+    Lcg r(0x5C1F);
+    for (const Shape& sh : shapes) {
+        const BinMat<uint32_t> img = scene(sh.w, sh.h, 0x5EED + static_cast<uint64_t>(sh.w));
+        TernaryMat<uint32_t> dx(sh.w, sh.h);
+        TernaryMat<uint32_t> dy(sh.w, sh.h);
+        derivatives(img, dx, dy);
+        std::vector<float> ring(static_cast<size_t>(sh.w) * kResponseRingRows);
+        const ResponseMap rm(ring.data(), static_cast<size_t>(sh.w), kResponseRingRows,
+                             static_cast<size_t>(sh.w));
+        GradientSource<1, uint32_t> src;
+        src.planes[0] = img.constView();
+        std::vector<uint32_t> rows(gradientRowWords<1, uint32_t>(static_cast<size_t>(sh.w)));
+        BinMat<uint32_t> callerMask(sh.w, sh.h);
+        for (int y = 0; y < sh.h; ++y)
+            for (int x = 0; x < sh.w; ++x)
+                if ((x * 7 + y * 3) % 11 != 0) callerMask.set(y, x, 1u);
+        for (const int perCell : {1, 3}) {
+            for (const uint32_t fullPct : {10u, 50u, 90u}) {
+                for (const bool withMask : {false, true}) {
+                    GridCornerParams p;
+                    p.cellWidth = sh.cw;
+                    p.cellHeight = sh.ch;
+                    p.perCell = perCell;
+                    const size_t across = gridCellsAcross(static_cast<size_t>(sh.w), p);
+                    const size_t cells = across * gridCellsDown(static_cast<size_t>(sh.h), p);
+                    std::vector<uint8_t> existing(cells);
+                    for (uint8_t& e : existing) {
+                        const bool full = r.next() % 100u < fullPct;
+                        e = static_cast<uint8_t>(full ? perCell
+                                                      : static_cast<int>(r.next() % static_cast<uint32_t>(perCell)));
+                    }
+                    BinMat<uint32_t> openMask(sh.w, sh.h);
+                    for (int y = 0; y < sh.h; ++y) {
+                        for (int x = 0; x < sh.w; ++x) {
+                            const size_t c = static_cast<size_t>(y / sh.ch) * across +
+                                             static_cast<size_t>(x / sh.cw);
+                            const bool admit = existing[c] < perCell &&
+                                               (!withMask || callerMask.at(y, x) != 0u);
+                            if (admit) openMask.set(y, x, 1u);
+                        }
+                    }
+                    const BinMatConstView<uint32_t> given =
+                        withMask ? callerMask.constView() : BinMatConstView<uint32_t>{};
+                    // The policy's runs are its per-pixel answer, row by row, and the
+                    // sweep's maximum over them is the mask's.
+                    const impl::AdmitOpenCells<uint32_t> open{
+                        given, existing.data(), static_cast<size_t>(perCell),
+                        static_cast<size_t>(sh.cw), static_cast<size_t>(sh.ch), across,
+                        static_cast<size_t>(sh.w)};
+                    for (int y = 0; y < sh.h; ++y) {
+                        std::vector<uint8_t> fromRuns(static_cast<size_t>(sh.w), 0);
+                        open.runs(static_cast<size_t>(y), [&](size_t x0, size_t x1) {
+                            for (size_t x = x0; x < x1; ++x) fromRuns[x] = 1;
+                        });
+                        size_t wrong = 0;
+                        for (int x = 0; x < sh.w; ++x)
+                            wrong += (fromRuns[static_cast<size_t>(x)] != 0) != open(x, y);
+                        differ += wrong != 0 ? 1 : 0;
+                    }
+                    GoodFeaturesParams g;
+                    const auto rowOfDx = [&](int y, float* dst) {
+                        cornerMinEigenValRow<uint32_t>(dx.constMagnitude(0), dy.constMagnitude(0),
+                                                       dx.constSign(), dy.constSign(), 3, y, dst);
+                    };
+                    const auto none = [](int, int, float) {};
+                    const float maxMask = impl::sweepCornerResponses<uint32_t>(
+                        static_cast<size_t>(sh.w), static_cast<size_t>(sh.h), g, rm,
+                        openMask.constView(), rowOfDx, none);
+                    const float maxRuns = impl::sweepCornerResponses<uint32_t>(
+                        static_cast<size_t>(sh.w), static_cast<size_t>(sh.h), g, rm, open,
+                        rowOfDx, none);
+                    differ += std::memcmp(&maxMask, &maxRuns, sizeof(float)) != 0 ? 1 : 0;
+                    std::vector<CornerCandidate> slots(gridCornerSlots(
+                        static_cast<size_t>(sh.w), static_cast<size_t>(sh.h), p));
+                    std::vector<Corner> want(2000), got(2000);
+                    for (const bool onDemand : {false, true}) {
+                        const auto run = [&](const GridCornerParams& q, BinMatConstView<uint32_t> m,
+                                             std::vector<Corner>& out) {
+                            if (onDemand)
+                                return gridCorners<1, uint32_t>(src, q, rm, rows.data(), rows.size(),
+                                                                slots.data(), slots.size(),
+                                                                out.data(), out.size(),
+                                                                existing.data(), m);
+                            return gridCorners<uint32_t>(dx, dy, q, rm, slots.data(), slots.size(),
+                                                         out.data(), out.size(), existing.data(), m);
+                        };
+                        const CornerResult ra = run(p, openMask.constView(), want);
+                        GridCornerParams q = p;
+                        q.skipFullCells = true;
+                        const CornerResult rb = run(q, given, got);
+                        ++cases;
+                        bool same = ra.count == rb.count &&
+                                    ra.candidatesRanked == rb.candidatesRanked &&
+                                    ra.candidatesTruncated == rb.candidatesTruncated;
+                        for (size_t i = 0; same && i < ra.count; ++i) {
+                            same = want[i].x == got[i].x && want[i].y == got[i].y &&
+                                   std::memcmp(&want[i].response, &got[i].response,
+                                               sizeof(float)) == 0;
+                        }
+                        differ += same ? 0 : 1;
+                        compared += ra.count;
+                    }
+                }
+            }
+        }
+    }
+    std::printf(" skipFullCells against the open-cell mask: %zu cases, %zu corners, %zu differ\n",
+                cases, compared, differ);
+    BINCV_CHECK_EQ(differ, size_t{0});
+    BINCV_CHECK(compared > 500);
+}
+
 BINCV_TEST_MAIN("test_grid_corners")

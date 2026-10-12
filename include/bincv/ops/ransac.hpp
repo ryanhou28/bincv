@@ -59,6 +59,12 @@
 /// the one this file ships; an essential-matrix or perspective-pose model is a new
 /// policy and no change to the loop.
 ///
+/// A policy may also carry STATE -- something the caller knows that the
+/// correspondences do not say, such as a rotation measured by a gyroscope. Such a
+/// policy's members are ordinary member functions, and the caller hands the driver
+/// an instance (`ransac(model, ...)`). A stateless policy is called through
+/// `ransac<Model>(...)`, which is the same driver over `Model{}`.
+///
 /// ---------------------------------------------------------------------------
 /// PRECISION, AND WHY THERE IS NO TIER 1 HERE
 ///
@@ -140,7 +146,7 @@ template <typename Model, typename = void>
 struct RansacHasIsInlier : std::false_type {};
 template <typename Model>
 struct RansacHasIsInlier<
-    Model, decltype(static_cast<void>(Model::isInlier(
+    Model, decltype(static_cast<void>(std::declval<const Model&>().isInlier(
                std::declval<const typename Model::Type&>(), Point2f(), Point2f(), 0.0f)))>
     : std::true_type {};
 
@@ -345,6 +351,8 @@ inline int ransacIterationsNeeded(size_t inliers, size_t total, size_t minimalSe
 /// **API TIER 2** -- the role and call shape of OpenCV's RANSAC estimators, with
 /// caller-owned scratch and no allocation.
 /// @tparam Model The model policy; see "THE MODEL IS A POLICY" at the top of this file.
+/// @param model The policy instance, carrying whatever state it has; `Model{}` for a
+/// stateless one, which the overload below supplies.
 /// @param from Source points. `count` entries.
 /// @param to Destination points, paired with `from` by index. `count` entries.
 /// @param count Correspondences. Fewer than `Model::kMinimalSetSize` returns `found = false`.
@@ -373,8 +381,8 @@ inline int ransacIterationsNeeded(size_t inliers, size_t total, size_t minimalSe
 /// used, so re-scoring would let it drift away from the number that ended the
 /// search.
 template <typename Model>
-inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
-                           const RansacParams& params, RansacScratch scratch,
+inline RansacResult ransac(const Model& model, const Point2f* from, const Point2f* to,
+                           size_t count, const RansacParams& params, RansacScratch scratch,
                            typename Model::Type* bestModel, uint8_t* inlierMask = nullptr) {
     BINCV_ASSERT(from != nullptr || count == 0, "ransac: a non-zero count needs source points");
     BINCV_ASSERT(to != nullptr || count == 0, "ransac: a non-zero count needs destination points");
@@ -422,7 +430,7 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                 : count;
         if (!impl::ransacSample(pool, Model::kMinimalSetSize, counter, indices)) continue;
 
-        const size_t produced = Model::estimate(from, to, indices, models);
+        const size_t produced = model.estimate(from, to, indices, models);
         for (size_t m = 0; m < produced; ++m) {
             for (size_t w = 0; w < words; ++w) candFlags[w] = 0;
             size_t support = 0;
@@ -446,10 +454,10 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                 bool inlier;
                 if constexpr (impl::RansacHasIsInlier<Model>::value) {
                     inlier = squaredTest
-                                 ? Model::isInlier(models[m], from[i], to[i], threshold)
-                                 : Model::residual(models[m], from[i], to[i]) < threshold;
+                                 ? model.isInlier(models[m], from[i], to[i], threshold)
+                                 : model.residual(models[m], from[i], to[i]) < threshold;
                 } else {
-                    inlier = Model::residual(models[m], from[i], to[i]) < threshold;
+                    inlier = model.residual(models[m], from[i], to[i]) < threshold;
                 }
                 if (inlier) {
                     candFlags[i >> 5] |= static_cast<uint32_t>(1u) << (i & 31u);
@@ -458,7 +466,7 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
             }
 #else
             for (size_t i = 0; i < count; ++i) {
-                if (Model::residual(models[m], from[i], to[i]) < threshold) {
+                if (model.residual(models[m], from[i], to[i]) < threshold) {
                     candFlags[i >> 5] |= static_cast<uint32_t>(1u) << (i & 31u);
                     ++support;
                 }
@@ -491,7 +499,7 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
     // produced. Re-scoring would let the reported inlier count drift away from the
     // count the stopping rule actually used.
     if (out.found && params.refine) {
-        out.refined = Model::refine(from, to, bestFlags, count, bestModel);
+        out.refined = model.refine(from, to, bestFlags, count, bestModel);
     }
 
     if (inlierMask != nullptr) {
@@ -503,6 +511,15 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
         }
     }
     return out;
+}
+
+/// @brief `ransac` over a stateless policy, `Model{}`. **API TIER 2.** See the
+/// overload above for every parameter.
+template <typename Model>
+inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
+                           const RansacParams& params, RansacScratch scratch,
+                           typename Model::Type* bestModel, uint8_t* inlierMask = nullptr) {
+    return ransac(Model{}, from, to, count, params, scratch, bestModel, inlierMask);
 }
 
 // ---------------------------------------------------------------------------

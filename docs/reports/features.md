@@ -114,7 +114,7 @@ level regardless of how small that level is. `1/1/1/1` is faster and less accura
 shipped ladder is the operating point that keeps keypoint yield up.
 
 **This is Lucas–Kanade against Lucas–Kanade.** Wired into a whole pipeline the end-to-end
-figure is 3.97× on x86-64 and 5.41× on aarch64
+figure is 3.97× on x86-64 and 5.37× on aarch64
 ([feature-tracking.md](feature-tracking.md#speed)); the stages around tracking do not have
 this ratio.
 
@@ -286,12 +286,27 @@ reference sensor stage, on the device
 
 | detector | µs a frame | corners | holds, bytes |
 |---|---|---|---|
-| `goodFeaturesToTrackStreaming`, pool of 8,192 | 11,903 | 138 | 74,560 |
-| `gridCorners`, 34-pixel cells, one a cell | 5,629 | 194 | 11,784 |
-| `gridCorners`, 16-pixel cells, two a cell | 5,839 | 1,437 | 31,584 |
+| `goodFeaturesToTrackStreaming`, pool of 8,192 | 11,907 | 138 | 74,560 |
+| `gridCorners`, 34-pixel cells, one a cell | 5,618 | 194 | 11,784 |
+| `gridCorners`, 16-pixel cells, two a cell | 5,834 | 1,437 | 31,584 |
 
 The pool form sweeps 1.62 times a detection on these frames, and the grid once; "holds" is
-the three-row response ring plus the pool or the slots. On the Cortex-M7 the reference
+the three-row response ring plus the pool or the slots.
+
+**A top-up skips the cells it has.** A frontend that keeps its tracks detects only where they
+are not, passing how many features each cell already holds. On the same frames, with the
+cells of each frame's 110 strongest grid corners standing in for live tracks (31.9% of cells
+full), the form that derives its gradient:
+
+| top-up detection | µs a frame | corners |
+|---|---|---|
+| `skipFullCells` off: a full cell takes no corner | 5,675 | 121 |
+| `skipFullCells` on: a full cell is left out of the search | 3,917 | 121 |
+
+1.45× [1.45, 1.45]. With it on, a full cell counts as masked out — neither a candidate nor
+part of the strongest response the relative threshold scales — and its gradient is cleared
+beyond the two pixels an open neighbour's suppression reads; the two settings returned the
+same corners on all 16 frames. On the Cortex-M7 the reference
 tracker detecting this way is in
 [targets/stm32h753/README.md](../../targets/stm32h753/README.md).
 

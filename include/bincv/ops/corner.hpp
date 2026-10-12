@@ -373,6 +373,7 @@
 #include <cstring>  // std::memcpy for the bit-pattern max, std::memmove for the spacing insert
 #include <new>  // std::nothrow -- the owning overload at the bottom, and nothing else
 #include <type_traits>  // is_same_v -- the mask-free max-reduce specialization
+#include <utility>      // declval -- whether an admit policy lists runs
 
 #include "../core/error.hpp"
 #include "../core/types.hpp"
@@ -2055,22 +2056,52 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
 
 namespace impl {
 
+/// @brief Whether an admit policy can list a row's admitted pixels as runs. **INTERNAL.**
+/// `admit.runs(y, fn)` calls `fn(x0, x1)` for each maximal run `[x0, x1)` it admits in
+/// row `y`, so the running maximum reduces runs instead of testing every pixel.
+template <typename Admit, typename = void>
+struct AdmitHasRuns : std::false_type {};
+template <typename Admit>
+struct AdmitHasRuns<Admit, std::void_t<decltype(std::declval<const Admit&>().runs(
+                               0, std::declval<void (*)(size_t, size_t)>()))>>
+    : std::true_type {};
+
+/// @brief A pixel mask as the sweep's admit policy, and whether it admits selectively.
+/// **INTERNAL.** A policy of any other type is its own and always selective.
+template <typename WordType>
+inline AdmitMasked<WordType> admitPolicy(BinMatConstView<WordType> mask) {
+    return AdmitMasked<WordType>{mask};
+}
+template <typename WordType, typename Policy>
+inline const Policy& admitPolicy(const Policy& policy) {
+    return policy;
+}
+template <typename WordType>
+inline bool admitActive(BinMatConstView<WordType> mask) {
+    return !mask.empty();
+}
+template <typename Policy>
+inline bool admitActive(const Policy&) {
+    return true;
+}
+
 /// @brief The streaming sweep every selection form shares: each response row into
 /// the caller's ring, the running maximum, and the 3x3 non-maximum suppression.
 /// **INTERNAL.** `rowAt(y, dst)` writes response row y, called for y = 0, 1, ... in
 /// order; `onCandidate(x, y, response)` is called for every admitted pixel that
 /// survives the suppression above the running threshold -- which only ever rises, so
 /// a pixel below it is below the final one too. Returns the frame's maximum response,
-/// or -1 when a mask admitted no pixel at all.
-template <typename WordType, typename RowAt, typename OnCandidate>
+/// or -1 when a mask admitted no pixel at all. `mask` is a pixel mask, or any policy
+/// `admitPolicy` resolves: which pixels may be corners and count toward the maximum.
+template <typename WordType, typename Mask, typename RowAt, typename OnCandidate>
 inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
-                                  const GoodFeaturesParams& params, ResponseMap ring,
-                                  BinMatConstView<WordType> mask, RowAt&& rowAt,
-                                  OnCandidate&& onCandidate) {
+                                  const GoodFeaturesParams& params, ResponseMap ring, Mask mask,
+                                  RowAt&& rowAt, OnCandidate&& onCandidate) {
     // Hoisted out of both loops: `masked` is a constant for the whole call, so the
     // no-mask path pays a predictable branch and never touches the mask's memory.
-    const bool masked = !mask.empty();
-    const impl::AdmitMasked<WordType> masked_admit{mask};
+    const bool masked = admitActive(mask);
+    const auto masked_admit = admitPolicy<WordType>(mask);
+    using Admit = std::remove_const_t<decltype(masked_admit)>;
     const auto admit = [&](int mx, int my) { return !masked || masked_admit(mx, my); };
 
     const int width = static_cast<int>(frameWidth);
@@ -2098,10 +2129,17 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
     float runningMax;
     if (masked) {
         runningMax = -1.0f;
-        for (int x = 0; x < width; ++x) {
-            if (!masked_admit(x, 0)) continue;
-            if (first[static_cast<size_t>(x)] > runningMax)
-                runningMax = first[static_cast<size_t>(x)];
+        if constexpr (AdmitHasRuns<Admit>::value) {
+            masked_admit.runs(0, [&](size_t x0, size_t x1) {
+                const float m = impl::rowMax(first + x0, x1 - x0);
+                if (m > runningMax) runningMax = m;
+            });
+        } else {
+            for (int x = 0; x < width; ++x) {
+                if (!masked_admit(x, 0)) continue;
+                if (first[static_cast<size_t>(x)] > runningMax)
+                    runningMax = first[static_cast<size_t>(x)];
+            }
         }
     } else {
         runningMax = impl::rowMax(first, static_cast<size_t>(width));
@@ -2115,10 +2153,17 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
         // that is the region cv::minMaxLoc is given. The unmasked twin is
         // `rowMax` -- see the seed loop on why the two are split.
         if (masked) {
-            for (int x = 0; x < width; ++x) {
-                if (!masked_admit(x, y)) continue;
-                if (cur[static_cast<size_t>(x)] > runningMax)
-                    runningMax = cur[static_cast<size_t>(x)];
+            if constexpr (AdmitHasRuns<Admit>::value) {
+                masked_admit.runs(static_cast<size_t>(y), [&](size_t x0, size_t x1) {
+                    const float m = impl::rowMax(cur + x0, x1 - x0);
+                    if (m > runningMax) runningMax = m;
+                });
+            } else {
+                for (int x = 0; x < width; ++x) {
+                    if (!masked_admit(x, y)) continue;
+                    if (cur[static_cast<size_t>(x)] > runningMax)
+                        runningMax = cur[static_cast<size_t>(x)];
+                }
             }
         } else {
             const float m = impl::rowMax(cur, static_cast<size_t>(width));
@@ -2202,12 +2247,12 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
 }
 
 /// @brief `sweepCornerResponses` over stored derivative planes. **INTERNAL.**
-template <typename WordType, typename OnCandidate>
+template <typename WordType, typename Mask, typename OnCandidate>
 inline float sweepCornerCandidates(BinMatConstView<WordType> magX, BinMatConstView<WordType> magY,
                                    BinMatConstView<WordType> signX,
                                    BinMatConstView<WordType> signY,
-                                   const GoodFeaturesParams& params, ResponseMap ring,
-                                   BinMatConstView<WordType> mask, OnCandidate&& onCandidate) {
+                                   const GoodFeaturesParams& params, ResponseMap ring, Mask mask,
+                                   OnCandidate&& onCandidate) {
     const int blockSize = params.blockSize;
     return sweepCornerResponses<WordType>(
         magX.width, magX.height, params, ring, mask,
@@ -2663,8 +2708,13 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
 
 /// @brief The image a detection takes its gradient from, and the border the gradient is
 /// taken with -- `derivativeX` and `derivativeY`'s, defaulting as they do. **API TIER 3.**
+/// @note One bit only. The response is the ternary gradient's, which reads one magnitude
+/// plane; an N-bit image's gradient has N, and a detector handed one would rank corners
+/// by the least significant of them -- a number, and not a corner response.
 template <size_t N, typename WordType>
 struct GradientSource {
+    static_assert(N == 1, "GradientSource: detection derives a ternary gradient, so the "
+                          "image must be one bit");
     BinMatConstView<WordType> planes[N];   ///< the image's planes, least significant first
     BorderType border = BORDER_REFLECT_101;
     bool borderValue = false;              ///< BORDER_CONSTANT's fill

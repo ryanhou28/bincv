@@ -5,15 +5,15 @@
 # host:     Raspberry Pi 4 Model B Rev 1.5
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
-# commit:   564c6b3 (dirty)
-# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/corner_opencv_benchmark.cpp=6651323d605d benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=273f10cd0fa0 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6
+# commit:    (dirty)
+# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/corner_opencv_benchmark.cpp=6651323d605d benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/corner.hpp=f8d49dc62882 include/bincv/ops/derivative.hpp=ab5c81465829 include/bincv/ops/reduce.hpp=728d865db387 include/bincv/ops/shift.hpp=ef3c19a45dad include/bincv/quantMat.hpp=9571cce97de6
 # governor: performance
 # throttled before: throttled=0x80000
-# temp before: temp=66.2'C
+# temp before: temp=63.3'C
 # pinning:  taskset -c 3
 # sleep between launches: 0s
-# date:     2026-10-09T17:15:52-07:00
-# loadavg at start: 1.03 1.00 0.84 1/309 501171
+# date:     2026-10-12T11:34:01-07:00
+# loadavg at start: 1.10 1.08 0.98 1/310 2999200
 # NO launch is discarded -- a cold start is part of what varies between
 # launches, and trimming it would trim the tail this sweep measures.
 
@@ -65,11 +65,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7792379     25.366    0.94%        2.95x      16.54
- binCV streaming         7386783     24.046    0.36%        3.12x      12.56
- binCV streaming, scalar NMS      7386536     24.045    0.07%        3.12x      12.56
- OpenCV binarized       23011275     74.906    1.32%        1.00x      36.94
- OpenCV Sobel           17754983     57.796    5.50%        1.30x      29.00
+ binCV                   7788966     25.355    0.35%        3.00x      16.54
+ binCV streaming         7395668     24.074    0.20%        3.16x      12.56
+ binCV streaming, scalar NMS      7391815     24.062    0.21%        3.16x      12.56
+ OpenCV binarized       23378698     76.103    1.73%        1.00x      36.94
+ OpenCV Sobel           17864040     58.151    0.52%        1.31x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
@@ -122,15 +122,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7799540     25.389    0.13%        2.96x      16.54
- binCV streaming         7385287     24.041    0.28%        3.12x      12.56
- binCV streaming, scalar NMS      7383571     24.035    0.37%        3.12x      12.56
- OpenCV binarized       23062578     75.073    1.15%        1.00x      36.94
- OpenCV Sobel           17734626     57.730    2.64%        1.30x      29.00
+ binCV                   7790131     25.358    0.15%        2.97x      16.54
+ binCV streaming         7392763     24.065    0.31%        3.13x      12.56
+ binCV streaming, scalar NMS      7390368     24.057    0.36%        3.13x      12.56
+ OpenCV binarized       23103460     75.207    0.88%        1.00x      36.94
+ OpenCV Sobel           17863591     58.150    2.03%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 173844
+ sink 172582
 ### run 3
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -179,15 +179,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7808359     25.418    0.16%        2.95x      16.54
- binCV streaming         7437360     24.210    0.33%        3.09x      12.56
- binCV streaming, scalar NMS      7431163     24.190    0.19%        3.10x      12.56
- OpenCV binarized       23007837     74.895    1.53%        1.00x      36.94
- OpenCV Sobel           18093477     58.898    0.47%        1.27x      29.00
+ binCV                   7784043     25.339    0.44%        2.97x      16.54
+ binCV streaming         7393805     24.068    0.20%        3.12x      12.56
+ binCV streaming, scalar NMS      7390852     24.059    0.26%        3.12x      12.56
+ OpenCV binarized       23087523     75.155    1.50%        1.00x      36.94
+ OpenCV Sobel           17839625     58.072    0.33%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 171306
+ sink 173844
 ### run 4
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -236,15 +236,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7782936     25.335    0.34%        3.00x      16.54
- binCV streaming         7390321     24.057    0.09%        3.16x      12.56
- binCV streaming, scalar NMS      7390907     24.059    0.37%        3.16x      12.56
- OpenCV binarized       23322814     75.921    0.40%        1.00x      36.94
- OpenCV Sobel           17833103     58.050    2.58%        1.31x      29.00
+ binCV                   7790841     25.361    0.34%        3.00x      16.54
+ binCV streaming         7399315     24.086    0.32%        3.16x      12.56
+ binCV streaming, scalar NMS      7391986     24.062    0.35%        3.16x      12.56
+ OpenCV binarized       23348695     76.005    1.05%        1.00x      36.94
+ OpenCV Sobel           17938362     58.393    1.33%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 173844
+ sink 172582
 ### run 5
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -293,15 +293,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7795318     25.375    0.41%        2.97x      16.54
- binCV streaming         7391807     24.062    0.32%        3.14x      12.56
- binCV streaming, scalar NMS      7385249     24.041    0.09%        3.14x      12.56
- OpenCV binarized       23176089     75.443    2.31%        1.00x      36.94
- OpenCV Sobel           17828212     58.035    0.20%        1.30x      29.00
+ binCV                   7804798     25.406    0.32%        2.98x      16.54
+ binCV streaming         7379588     24.022    0.18%        3.15x      12.56
+ binCV streaming, scalar NMS      7382342     24.031    0.25%        3.15x      12.56
+ OpenCV binarized       23241414     75.656    1.52%        1.00x      36.94
+ OpenCV Sobel           17993394     58.572    1.26%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 172575
+ sink 173844
 ### run 6
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -350,15 +350,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7801297     25.395    0.26%        2.98x      16.54
- binCV streaming         7384162     24.037    0.21%        3.15x      12.56
- binCV streaming, scalar NMS      7382826     24.033    0.37%        3.15x      12.56
- OpenCV binarized       23227298     75.610    0.36%        1.00x      36.94
- OpenCV Sobel           17907958     58.294    1.52%        1.30x      29.00
+ binCV                   7794281     25.372    0.30%        2.95x      16.54
+ binCV streaming         7392993     24.066    0.30%        3.11x      12.56
+ binCV streaming, scalar NMS      7389539     24.054    0.14%        3.12x      12.56
+ OpenCV binarized       23018964     74.932    1.26%        1.00x      36.94
+ OpenCV Sobel           17791834     57.916    1.00%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 171313
+ sink 173844
 ### run 7
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -407,15 +407,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7787780     25.351    0.40%        2.96x      16.54
- binCV streaming         7405438     24.106    0.45%        3.11x      12.56
- binCV streaming, scalar NMS      7398304     24.083    0.07%        3.12x      12.56
- OpenCV binarized       23048802     75.029    1.72%        1.00x      36.94
- OpenCV Sobel           17856100     58.125    1.07%        1.29x      29.00
+ binCV                   7815629     25.442    0.43%        2.95x      16.54
+ binCV streaming         7422918     24.163    0.25%        3.10x      12.56
+ binCV streaming, scalar NMS      7420222     24.154    0.50%        3.10x      12.56
+ OpenCV binarized       23022620     74.943    1.04%        1.00x      36.94
+ OpenCV Sobel           17908219     58.295    1.11%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 173844
+ sink 172575
 ### run 8
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -464,11 +464,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7803207     25.401    0.06%        2.96x      16.54
- binCV streaming         7413532     24.133    0.45%        3.12x      12.56
- binCV streaming, scalar NMS      7417284     24.145    0.66%        3.11x      12.56
- OpenCV binarized       23096210     75.183    0.14%        1.00x      36.94
- OpenCV Sobel           17998786     58.590    2.51%        1.28x      29.00
+ binCV                   7801104     25.394    0.29%        2.94x      16.54
+ binCV streaming         7405106     24.105    0.38%        3.10x      12.56
+ binCV streaming, scalar NMS      7400782     24.091    0.12%        3.10x      12.56
+ OpenCV binarized       22959593     74.738    1.77%        1.00x      36.94
+ OpenCV Sobel           17935527     58.384    2.01%        1.28x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
@@ -521,11 +521,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7789926     25.358    0.40%        2.95x      16.54
- binCV streaming         7391283     24.060    0.12%        3.10x      12.56
- binCV streaming, scalar NMS      7392630     24.065    0.31%        3.10x      12.56
- OpenCV binarized       22945347     74.692    1.58%        1.00x      36.94
- OpenCV Sobel           17860167     58.139    0.12%        1.28x      29.00
+ binCV                   7805884     25.410    0.30%        2.95x      16.54
+ binCV streaming         7381003     24.027    0.25%        3.12x      12.56
+ binCV streaming, scalar NMS      7378785     24.019    0.39%        3.12x      12.56
+ OpenCV binarized       23022142     74.942    1.37%        1.00x      36.94
+ OpenCV Sobel           17856970     58.128    1.60%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
@@ -578,18 +578,18 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   7803667     25.403    0.11%        2.96x      16.54
- binCV streaming         7402676     24.097    0.37%        3.12x      12.56
- binCV streaming, scalar NMS      7402991     24.098    0.11%        3.12x      12.56
- OpenCV binarized       23093743     75.175    1.38%        1.00x      36.94
- OpenCV Sobel           17963138     58.474    2.53%        1.29x      29.00
+ binCV                   7793433     25.369    0.20%        2.98x      16.54
+ binCV streaming         7432925     24.196    0.55%        3.12x      12.56
+ binCV streaming, scalar NMS      7425551     24.172    0.28%        3.13x      12.56
+ OpenCV binarized       23218529     75.581    1.18%        1.00x      36.94
+ OpenCV Sobel           17844774     58.088    1.68%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 173844
+ sink 170044
 
-# loadavg at end: 1.25 1.06 0.88 1/310 502207
+# loadavg at end: 1.02 1.05 0.99 1/309 3000223
 # throttled after: throttled=0x80000
-# temp after: temp=66.2'C
-# date:     2026-10-09T17:17:30-07:00
+# temp after: temp=63.7'C
+# date:     2026-10-12T11:35:39-07:00
 # done
