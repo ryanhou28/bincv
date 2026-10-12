@@ -187,7 +187,7 @@ pipeline, and it is not the number to compare against a library call.
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|
-| time, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.65 | 4.376 | 5.41× [5.39, 5.42] | [feature-tracking.md](feature-tracking.md) |
+| time, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.56 | 4.382 | 5.37× [5.35, 5.40] | [feature-tracking.md](feature-tracking.md) |
 
 Peak working set is computed from buffer geometry and is identical on both architectures, so
 it is one pair rather than two:
@@ -409,5 +409,5 @@ the same shape; this one holds the rows an index reader would have seen.
 | 2026-09-21 | `denseDisparity` census, aarch64 | 462 ms | 730.6 ms | the row's two columns had timed different word-type arms; both are now the `uint32` arm |
 | 2026-09-23 | `FAST`, bit-plane, x86-64 | 1.50× then 1.47× | 1.65× | the vector arm's runtime switch was read once per row, keeping the scalar body live; read once per call |
 | 2026-09-06 / 09-22 | assembled pipeline, x86-64 | 3.30× | 3.66× then 3.97× | one pyramid build per frame; then the `goodFeaturesToTrack` selection-stage optimization |
-| 2026-09-21 / 09-22, 10-09 | assembled pipeline, aarch64 | 4.73× | 4.62×, 5.32×, 5.39×, then 5.41× | the device sweep read the LK stage 3% slower and an independent spot-check agreed; the selection-stage optimization then moved the row; then the sensor stage's shared row bodies; then a re-take inside the previous interval |
+| 2026-09-21 / 09-22, 10-09, 10-12 | assembled pipeline, aarch64 | 4.73× | 4.62×, 5.32×, 5.39×, 5.41×, then 5.37× | the device sweep read the LK stage 3% slower and an independent spot-check agreed; the selection-stage optimization then moved the row; then the sensor stage's shared row bodies; then a re-take inside the previous interval; then a re-take where OpenCV's denominator ran 0.4% faster and binCV's time stayed inside its interval |
 | 2026-09-22 | `goodFeaturesToTrack`, both | against a binarized `cv::goodFeaturesToTrack` | against stock, 1.38× / 2.42× | the selection-stage optimization made the stock denominator the right one to lead with ([features.md](features.md#corner-detection)) |

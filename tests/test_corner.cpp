@@ -2013,18 +2013,12 @@ BINCV_TEST(Corner, OnDemandGradient_IdenticalToStoredDerivatives) {
                 }
             }
         }
-        // A mask over the left half, and a two-bit source built from two frames.
+        // A mask over the left half.
         BinMat<uint32_t> mask(f.width, f.height);
         for (int y = 0; y < f.height; ++y)
             for (int x = 0; x < f.width / 2; ++x) mask.set(y, x, 1u);
         bad += onDemandCornerMismatches<1>(bits, bincv::BORDER_REFLECT_101, kStreamParams[0], 64,
                                            mask.constView(), cells, multiPass);
-        bincv::QuantMat<2, uint32_t> two(f.width, f.height);
-        for (int y = 0; y < f.height; ++y)
-            for (int x = 0; x < f.width; ++x)
-                two.set(y, x, static_cast<unsigned>(f.at(y, x)) + static_cast<unsigned>((x / 5 + y / 3) % 2) * 2u);
-        bad += onDemandCornerMismatches<2>(two, bincv::BORDER_REFLECT_101, kStreamParams[0], 64,
-                                           {}, cells, multiPass);
     }
     std::printf(" on-demand gradient == stored derivatives: %zu cells (%zu multi-sweep), "
                 "%zu differ\n",

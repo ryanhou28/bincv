@@ -8,6 +8,13 @@
 ///                      two builds
 ///   SET rt <0|1>       goodFeaturesToTrack's square-root table off or on (on by
 ///                      default on this core), for the same reason
+///   SET nc <0|1>       Lucas–Kanade's conversions through 32 bits off or on (on by
+///                      default on this core), for the same reason
+///   SET topup <0|1>    bincv_m7_track_grid only: after every frame, also time a top-up
+///                      detection over the cells the live tracks hold, with
+///                      `skipFullCells` off and on, and count the frames where the two
+///                      return different corners (off by default; the tracker is
+///                      unchanged either way)
 ///
 /// For each frame the board asks for rows -- `NEED <frame> <row> <count>` -- and the
 /// host answers with exactly those bytes and their CRC-32, so nothing arrives while
@@ -89,6 +96,10 @@ __attribute__((section(".sram2"), aligned(32))) int g_age[kMaxTracks];
 __attribute__((section(".sram2"), aligned(32))) uint8_t g_rx[kChunkRows * kMaxW];
 __attribute__((section(".sram2"), aligned(32))) uint16_t g_lifetimes[kMaxAge];
 __attribute__((section(".sram2"), aligned(32))) W g_gradient[atLeastOne(kMax.gradientWords())];
+__attribute__((section(".sram2"), aligned(32))) uint8_t g_existing[kGrid ? kPoolCapacity : 1];
+
+bool g_topUp = false;
+bool& topUpEnabled() { return g_topUp; }
 
 struct CycleClock {
     uint64_t operator()() const { return boardCycles64(); }
@@ -192,6 +203,8 @@ void cmdTrack(const char* args) {
     const bincv::GoodFeaturesParams gftt;
     const bincv::LKParams lk;
     size_t truncated = 0, multiPass = 0, maxPasses = 0;
+    uint64_t topUpCycles[2] = {0, 0};
+    size_t topUpCorners[2] = {0, 0}, topUpFrames = 0, topUpDiffer = 0;
     for (size_t f = 0; f < frames; ++f) {
         const frontend::StageTimes before = tr.times();
         tr.beginFrame();
@@ -229,6 +242,19 @@ void cmdTrack(const char* args) {
         boardPutc('\n');
         putPoints(f, tr.trackedPoints(), tr.trackedStatus(), r.tracked);
 
+        if constexpr (kGrid && kOnDemand) {
+            if (g_topUp) {
+                const auto off = tr.topUp(gftt, false, g_existing);
+                const auto on = tr.topUp(gftt, true, g_existing);
+                topUpCycles[0] += off.cycles;
+                topUpCycles[1] += on.cycles;
+                topUpCorners[0] += off.corners;
+                topUpCorners[1] += on.corners;
+                ++topUpFrames;
+                if (off.digest != on.digest || off.corners != on.corners) ++topUpDiffer;
+            }
+        }
+
         const frontend::StageTimes& t = tr.times();
         boardPuts("T ");
         boardPutU32(static_cast<uint32_t>(f));
@@ -263,6 +289,16 @@ void cmdTrack(const char* args) {
             median = i;
             break;
         }
+    }
+    if (topUpFrames > 0) {
+        boardPuts("-- top-up detection over the live tracks' cells, mean over ");
+        boardPutU32(static_cast<uint32_t>(topUpFrames));
+        boardPuts(" frames --\n");
+        putStage("skipFullCells off", topUpCycles[0], topUpFrames);
+        putStage("skipFullCells on", topUpCycles[1], topUpFrames);
+        putBytes("corners, off             : ", topUpCorners[0]);
+        putBytes("corners, on              : ", topUpCorners[1]);
+        putBytes("frames that differ       : ", topUpDiffer);
     }
     boardPuts("-- tracking --\ndetections               : ");
     boardPutU32(static_cast<uint32_t>(tr.detections()));
@@ -315,6 +351,8 @@ struct Setting {
 const Setting kSettings[] = {
     {"lkwc", &bincv::impl::lkWindowCountEnabled},
     {"rt", &bincv::impl::cornerRootTableEnabled},
+    {"nc", &bincv::impl::lkNarrowConvertEnabled},
+    {"topup", &topUpEnabled},
 };
 
 void cmdSet(const char* args) {

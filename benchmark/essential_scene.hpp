@@ -19,15 +19,17 @@
 
 #include "bincv/core/types.hpp"
 #include "bincv/ops/essential.hpp"
+#include "bincv/ops/essentialKnownRotation.hpp"
 
 namespace essentialscene {
 
 inline constexpr double kThreshold = 0.002;  // normalised units, as essential_benchmark
 
 /// The scene: `count` correspondences, the first `outlierPct` of every hundred
-/// displaced. Returns how many are planted inliers.
+/// displaced. Returns how many are planted inliers. `rotation`, when given, receives the
+/// planted rotation row-major -- what the known-rotation estimator is handed.
 inline size_t build(bincv::Point2f* from, bincv::Point2f* to, size_t count, int outlierPct,
-                    uint64_t seed) {
+                    uint64_t seed, double* rotation = nullptr) {
     uint64_t s = seed;
     const auto uni = [&s]() {
         s = s * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
@@ -43,6 +45,9 @@ inline size_t build(bincv::Point2f* from, bincv::Point2f* to, size_t count, int 
         {1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)},
         {2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)},
         {2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)}};
+    if (rotation != nullptr) {
+        for (int i = 0; i < 9; ++i) rotation[i] = R[i / 3][i % 3];
+    }
     double t[3] = {uni(), uni(), 1.0};
     const double tn = std::sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
     for (int i = 0; i < 3; ++i) t[i] /= tn;

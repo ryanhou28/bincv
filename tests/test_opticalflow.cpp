@@ -4524,3 +4524,106 @@ BINCV_TEST(Flow, WindowCountArmIsBitExact) {
     windowCountArmIsBitExact<1, 1, 1, 1>("1/1/1/1");
     windowCountArmIsBitExact<2, 3, 3>("2/3/3");
 }
+
+// ---------------------------------------------------------------------------
+// The narrowed conversions (`impl::lkNarrowConvertEnabled()`): a 64-bit integer to
+// double, and a floor to a 64-bit integer, taken through 32 bits where the value fits.
+// Compiled and on by default only on M-profile, where the 64-bit conversions are
+// software; this suite compiles them everywhere (tests/CMakeLists.txt). The helpers at
+// and across the 32-bit boundary first, then whole trackings with the switch on and off
+// -- with the window-count arm and without, the reference window and a short one, and
+// guesses far enough out of range to take the 64-bit route -- and nothing may differ.
+// ---------------------------------------------------------------------------
+template <size_t... LevelBits>
+size_t narrowConvertMismatches(bool windowCount, int winHeight, size_t& tracked) {
+    const int width = kW, height = kH;
+    BinMat<uint32_t> prevSrc(width, height), nextSrc(width, height);
+    renderWarped(prevSrc, Warp{});
+    renderWarped(nextSrc, translation(-2.6, 1.9));
+
+    LadderPipeline<uint32_t, LevelBits...> fe(width, height);
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+
+    std::vector<Point2f> pts, guess;
+    for (int y = 1; y < height - 1; y += 5) {
+        for (int x = 1; x < width - 1; x += 7) {
+            pts.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+            // Every ninth guess is far outside the 32-bit range, the rest near the answer.
+            const bool far = pts.size() % 9 == 0;
+            guess.push_back(Point2f{far ? 3.0e9f : static_cast<float>(x) - 2.0f,
+                                    far ? -5.0e9f : static_cast<float>(y) + 2.0f});
+        }
+    }
+    const size_t n = pts.size();
+    LKParams params;
+    params.winHeight = winHeight;
+    params.useInitialFlow = true;
+    std::vector<Point2f> outA(guess), outB(guess);
+    std::vector<uint8_t> stA(n), stB(n);
+    std::vector<float> errA(n), errB(n);
+
+    bool& batch = bincv::impl::lkBatchEnabled();
+    bool& wc = bincv::impl::lkWindowCountEnabled();
+    bool& nc = bincv::impl::lkNarrowConvertEnabled();
+    const bool savedBatch = batch, savedWc = wc, savedNc = nc;
+    batch = false;
+    wc = windowCount;
+    nc = true;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outA.data(), stA.data(), errA.data(), n, params);
+    nc = false;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outB.data(), stB.data(), errB.data(), n, params);
+    batch = savedBatch;
+    wc = savedWc;
+    nc = savedNc;
+
+    size_t bad = 0;
+    tracked = 0;
+    for (size_t i = 0; i < n; ++i) {
+        tracked += stA[i] != 0;
+        if (stA[i] != stB[i] || std::memcmp(&outA[i], &outB[i], sizeof(Point2f)) != 0 ||
+            std::memcmp(&errA[i], &errB[i], sizeof(float)) != 0)
+            ++bad;
+    }
+    return bad;
+}
+
+BINCV_TEST(Flow, NarrowConvertIsBitExact) {
+    bool& nc = bincv::impl::lkNarrowConvertEnabled();
+    const bool saved = nc;
+    // The helpers, across the boundary. Every value must convert as the 64-bit
+    // conversion converts it, whichever route it takes.
+    const long long ints[] = {0, 1, -1, 2147483647LL, -2147483647LL - 1, 2147483648LL,
+                              -2147483649LL, 1LL << 40, -(1LL << 40), 123456789LL};
+    const double reals[] = {0.0, -0.5, 0.5, 2147483647.0, 2147483647.5, 2147483648.0,
+                            -2147483648.0, -2147483648.5, -2147483649.0, 1e12, -1e12,
+                            -1.0000001, 3.9999999};
+    const float floats[] = {0.0f, -0.5f, 2147483520.0f, 2147483648.0f, -2147483648.0f,
+                            -2147483904.0f, 3.0e9f, -5.0e9f, 7.25f, -7.25f};
+    for (const bool on : {true, false}) {
+        nc = on;
+        for (const long long v : ints) {
+            const double a = bincv::impl::exactToDouble(v), b = static_cast<double>(v);
+            BINCV_CHECK(std::memcmp(&a, &b, sizeof a) == 0);
+        }
+        for (const double v : reals)
+            BINCV_CHECK_EQ(bincv::impl::floorToInteger(v), static_cast<long long>(std::floor(v)));
+        for (const float v : floats)
+            BINCV_CHECK_EQ(bincv::impl::floorToInteger(v), static_cast<long long>(std::floor(v)));
+    }
+    nc = saved;
+
+    size_t tracked = 0, bad = 0;
+    for (const bool windowCount : {true, false}) {
+        for (const int winHeight : {31, 15}) {
+            bad += narrowConvertMismatches<1, 2, 2, 2>(windowCount, winHeight, tracked);
+            BINCV_CHECK(tracked > 20);
+            bad += narrowConvertMismatches<1, 2, 2>(windowCount, winHeight, tracked);
+            BINCV_CHECK(tracked > 20);
+            bad += narrowConvertMismatches<2, 3, 3>(windowCount, winHeight, tracked);
+            BINCV_CHECK(tracked > 20);
+        }
+    }
+    std::printf(" narrowed conversions vs 64-bit: %zu tracked points differ\n", bad);
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+}

@@ -366,6 +366,42 @@ public:
     const bincv::Point2f* trackedPoints() const { return m_.tracked; }
     const uint8_t* trackedStatus() const { return m_.status; }
 
+    /// What a top-up detection costs on the frame just stepped, as a frontend that keeps
+    /// its tracks makes one: `gridParams`'s grid over the cells the live tracks hold, with
+    /// `skipFullCells` as asked. A measurement beside the pipeline, which goes on exactly
+    /// as it would have: it writes only scratch the next detection rewrites. Grid and
+    /// on-demand configurations only. `existing` is the caller's, one byte a cell.
+    struct TopUp {
+        uint64_t cycles = 0;
+        uint32_t digest = 0;
+        size_t corners = 0;
+    };
+    TopUp topUp(const bincv::GoodFeaturesParams& gftt, bool skip, uint8_t* existing) {
+        static_assert(Grid && OnDemand, "topUp measures the on-demand grid detector");
+        bincv::GridCornerParams gp = gridParams(gftt);
+        gp.skipFullCells = skip;
+        const size_t across = bincv::gridCellsAcross(L_.w, gp);
+        const size_t cells = across * bincv::gridCellsDown(L_.h, gp);
+        for (size_t c = 0; c < cells; ++c) existing[c] = 0;
+        for (size_t i = 0; i < count_; ++i) {
+            const size_t c = static_cast<size_t>(m_.points[i].y) / static_cast<size_t>(gp.cellHeight) * across +
+                             static_cast<size_t>(m_.points[i].x) / static_cast<size_t>(gp.cellWidth);
+            if (existing[c] < 255) ++existing[c];
+        }
+        bincv::ResponseMap ring{m_.ring, L_.w, bincv::kResponseRingRows, L_.w};
+        bincv::GradientSource<1, W> gs;
+        gs.planes[0] = plane(next_, 0, 0);
+        TopUp t;
+        const uint64_t t0 = clock_();
+        const bincv::CornerResult cr =
+            bincv::gridCorners(gs, gp, ring, m_.gradientRows, L_.gradientWords(), m_.pool,
+                               L_.poolCapacity, m_.corners, L_.maxTracks, existing);
+        t.cycles = clock_() - t0;
+        t.corners = cr.count;
+        t.digest = fnv1a(kFnvSeed, m_.corners, cr.count * sizeof(bincv::Corner));
+        return t;
+    }
+
 private:
     /// Views onto a pyramid buffer: level l's plane p.
     bincv::BinMatView<W> plane(W* pyr, size_t l, size_t p) const {

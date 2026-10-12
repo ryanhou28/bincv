@@ -30,6 +30,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 14 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 4 entries
 - [`ops/essential.hpp`](#opsessentialhpp) — 10 entries
+- [`ops/essentialKnownRotation.hpp`](#opsessentialKnownRotationhpp) — 4 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 2 entries
 - [`ops/gridCorners.hpp`](#opsgridCornershpp) — 5 entries
 - [`ops/logic.hpp`](#opslogichpp) — 4 entries
@@ -284,6 +285,17 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `findEssentialMat` | 2 | `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role over caller-owned scratch |
 | `EssentialModelRealRoots` *(struct)* | 2 | The five-point model policy over `fivePointEssentialRealRoots`, for `bincv::ransac` |
 | `findEssentialMatRealRoots` | 2 | `findEssentialMat` with the minimal solver built for a small core |
+
+## `ops/essentialKnownRotation.hpp`
+
+[`include/bincv/ops/essentialKnownRotation.hpp`](../include/bincv/ops/essentialKnownRotation.hpp)
+
+| | tier | |
+|---|---|---|
+| `KnownRotationEssentialModel` *(struct)* | 3 | The two-point model policy under a known rotation, for `bincv::ransac` |
+| `estimate` | — | The translation through two correspondences, as `E = [t]x R / sqrt(2)` |
+| `refine` | — | Least-squares refit of the translation over the consensus set: the unit `t` minimising `sum (t  |
+| `essentialFromKnownRotation` | 3 | The essential matrix `[t]x R` for a known rotation, by RANSAC over two-point samples, over caller-owned scratch |
 
 ## `ops/fast.hpp`
 

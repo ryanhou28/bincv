@@ -15,6 +15,14 @@
 //
 // The blob is the 8-bit BSQ1 file scripts/make_sequence_blob.py writes; frames are
 // sampled evenly across it.
+//
+// AND A TOP-UP. A frontend that keeps its tracks detects only in the cells they leave
+// empty, so the second table times the on-demand grid detector with `existing` set --
+// the cells of the frame's 110 strongest grid corners, the reference tracker's mean live
+// count, standing in for tracks, which live where corners are -- with `skipFullCells`
+// off and on. Those two may in principle return different corners (the relative
+// threshold's maximum is taken over different pixels), so the table says whether they
+// did on these frames before it prints a ratio.
 
 #include <cstddef>
 #include <cstdint>
@@ -40,6 +48,8 @@ constexpr size_t kPool = 8192;          // the board tracker's candidate pool
 
 struct Frame {
     bincv::TernaryMat<W> dx, dy;
+    bincv::BinMat<W> bits;
+    std::vector<uint8_t> existing;   // the top-up's occupied cells
 };
 
 } // namespace
@@ -77,7 +87,7 @@ int main(int argc, char** argv) {
                              bincv::EdgeSpatial::Wide, uint8_t, W>(median.data(), w, h, w,
                                                                    bits.view(), kEdgeThreshold);
         Frame fr{bincv::TernaryMat<W>(static_cast<int>(w), static_cast<int>(h)),
-                 bincv::TernaryMat<W>(static_cast<int>(w), static_cast<int>(h))};
+                 bincv::TernaryMat<W>(static_cast<int>(w), static_cast<int>(h)), bits, {}};
         bincv::derivativeX(bits, fr.dx);
         bincv::derivativeY(bits, fr.dy);
         frames.push_back(std::move(fr));
@@ -152,6 +162,54 @@ int main(int argc, char** argv) {
                        }});
     const std::vector<measure::Timing> t = measure::measureInterleaved(benches, 7, 150.0);
 
+    // The top-up: occupancy from the strongest coarse corners, then both settings over the
+    // same frames, compared before they are timed.
+    constexpr size_t kLiveTracks = 110;
+    const size_t across = bincv::gridCellsAcross(w, coarse);
+    std::vector<W> gradientRows(bincv::gradientRowWords<1, W>(w));
+    for (Frame& fr : frames) {
+        fr.existing.assign(across * bincv::gridCellsDown(h, coarse), 0);
+        const bincv::CornerResult c = bincv::gridCorners<W>(
+            fr.dx, fr.dy, coarse, rm, slotsCoarse.data(), slotsCoarse.size(), corners.data(),
+            corners.size());
+        for (size_t i = 0; i < c.count && i < kLiveTracks; ++i)
+            fr.existing[static_cast<size_t>(corners[i].y / coarse.cellHeight) * across +
+                        static_cast<size_t>(corners[i].x / coarse.cellWidth)] = 1;
+    }
+    bincv::GridCornerParams skip = coarse;
+    skip.skipFullCells = true;
+    const auto topUp = [&](const Frame& fr, const bincv::GridCornerParams& p) {
+        bincv::GradientSource<1, W> src;
+        src.planes[0] = fr.bits.constView();
+        return bincv::gridCorners<1, W>(src, p, rm, gradientRows.data(), gradientRows.size(),
+                                        slotsCoarse.data(), slotsCoarse.size(), corners.data(),
+                                        corners.size(), fr.existing.data());
+    };
+    size_t full = 0, cellsAll = 0, nOff = 0, nOn = 0, framesDiffer = 0;
+    std::vector<bincv::Corner> offCorners(corners.size());
+    for (const Frame& fr : frames) {
+        for (uint8_t e : fr.existing) full += e;
+        cellsAll += fr.existing.size();
+        const bincv::CornerResult a = topUp(fr, coarse);
+        std::memcpy(offCorners.data(), corners.data(), a.count * sizeof(bincv::Corner));
+        const bincv::CornerResult b = topUp(fr, skip);
+        nOff += a.count;
+        nOn += b.count;
+        framesDiffer += (a.count != b.count ||
+                         std::memcmp(offCorners.data(), corners.data(),
+                                     a.count * sizeof(bincv::Corner)) != 0)
+                            ? size_t{1}
+                            : size_t{0};
+    }
+    std::vector<measure::Bench> topUps;
+    topUps.push_back({"top-up, skipFullCells off", [&](int) {
+                          for (const Frame& fr : frames) measure::g_sink += topUp(fr, coarse).count;
+                      }});
+    topUps.push_back({"top-up, skipFullCells on", [&](int) {
+                          for (const Frame& fr : frames) measure::g_sink += topUp(fr, skip).count;
+                      }});
+    const std::vector<measure::Timing> tu = measure::measureInterleaved(topUps, 7, 150.0);
+
     const double n = static_cast<double>(frames.size());
     std::printf("Corner detection on %zu frames of %zux%zu, sampled evenly from %s\n",
                 frames.size(), w, h, argv[1]);
@@ -174,6 +232,17 @@ int main(int argc, char** argv) {
                 gftt.maxCorners, gftt.minDistance, kPool, static_cast<double>(sweeps) / n);
     std::printf(" 'holds' is the response ring plus the pool or the slots; the corners"
                 " written are the caller's either way.\n");
+
+    std::printf("\n TOP-UP: the on-demand grid detector, 34-px cells, %.1f%% of cells full\n",
+                100.0 * static_cast<double>(full) / static_cast<double>(cellsAll));
+    std::printf(" the two settings returned different corners on %zu of %zu frames\n",
+                framesDiffer, frames.size());
+    std::printf(" %-30s %12s %8s %10s\n", "detector", "us/frame", "spread", "corners");
+    const double topCounts[2] = {static_cast<double>(nOff) / n, static_cast<double>(nOn) / n};
+    for (size_t i = 0; i < topUps.size(); ++i) {
+        std::printf(" %-30s %12.1f %7.1f%% %10.1f\n", topUps[i].name.c_str(),
+                    tu[i].medianNs / 1000.0 / n, tu[i].spreadPct(), topCounts[i]);
+    }
     std::printf(" sink %zu\n", static_cast<size_t>(measure::g_sink));
     return 0;
 }

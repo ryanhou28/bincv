@@ -204,13 +204,15 @@ Zbb; the rest are M-profile only:
 | | what it does | on the Cortex-M7 ([targets/stm32h753](targets/stm32h753/README.md)) |
 |---|---|---|
 | `BINCV_LK_WINDOW_COUNT` | Lucas–Kanade counts down the window in byte lanes | tracking 4.57× faster; 13,556 B of flash |
+| `BINCV_LK_NARROW_CONVERT` | Lucas–Kanade converts its window sums and offsets through 32 bits where they fit, instead of calling the C runtime's 64-bit conversions (M-profile) | tracking 1.05× faster; 2,976 B |
 | `BINCV_CORNER_ROOT_TABLE` | the 3x3 corner response's square root from a table (M-profile) | detection 1.47× faster; 2,984 B of flash |
-| `BINCV_STEREO_WINDOW_COUNT` | sparse stereo's refinement reads its windows once and counts down them in byte lanes | refinement 6.28× faster; 1,137 B |
+| `BINCV_STEREO_WINDOW_COUNT` | sparse stereo's refinement reads its windows once and counts down them in byte lanes | refinement 6.48× faster; 1,137 B |
 | `BINCV_STEREO_INTEGER_ROW_GATE` | sparse stereo's descriptor stage tests rows on the coordinates' bit patterns (M-profile) | descriptor stage 2.89× faster; 2,209 B |
 | `BINCV_RANSAC_SQUARED_TEST` | RANSAC decides an inlier in single precision under a proven error bound, then on squares, taking the root only near the threshold (M-profile) | scoring 1.66× faster, the estimation up to 1.11×; 1,914 B |
 | `BINCV_SUBPIX_REUSE` | `cornerSubPix` reuses the sums of an anchor it has already summed (M-profile) | 1.36× faster; 205 B |
 
-Each has a run-time switch (`impl::lkWindowCountEnabled`, `impl::cornerRootTableEnabled`,
+Each has a run-time switch (`impl::lkWindowCountEnabled`, `impl::lkNarrowConvertEnabled`,
+`impl::cornerRootTableEnabled`,
 `impl::stereoWindowCountEnabled`, `impl::stereoIntegerRowGateEnabled`,
 `impl::ransacSquaredTestEnabled` and `impl::ransacFloatScorerEnabled`,
 `impl::subPixReuseEnabled`) so one image can time both
@@ -225,11 +227,25 @@ a solve is 8× faster, an estimation 2× to 7×, in the same stack. Its answers 
 published solver's bit for bit — it is held to every accuracy bound that solver is, and on
 the measured scenes it finds the same inliers — so it is a separate name rather than an arm.
 
+**With a gyroscope, the rotation need not be estimated at all.**
+`essentialFromKnownRotation` (`ops/essentialKnownRotation.hpp`,
+`KnownRotationEssentialModel`) takes the rotation between the two frames as an argument,
+and the epipolar constraint is then linear in the translation: a hypothesis is two
+correspondences and three cross products, and a two-point sample is clean far more often
+than a five-point one, so the stopping rule needs fewer of them. It returns an
+`EssentialMatrix` like `findEssentialMat` and refits the translation over the consensus set
+in closed form. **It takes the rotation as exact**, so the sensor's error lands in every
+residual — whether that pays is the caller's sensor's to measure.
+
 **A detector that needs no candidate pool.** `gridCorners` (`ops/gridCorners.hpp`) keeps the
 strongest corner or corners of each cell of a grid in one sweep, in a few eight-byte slots a
 cell — the cell size, the count, the thresholds, spacing, a cap, the cells that already hold
 features and a mask are all arguments. It answers a different question from
-`goodFeaturesToTrack`, so it is a separate operation rather than a mode of it.
+`goodFeaturesToTrack`, so it is a separate operation rather than a mode of it. For a
+frontend that tops up the tracks it keeps, `GridCornerParams::skipFullCells` leaves the
+full cells out of the search entirely — as a mask would, so the relative threshold is
+taken over the open cells only — and the form that derives its gradient then skips most
+of their work.
 
 **Three things exist for a frame that does not fit.** `MedianEdgeStream`
 (`ops/medianEdgeStream.hpp`) runs the sensor stage on rows as a camera delivers them, in

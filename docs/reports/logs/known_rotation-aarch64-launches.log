@@ -1,0 +1,695 @@
+# launch sweep -- 10 separate processes of one benchmark
+# benchmark: build/benchmark/known_rotation_benchmark 
+# launches: 10
+# arch:     aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# commit:    (dirty)
+# sources:  benchmark/heap_probe.hpp=8cf39500119f benchmark/known_rotation_benchmark.cpp=6b3ffe2d5429 benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/core/error.hpp=43506907e810 include/bincv/core/types.hpp=97966010c55c include/bincv/ops/essential.hpp=e1bb52d9b4e8 include/bincv/ops/essentialKnownRotation.hpp=1aa93c0f3599 include/bincv/ops/ransac.hpp=d3861b7fff8b
+# governor: performance
+# throttled before: throttled=0x80000
+# temp before: temp=61.8'C
+# pinning:  taskset -c 3
+# sleep between launches: 0s
+# date:     2026-10-12T10:21:54-07:00
+# loadavg at start: 1.02 1.02 0.70 1/315 2951457
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.72     0.2%               1.0x
+ known rotation, no refit              24.59     0.0%               0.9x
+ binCV five-point                    1468.32     0.1%              53.0x
+ binCV five-point, real roots         974.36     0.1%              35.1x
+ cv::findEssentialMat                8368.30     2.4%             301.8x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 89.99     0.1%               1.0x
+ known rotation, no refit              84.75     0.1%               0.9x
+ binCV five-point                   17635.05     0.0%             196.0x
+ binCV five-point, real roots        2977.77     0.1%              33.1x
+ cv::findEssentialMat               15709.25     0.3%             174.6x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                269.49     0.1%               1.0x
+ known rotation, no refit             259.80     0.1%               1.0x
+ binCV five-point                   27527.97     0.0%             102.1x
+ binCV five-point, real roots        8340.76     0.1%              30.9x
+ cv::findEssentialMat               42598.54     1.6%             158.1x
+
+ sink 46664559
+### run 2
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.68     0.0%               1.0x
+ known rotation, no refit              24.56     0.0%               0.9x
+ binCV five-point                    1468.33     0.2%              53.0x
+ binCV five-point, real roots         974.15     0.2%              35.2x
+ cv::findEssentialMat                8385.68     2.1%             302.9x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 90.19     0.1%               1.0x
+ known rotation, no refit              84.96     0.1%               0.9x
+ binCV five-point                   17654.72     0.1%             195.7x
+ binCV five-point, real roots        2989.64     0.2%              33.1x
+ cv::findEssentialMat               15697.24     0.3%             174.0x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                266.96     0.1%               1.0x
+ known rotation, no refit             257.96     0.1%               1.0x
+ binCV five-point                   27486.63     0.0%             103.0x
+ binCV five-point, real roots        8293.23     0.0%              31.1x
+ cv::findEssentialMat               42772.19     1.1%             160.2x
+
+ sink 46677528
+### run 3
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.69     0.1%               1.0x
+ known rotation, no refit              24.56     0.2%               0.9x
+ binCV five-point                    1468.88     0.1%              53.0x
+ binCV five-point, real roots         974.66     0.2%              35.2x
+ cv::findEssentialMat                8396.30     2.9%             303.2x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 90.27     0.1%               1.0x
+ known rotation, no refit              84.93     0.1%               0.9x
+ binCV five-point                   17659.37     0.1%             195.6x
+ binCV five-point, real roots        2990.15     0.1%              33.1x
+ cv::findEssentialMat               15749.26     0.9%             174.5x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                266.63     0.0%               1.0x
+ known rotation, no refit             257.74     0.1%               1.0x
+ binCV five-point                   27507.26     0.0%             103.2x
+ binCV five-point, real roots        8315.94     0.0%              31.2x
+ cv::findEssentialMat               42832.95     1.4%             160.6x
+
+ sink 46734804
+### run 4
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.69     0.2%               1.0x
+ known rotation, no refit              24.56     0.0%               0.9x
+ binCV five-point                    1469.21     0.1%              53.1x
+ binCV five-point, real roots         974.58     0.2%              35.2x
+ cv::findEssentialMat                8413.25     2.4%             303.8x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 89.99     0.3%               1.0x
+ known rotation, no refit              84.71     0.1%               0.9x
+ binCV five-point                   17648.28     0.1%             196.1x
+ binCV five-point, real roots        2980.07     0.1%              33.1x
+ cv::findEssentialMat               15715.80     2.5%             174.6x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                266.19     0.1%               1.0x
+ known rotation, no refit             257.37     0.1%               1.0x
+ binCV five-point                   27490.09     0.1%             103.3x
+ binCV five-point, real roots        8295.07     0.0%              31.2x
+ cv::findEssentialMat               42519.25     1.6%             159.7x
+
+ sink 46795626
+### run 5
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.71     0.1%               1.0x
+ known rotation, no refit              24.59     0.1%               0.9x
+ binCV five-point                    1467.91     0.1%              53.0x
+ binCV five-point, real roots         974.44     0.2%              35.2x
+ cv::findEssentialMat                8392.55     2.2%             302.9x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 89.97     0.1%               1.0x
+ known rotation, no refit              84.73     0.1%               0.9x
+ binCV five-point                   17648.75     0.1%             196.2x
+ binCV five-point, real roots        2976.69     0.0%              33.1x
+ cv::findEssentialMat               15781.77     2.2%             175.4x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                266.49     0.1%               1.0x
+ known rotation, no refit             257.64     0.2%               1.0x
+ binCV five-point                   27503.38     0.1%             103.2x
+ binCV five-point, real roots        8293.08     0.0%              31.1x
+ cv::findEssentialMat               42433.01     1.4%             159.2x
+
+ sink 46730394
+### run 6
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.72     0.1%               1.0x
+ known rotation, no refit              24.59     0.0%               0.9x
+ binCV five-point                    1468.14     0.1%              53.0x
+ binCV five-point, real roots         974.21     0.2%              35.1x
+ cv::findEssentialMat                8385.56     2.5%             302.5x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 90.56     0.1%               1.0x
+ known rotation, no refit              85.25     0.1%               0.9x
+ binCV five-point                   17652.92     0.1%             194.9x
+ binCV five-point, real roots        2989.78     0.1%              33.0x
+ cv::findEssentialMat               15731.84     2.5%             173.7x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                267.01     0.1%               1.0x
+ known rotation, no refit             258.30     0.1%               1.0x
+ binCV five-point                   27506.04     0.2%             103.0x
+ binCV five-point, real roots        8307.04     0.0%              31.1x
+ cv::findEssentialMat               42473.81     0.3%             159.1x
+
+ sink 46653435
+### run 7
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.67     0.2%               1.0x
+ known rotation, no refit              24.56     0.0%               0.9x
+ binCV five-point                    1467.60     0.0%              53.0x
+ binCV five-point, real roots         974.56     0.1%              35.2x
+ cv::findEssentialMat                8350.96     2.4%             301.8x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 89.90     0.1%               1.0x
+ known rotation, no refit              84.72     0.1%               0.9x
+ binCV five-point                   17639.43     0.0%             196.2x
+ binCV five-point, real roots        2981.93     0.1%              33.2x
+ cv::findEssentialMat               15707.25     2.6%             174.7x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                265.88     0.1%               1.0x
+ known rotation, no refit             257.13     0.1%               1.0x
+ binCV five-point                   27506.47     0.1%             103.5x
+ binCV five-point, real roots        8296.29     0.0%              31.2x
+ cv::findEssentialMat               42434.95     0.3%             159.6x
+
+ sink 46801683
+### run 8
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.66     0.1%               1.0x
+ known rotation, no refit              24.56     0.0%               0.9x
+ binCV five-point                    1468.16     0.1%              53.1x
+ binCV five-point, real roots         974.81     0.2%              35.2x
+ cv::findEssentialMat                8369.47     1.9%             302.6x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 89.92     0.1%               1.0x
+ known rotation, no refit              84.72     0.1%               0.9x
+ binCV five-point                   17637.43     0.0%             196.1x
+ binCV five-point, real roots        2981.74     0.2%              33.2x
+ cv::findEssentialMat               15702.96     2.5%             174.6x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                266.41     0.0%               1.0x
+ known rotation, no refit             257.57     0.0%               1.0x
+ binCV five-point                   27526.02     0.1%             103.3x
+ binCV five-point, real roots        8299.77     0.0%              31.2x
+ cv::findEssentialMat               42428.08     0.3%             159.3x
+
+ sink 46787877
+### run 9
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.70     0.1%               1.0x
+ known rotation, no refit              24.56     0.0%               0.9x
+ binCV five-point                    1467.97     0.0%              53.0x
+ binCV five-point, real roots         973.43     0.1%              35.1x
+ cv::findEssentialMat                8364.94     1.9%             302.0x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 89.99     0.1%               1.0x
+ known rotation, no refit              84.74     0.1%               0.9x
+ binCV five-point                   17637.39     0.0%             196.0x
+ binCV five-point, real roots        2976.13     0.1%              33.1x
+ cv::findEssentialMat               15741.55     2.2%             174.9x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                267.00     0.1%               1.0x
+ known rotation, no refit             257.89     0.1%               1.0x
+ binCV five-point                   27535.67     0.1%             103.1x
+ binCV five-point, real roots        8309.75     0.0%              31.1x
+ cv::findEssentialMat               42566.53     0.4%             159.4x
+
+ sink 46767438
+### run 10
+Essential matrix under a known rotation -- two-point samples against the five-point estimators
+======================================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500; the rotation is the planted one, exact
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               160           5           0.0000
+ known rotation, no refit            160           5           0.0000
+ binCV five-point                    160          12           0.0000
+ binCV five-point, real roots        160          12           0.0000
+ cv::findEssentialMat                160          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 56 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 27.66     0.1%               1.0x
+ known rotation, no refit              24.56     0.0%               0.9x
+ binCV five-point                    1470.97     0.0%              53.2x
+ binCV five-point, real roots         976.08     0.1%              35.3x
+ cv::findEssentialMat                8366.58     1.3%             302.4x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               350           7           0.0000
+ known rotation, no refit            350           7           0.0000
+ binCV five-point                    350          26           0.0000
+ binCV five-point, real roots        350          26           0.0000
+ cv::findEssentialMat                350          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 128 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                 89.98     0.1%               1.0x
+ known rotation, no refit              84.91     0.1%               0.9x
+ binCV five-point                   17648.32     0.1%             196.1x
+ binCV five-point, real roots        2992.28     0.1%              33.3x
+ cv::findEssentialMat               15705.97     2.3%             174.6x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600
+ estimator                       inliers  iterations translation, deg
+ known rotation, refit               607          11           0.0074
+ known rotation, no refit            607          11           0.0000
+ binCV five-point                    607          54           0.0002
+ binCV five-point, real roots        607          54           0.0002
+ cv::findEssentialMat                607          --           0.0000
+
+ heap during one known-rotation call: 0 B peak live, 0 calls; caller scratch 256 B, as the five-point's
+
+ variant                             us/call   spread  known rotation is
+ known rotation, refit                265.90     0.0%               1.0x
+ known rotation, no refit             257.42     0.0%               1.0x
+ binCV five-point                   27542.86     0.1%             103.6x
+ binCV five-point, real roots        8324.41     0.0%              31.3x
+ cv::findEssentialMat               42412.46     0.3%             159.5x
+
+ sink 46791360
+
+# loadavg at end: 1.04 1.05 0.82 1/311 2954405
+# throttled after: throttled=0x80000
+# temp after: temp=59.9'C
+# date:     2026-10-12T10:26:36-07:00
+# done

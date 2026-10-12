@@ -328,6 +328,29 @@
 #error "BINCV_LK_WINDOW_COUNT=0 on a target whose default selects the window-count arm"
 #endif
 
+// The conversions between 64-bit integers and floating point, taken through 32 bits
+// where the value fits. An M-profile floating-point unit converts 32-bit integers in
+// one instruction and 64-bit ones not at all, so `double(long long)` and
+// `long long(floor(x))` are calls into the C runtime's software routines -- the first
+// finishes in the soft-float adder -- and the tracker makes sixteen of them an
+// iteration, converting window sums and pixel offsets that never come near 2^31.
+// Selected and compiled only on M-profile, where it measured 1.05x on the whole of
+// `track` at the reference 31x31 window, more at a shorter one; every other target
+// converts as it always has. `floorToLL` is the same conversion, so sparse stereo and
+// block matching take it too. Like BINCV_LK_WINDOW_COUNT it changes inline bodies, so it
+// must be the same in every translation unit.
+#if defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
+#define BINCV_LK_NARROW_CONVERT_DEFAULT 1
+#else
+#define BINCV_LK_NARROW_CONVERT_DEFAULT 0
+#endif
+#if !defined(BINCV_LK_NARROW_CONVERT)
+#define BINCV_LK_NARROW_CONVERT BINCV_LK_NARROW_CONVERT_DEFAULT
+#endif
+#if BINCV_LK_NARROW_CONVERT_DEFAULT && !BINCV_LK_NARROW_CONVERT
+#error "BINCV_LK_NARROW_CONVERT=0 on a target whose default selects the narrowed conversions"
+#endif
+
 #include "../core/error.hpp"
 #include "../core/parallel.hpp"
 #include "../core/types.hpp"
@@ -917,6 +940,42 @@ struct StagedWindow;
 template <size_t N, typename WordType>
 struct TapCache;
 
+#if BINCV_LK_NARROW_CONVERT
+/// @brief Select the narrowed conversions (BINCV_LK_NARROW_CONVERT). **INTERNAL, and not
+/// a tuning knob.** On by default where they are compiled; the tests and the board flip
+/// it to hold the two to identical output and to time both. A plain `bool`, so not
+/// thread-safe to flip while tracking.
+inline bool& lkNarrowConvertEnabled() {
+    static bool on = BINCV_LK_NARROW_CONVERT_DEFAULT != 0;
+    return on;
+}
+#endif
+
+/// @brief `double(v)`, through a 32-bit conversion where `v` fits one and the narrowed
+/// conversions are selected. **INTERNAL.** Every 32-bit integer is exact in a double, so
+/// the two routes give the same value bit for bit.
+BINCV_HOST_DEVICE inline double exactToDouble(long long v) {
+#if BINCV_LK_NARROW_CONVERT
+    if (lkNarrowConvertEnabled() && v >= -2147483647LL - 1 && v <= 2147483647LL)
+        return static_cast<double>(static_cast<int32_t>(v));
+#endif
+    return static_cast<double>(v);
+}
+
+/// @brief `long long(floor(v))`, likewise. **INTERNAL.** An integral `floor` inside the
+/// 32-bit range converts to the same integer either way; anything else, a NaN included,
+/// takes the 64-bit conversion it always took.
+template <typename Real>
+BINCV_HOST_DEVICE inline long long floorToInteger(Real v) {
+    const Real f = std::floor(v);
+#if BINCV_LK_NARROW_CONVERT
+    if (lkNarrowConvertEnabled() && f >= static_cast<Real>(-2147483648.0) &&
+        f < static_cast<Real>(2147483648.0))
+        return static_cast<int32_t>(f);
+#endif
+    return static_cast<long long>(f);
+}
+
 /// @brief The five integer sums one gradient component's residual needs.
 /// @note `sum(T * Ix)` for each of the four tap planes, and `sum(I * Ix)` for the
 /// previous frame. The four bilinear weights combine them ONCE per window --
@@ -936,9 +995,8 @@ struct TapSums {
     /// being the same expression rather than the same intent. (Both sides are
     /// compiled without FMA contraction; see the CUDA backend's header.)
     BINCV_HOST_DEVICE double combine(double w00, double w01, double w10, double w11) const {
-        return w00 * static_cast<double>(t00) + w01 * static_cast<double>(t01) +
-               w10 * static_cast<double>(t10) + w11 * static_cast<double>(t11) -
-               static_cast<double>(self);
+        return w00 * exactToDouble(t00) + w01 * exactToDouble(t01) +
+               w10 * exactToDouble(t10) + w11 * exactToDouble(t11) - exactToDouble(self);
     }
 };
 
@@ -2516,7 +2574,7 @@ inline float windowMeanAbsDiff(const LKLevelN<N, WordType>& lv, const RegionWord
 /// candidate in the search. The CUDA sparse-stereo and block-matching
 /// kernels call this one.
 BINCV_HOST_DEVICE inline long long floorToLL(float v) {
-    return static_cast<long long>(std::floor(v));
+    return floorToInteger(v);
 }
 
 } // namespace impl
@@ -2815,10 +2873,10 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         // twice that error to the next one down.
         const double offX = static_cast<double>(nextX) - static_cast<double>(prevX);
         const double offY = static_cast<double>(nextY) - static_cast<double>(prevY);
-        const long long tapX = static_cast<long long>(std::floor(offX));
-        const long long tapY = static_cast<long long>(std::floor(offY));
-        const double fx = offX - static_cast<double>(tapX);
-        const double fy = offY - static_cast<double>(tapY);
+        const long long tapX = floorToInteger(offX);
+        const long long tapY = floorToInteger(offY);
+        const double fx = offX - exactToDouble(tapX);
+        const double fy = offY - exactToDouble(tapY);
         const double w00 = (1.0 - fx) * (1.0 - fy);
         const double w01 = fx * (1.0 - fy);
         const double w10 = (1.0 - fx) * fy;
@@ -2947,10 +3005,10 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         } else if (c.err != nullptr || c.maxResidual > 0.0) {
             const double offX = static_cast<double>(finalX) - static_cast<double>(prevX);
             const double offY = static_cast<double>(finalY) - static_cast<double>(prevY);
-            const long long tapX = static_cast<long long>(std::floor(offX));
-            const long long tapY = static_cast<long long>(std::floor(offY));
-            const double fx = offX - static_cast<double>(tapX);
-            const double fy = offY - static_cast<double>(tapY);
+            const long long tapX = floorToInteger(offX);
+            const long long tapY = floorToInteger(offY);
+            const double fx = offX - exactToDouble(tapX);
+            const double fy = offY - exactToDouble(tapY);
             const double residual = windowMeanAbsDiff(lv, region, tapX, tapY,
                 (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
             if (c.err != nullptr) c.err[p] = static_cast<float>(residual);
