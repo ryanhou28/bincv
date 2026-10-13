@@ -360,6 +360,114 @@ inline uint32_t edgeMask32(const uint8_t* rowUp, const uint8_t* row, const uint8
     }
     return out;
 }
+
+// ==================================================================
+// ON ALIGNED ROWS, NO UNALIGNED LOAD AT ALL.
+//
+// `edgeMask32` reads the horizontal neighbours at `x - 1` and `x + 1`, and on this
+// core an unaligned word load takes 3 cycles where an aligned one issues two to a
+// cycle: two of them per four pixels were a quarter of the row. When the three rows
+// are 4-byte aligned, the neighbours are funnel-shifted out of the middle row's own
+// aligned words instead -- `(c >> 8) | (q << 24)` is the word one byte on, and each
+// half is one shift that pairs with a DSP instruction.
+//
+// The rest is shaped by the same core. A DSP SIMD instruction issues one a cycle and
+// `uqsub8` takes two to deliver, so the thresholds stay on the GE flags, whose
+// `usub8` and `sel` deliver in one. `sel` picks the lane's bit out of a constant
+// directly -- bit `i` for the first four pixels, bit `4 + i` for the next four -- and
+// one `usad8` against zero sums the four lanes into the eight pixels' byte.
+
+/// @brief Force the unaligned arm on rows the aligned one could serve, so the board
+/// can time the two in one image. **INTERNAL.**
+inline bool& edgeAlignedRowEnabled() {
+    static bool on = true;
+    return on;
+}
+
+/// @brief Eight pixels of the predicate from aligned words, as eight bits. **INTERNAL.**
+/// @param p,c,q,n The middle row's words at `x - 4`, `x`, `x + 4`, `x + 8`.
+/// @param u0,u1,d0,d1 The rows above and below, at `x` and `x + 4`.
+/// @param t4 The relation-adjusted threshold in every byte lane.
+template <EdgeCombine C>
+inline uint32_t edgeByte8(uint32_t p, uint32_t c, uint32_t q, uint32_t n, uint32_t u0,
+                          uint32_t u1, uint32_t d0, uint32_t d1, uint32_t t4) {
+    const uint32_t a0 = (c >> 8) | (q << 24), b0 = (c << 8) | (p >> 24);
+    const uint32_t a1 = (q >> 8) | (n << 24), b1 = (q << 8) | (c >> 24);
+    const uint32_t h0 = __uqsub8(a0, b0) | __uqsub8(b0, a0);
+    const uint32_t v0 = __uqsub8(d0, u0) | __uqsub8(u0, d0);
+    const uint32_t h1 = __uqsub8(a1, b1) | __uqsub8(b1, a1);
+    const uint32_t v1 = __uqsub8(d1, u1) | __uqsub8(u1, d1);
+    constexpr uint32_t kLo = 0x08040201u, kHi = 0x80402010u;
+    (void)__usub8(h0, t4);  // GE[i]: h0_i >= t
+    uint32_t s = __sel(kLo, 0u);
+    (void)__usub8(v0, t4);
+    s = (C == EdgeCombine::Or) ? __sel(kLo, s) : __sel(s, 0u);
+    const uint32_t sHi = s | kHi;
+    (void)__usub8(h1, t4);
+    uint32_t r = __sel(sHi, s);
+    (void)__usub8(v1, t4);
+    r = (C == EdgeCombine::Or) ? __sel(sHi, r) : __sel(r, s);
+    return __usad8(r, 0u);
+}
+
+// GCC's scheduling pass before register allocation hoists the loads of this loop
+// until its row pointers and constants no longer fit the core's registers, and the
+// spills then cost more than the scheduling gains: the row measured 1.19x faster with
+// the pass off. Clang has no per-function form of the switch.
+#if defined(__GNUC__) && !defined(__clang__)
+#define BINCV_EDGE_ALIGNED_ROW __attribute__((noinline, optimize("no-schedule-insns")))
+#else
+#define BINCV_EDGE_ALIGNED_ROW __attribute__((noinline))
+#endif
+
+/// @brief One output row from 4-byte-aligned rows, eight pixels at a time. **INTERNAL.**
+/// @pre The three rows are 4-byte aligned, `width` is a multiple of 8 and at least 34,
+/// and `tp <= 255`.
+/// @note Every load is inside the three rows. The words before column 0 and after the
+/// last are taken as zero, and only the two border columns read them, which are then
+/// set from the scalar predicate as in `edgeRowVector`.
+template <EdgeCombine C, EdgeRelation R, typename SrcT, typename WordType>
+BINCV_EDGE_ALIGNED_ROW void edgeRowAligned(const SrcT* up, const SrcT* mid, const SrcT* dn,
+                                           size_t width, WordType* out, EdgeDiff<SrcT> t,
+                                           int tp) {
+    const uint8_t* u = reinterpret_cast<const uint8_t*>(up);
+    const uint8_t* m = reinterpret_cast<const uint8_t*>(mid);
+    const uint8_t* d = reinterpret_cast<const uint8_t*>(dn);
+    const uint32_t t4 = 0x01010101u * static_cast<uint32_t>(tp);
+    const size_t last = width / 8 - 1;  // the chunk whose right neighbour is outside
+    uint32_t p = 0, c = loadBytes4(m);
+    const auto chunk = [&](size_t j, bool final) {
+        const size_t o = j * 8;
+        const uint32_t q = loadBytes4(m + o + 4);
+        const uint32_t n = final ? 0u : loadBytes4(m + o + 8);
+        const uint32_t b = edgeByte8<C>(p, c, q, n, loadBytes4(u + o), loadBytes4(u + o + 4),
+                                        loadBytes4(d + o), loadBytes4(d + o + 4), t4);
+        p = q;
+        c = n;
+        return b;
+    };
+    size_t w = 0;
+    for (; 4 * w + 4 <= last; ++w) {
+        const uint32_t b0 = chunk(4 * w, false);
+        const uint32_t b1 = chunk(4 * w + 1, false);
+        const uint32_t b2 = chunk(4 * w + 2, false);
+        const uint32_t b3 = chunk(4 * w + 3, false);
+        out[w] = static_cast<WordType>(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24));
+    }
+    // The last word: its chunks past the row are never computed, so its padding bytes
+    // are zero.
+    uint32_t acc = 0;
+    for (size_t k = 0; 4 * w + k <= last; ++k) {
+        acc |= chunk(4 * w + k, 4 * w + k == last) << (8 * k);
+    }
+    out[w] = static_cast<WordType>(acc);
+    for (const size_t bx : {size_t{0}, width - 1}) {
+        const bool on = edgeAt<C, R, EdgeSpatial::Wide, SrcT>(up, mid, dn, width, bx, t);
+        WordType& wd = out[bx / 32];
+        const WordType bit = static_cast<WordType>(WordType{1} << (bx % 32));
+        wd = on ? static_cast<WordType>(wd | bit) : static_cast<WordType>(wd & ~bit);
+    }
+}
 #endif
 
 #if defined(BINCV_EDGE_AVX2) || defined(BINCV_EDGE_NEON) || defined(BINCV_EDGE_DSP)
@@ -429,6 +537,15 @@ inline void edgeRow(const SrcT* up, const SrcT* mid, const SrcT* dn, size_t widt
     if constexpr (kEdgeVectorShape<S, SrcT, WordType>) {
         const int tp = static_cast<int>(t) + (R == EdgeRelation::Ge ? 0 : 1);
         if (hasEdgeSimd() && width >= bitsPerWord<WordType>() + 2 && tp <= 255) {
+#if defined(BINCV_EDGE_DSP)
+            const uintptr_t rows = reinterpret_cast<uintptr_t>(up) |
+                                   reinterpret_cast<uintptr_t>(mid) |
+                                   reinterpret_cast<uintptr_t>(dn);
+            if (edgeAlignedRowEnabled() && (rows & 3u) == 0 && width % 8 == 0) {
+                edgeRowAligned<C, R, SrcT, WordType>(up, mid, dn, width, out, t, tp);
+                return;
+            }
+#endif
             edgeRowVector<C, R, SrcT, WordType>(up, mid, dn, width, out, t, tp);
             return;
         }

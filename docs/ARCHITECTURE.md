@@ -280,8 +280,8 @@ drags in enough of newlib's stdio to want `_sbrk` at link time. No kernel alloca
 throws or does I/O, so neither reaches one.
 
 **Measured there:** the assembled feature tracker at 752×480, bit-identical to the x86-64
-run on every frame, in 512,600 bytes split across two RAM banks, or 238,712 with its
-derivatives made where they are read and 175,936 detecting on a grid; the reductions and
+run on every frame, in 511,848 bytes split across two RAM banks, or 237,960 with its
+derivatives made where they are read and 175,184 detecting on a grid; the reductions and
 dense disparity; sparse stereo and sub-pixel corner refinement, bit-identical to the host,
 and the five-point RANSAC, identical in its masks and within 5e-11 in its model, the
 difference being the compiler's fused multiply-adds, with a real-root solver built for the

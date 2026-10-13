@@ -95,6 +95,11 @@ target_compile_definitions(bincv_m7_lkstages PRIVATE BINCV_LK_STAGE_TIMING
 add_executable(bincv_m7_sensor startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_sensor.cpp)
 bincv_m7_image(bincv_m7_sensor)
 
+# Not a kernel: what single instructions cost on this core, which the DSP arms are
+# written against.
+add_executable(bincv_m7_cycles startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_cycles.cpp)
+bincv_m7_image(bincv_m7_cycles)
+
 add_executable(bincv_m7_stereo startup.c board.c syscalls.c string.c m7_harness.cpp bincv_m7_stereo.cpp)
 bincv_m7_image(bincv_m7_stereo)
 

@@ -266,8 +266,12 @@ endforeach()
 target_compile_definitions(test_opticalflow PRIVATE BINCV_LK_WINDOW_COUNT=1
                                                     BINCV_LK_NARROW_CONVERT=1)
 # The same for goodFeaturesToTrack's square-root table, compiled by default only on
-# M-profile: Corner.RootTable_EveryWindowCount holds it to the root everywhere.
-target_compile_definitions(test_corner PRIVATE BINCV_CORNER_ROOT_TABLE=1)
+# M-profile: Corner.RootTable_EveryWindowCount holds it to the root everywhere. And for
+# the sweep's skip of groups with a zero response: Corner.GroupSkipIsTheSweepThatReadsEveryPixel,
+# and with it on, every other streaming case in both suites runs the skipping sweep.
+target_compile_definitions(test_corner PRIVATE BINCV_CORNER_ROOT_TABLE=1
+                                               BINCV_CORNER_GROUP_SKIP=1)
+target_compile_definitions(test_grid_corners PRIVATE BINCV_CORNER_GROUP_SKIP=1)
 # And for sparse stereo's staged refinement and integer row gate: Stereo.StagedArmIsBitExact
 # and Stereo.IntegerRowGateIsBitExact hold them to the published code everywhere.
 target_compile_definitions(test_stereo PRIVATE BINCV_STEREO_WINDOW_COUNT=1

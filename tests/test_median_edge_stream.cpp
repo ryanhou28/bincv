@@ -19,6 +19,10 @@
 //    five, irregular, the whole frame at once -- because a stream that is right for
 //    one chunking and wrong for another is the failure this shape invites.
 //  * the vector arms ON and OFF, where they exist.
+//  * rows pushed from the image itself, and from a staging buffer of another stride
+//    that is overwritten after every push: the stream reads a push's rows in place,
+//    so one that kept a pointer past the call would read the garbage.
+#include <cstddef>
 #include <cstdint>
 #include <algorithm>
 #include <cstdio>
@@ -158,6 +162,7 @@ size_t sweepOne(size_t w, size_t h, const MedianPattern<K>& pat, T threshold, ui
                                      threshold);
         wrong += bitsWrong(bits, stride, w, h, want);
 
+        size_t which = 0;
         for (size_t mode : {size_t{1}, size_t{2}, size_t{3}, size_t{5}, size_t{0}, size_t{99}}) {
             using Stream = MedianEdgeStream<K, T, W, C, R, S>;
             std::vector<T> scratch(Stream::scratchElements(w, pat));
@@ -165,9 +170,22 @@ size_t sweepOne(size_t w, size_t h, const MedianPattern<K>& pat, T threshold, ui
             Stream st(scratch.data(), scratch.size(), pat, BinMatView<W>(sb.data(), w, h, stride),
                       threshold);
             st.reset();
+            const bool staged = (which++ % 2) == 1;
+            const size_t sstride = w + 3;
+            std::vector<T> staging(sstride * h);
             size_t row = 0, lastDone = 0;
             for (size_t n : chunks(h, mode)) {
-                st.push(img.data() + row * w, n, w);
+                if (staged) {
+                    for (size_t r = 0; r < n; ++r) {
+                        std::copy(img.begin() + static_cast<std::ptrdiff_t>((row + r) * w),
+                                  img.begin() + static_cast<std::ptrdiff_t>((row + r + 1) * w),
+                                  staging.begin() + static_cast<std::ptrdiff_t>(r * sstride));
+                    }
+                    st.push(staging.data(), n, sstride);
+                    std::fill(staging.begin(), staging.end(), static_cast<T>(0x5A5A));
+                } else {
+                    st.push(img.data() + row * w, n, w);
+                }
                 row += n;
                 if (st.rowsDone() < lastDone) ++wrong;   // never goes backwards
                 lastDone = st.rowsDone();
@@ -256,11 +274,15 @@ BINCV_TEST(MedianEdgeStream, SixteenBitSource) {
 }
 
 BINCV_TEST(MedianEdgeStream, ScratchIsTheNeighbourhood) {
-    // What the header promises the stream holds: the rows the median reaches, and
-    // the three median rows the edge test reads -- 5 x 752 at the reference's shape.
-    BINCV_CHECK((MedianEdgeStream<3, uint8_t>::scratchElements(752, kMedianReferenceL)) == 3760);
+    // What the header promises the stream holds: the input rows a later push's medians
+    // reach back to, and the three median rows the edge test reads -- 4 x 752 at the
+    // reference's shape. A row is rounded up to whole 4-byte words.
+    BINCV_CHECK((MedianEdgeStream<3, uint8_t>::scratchElements(752, kMedianReferenceL)) == 3008);
     BINCV_CHECK((MedianEdgeStream<5, uint8_t>::scratchElements(752, kMedianReferencePlus)) ==
-                6 * 752);
+                5 * 752);
+    BINCV_CHECK((MedianEdgeStream<3, uint8_t>::scratchElements(33, kMedianReferenceL)) == 4 * 36);
+    BINCV_CHECK((MedianEdgeStream<3, uint16_t>::scratchElements(33, kMedianReferenceL)) ==
+                4 * 34);
 }
 
 BINCV_TEST_MAIN("test_median_edge_stream")

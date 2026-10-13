@@ -205,7 +205,7 @@ Nothing in these reports says anything about them.
 
 **Cortex-M is measured, and none of it is in these reports.** binCV runs on an STM32H753ZI
 (Cortex-M7), including the assembled feature tracker at 752×480, bit-identical to the x86-64
-run on every frame, in 512,600 bytes
+run on every frame, in 511,848 bytes
 ([targets/stm32h753/README.md](../../targets/stm32h753/README.md)). A 752×480 frame occupies
 46,080 bytes where a `CV_8U` one would occupy 360,960, and the tracker's staging buffers
 measure 4,120 bytes at the shipped pyramid depth of 2 bits per pixel against that board's
