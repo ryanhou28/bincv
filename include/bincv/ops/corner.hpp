@@ -429,6 +429,24 @@
 #error "BINCV_CORNER_ROOT_TABLE=0 on a target whose default selects the root table"
 #endif
 
+// The sweep's running maximum and suppression SKIP EIGHT-PIXEL GROUPS whose response
+// is known to be zero, from a bitmap the bit-sliced response row writes as it goes
+// (`impl::GroupBits`). Selected by default on M-profile Arm, where the suppression
+// tests every pixel scalar: on the Cortex-M7 a grid detection over the cells a
+// tracker has not filled measured 1.08x faster, and a dense one the same, for about
+// 4.7 KB of flash (targets/stm32h753/README.md). Compiled there, or where a
+// translation unit asks; the tests define it to hold the skipping sweep to the one
+// that reads every pixel. It changes inline bodies, so it must be the same in every
+// translation unit of a program.
+#if defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
+#define BINCV_CORNER_GROUP_SKIP_DEFAULT 1
+#else
+#define BINCV_CORNER_GROUP_SKIP_DEFAULT 0
+#endif
+#if !defined(BINCV_CORNER_GROUP_SKIP)
+#define BINCV_CORNER_GROUP_SKIP BINCV_CORNER_GROUP_SKIP_DEFAULT
+#endif
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
@@ -1088,6 +1106,94 @@ inline float rowMax(const float* row, size_t n) {
 #endif
     return rowMaxNonNegative(row, n);
 }
+
+#if BINCV_CORNER_GROUP_SKIP
+// ---------------------------------------------------------------------------
+// WHICH GROUPS OF A RESPONSE ROW CAN BE NON-ZERO
+//
+// The bit-sliced response already knows, per eight pixels, whether any count in
+// the window is non-zero -- it skips the gather and the transpose of a group that
+// has none. A response row hands that on to a `GroupBits`, which keeps it as a
+// bitmap, bit `g` for pixels `[8g, 8g + 8)`: a clear bit means every response in the
+// group is exactly 0, a set bit only that one may not be.
+//
+// Every caller but the sweep passes a sink with no bitmap and pays a null test per
+// non-empty group. A sink type that did nothing would instead be a second copy of
+// the 12 KB row body, and in the tracker image that growth alone moved GCC's
+// inlining of Lucas-Kanade's hot loop.
+// ---------------------------------------------------------------------------
+
+/// @brief A response row's group flags, as a bitmap of 32-bit words, or dropped when
+/// `bits` is null. **INTERNAL.**
+struct GroupBits {
+    uint32_t* bits = nullptr;
+    /// Every group of a row `width` pixels wide marked zero.
+    void clear(size_t width) const {
+        if (bits == nullptr) return;
+        for (size_t i = 0; i < (width + 255) / 256; ++i) bits[i] = 0;
+    }
+    /// The group holding pixel `x0` -- a multiple of 8 -- marked possibly non-zero.
+    void mark(size_t x0) const {
+        if (bits != nullptr) bits[x0 / 256] |= uint32_t{1} << (x0 / 8 % 32);
+    }
+    /// Every group marked, for a response computed without the flags.
+    void markAll(size_t width) const {
+        if (bits == nullptr) return;
+        for (size_t i = 0; i < (width + 255) / 256; ++i) bits[i] = ~uint32_t{0};
+    }
+};
+
+/// @brief The widest row the sweep keeps group flags for: three rows of them are
+/// 192 bytes of stack. A wider frame sweeps every pixel. **INTERNAL.**
+inline constexpr size_t kGroupSkipMaxWidth = 4096;
+inline constexpr size_t kGroupSkipWords = kGroupSkipMaxWidth / 256;
+
+/// @brief Calls `fn(x0, x1)` for each run `[x0, x1)` of `[lo, hi)` covered by groups
+/// `groups` marks, in order. **INTERNAL.** Adjacent marked groups are one run, so a
+/// dense row costs a call per 256 pixels rather than per 8.
+template <typename Fn>
+inline void forMarkedGroups(const uint32_t* groups, size_t lo, size_t hi, Fn&& fn) {
+    if (lo >= hi) return;
+    const size_t g0 = lo / 8, g1 = (hi + 7) / 8;
+    for (size_t wi = g0 / 32; wi * 32 < g1; ++wi) {
+        uint32_t bits = groups[wi];
+        if (wi == g0 / 32) bits &= ~uint32_t{0} << (g0 % 32);
+        if ((wi + 1) * 32 > g1) bits &= (uint32_t{1} << (g1 % 32)) - 1u;
+        while (bits != 0) {
+            const unsigned first = static_cast<unsigned>(__builtin_ctz(bits));
+            const uint32_t rest = ~(bits >> first);
+            const unsigned end = rest == 0 ? 32u : first + static_cast<unsigned>(__builtin_ctz(rest));
+            bits = end == 32u ? 0u : bits & (~uint32_t{0} << end);
+            const size_t x0 = (wi * 32 + first) * 8, x1 = (wi * 32 + end) * 8;
+            fn(x0 > lo ? x0 : lo, x1 < hi ? x1 : hi);
+        }
+    }
+}
+
+/// @brief `rowMaxNonNegative` over `[lo, hi)`, reading only the groups `groups` marks.
+/// **INTERNAL.** The same answer: every unread response is 0, and the reduction is
+/// seeded at 0.
+inline float rowMaxMarked(const float* row, size_t lo, size_t hi, const uint32_t* groups) {
+    uint32_t m = 0;
+    forMarkedGroups(groups, lo, hi, [&](size_t x0, size_t x1) {
+        for (size_t i = x0; i < x1; ++i) {
+            uint32_t bits;
+            std::memcpy(&bits, row + i, sizeof(bits));
+            m = bits > m ? bits : m;
+        }
+    });
+    float out;
+    std::memcpy(&out, &m, sizeof(out));
+    return out;
+}
+
+/// @brief Force the sweep to read every pixel, so the board can time both forms in one
+/// image and the tests can hold one to the other. **INTERNAL.**
+inline bool& cornerGroupSkipEnabled() {
+    static bool on = true;
+    return on;
+}
+#endif
 
 } // namespace impl
 
@@ -1797,12 +1903,22 @@ BINCV_HOST_DEVICE inline WordType boxWordAt(const WordType* row, size_t words, l
 /// the caller establishes both, and getting it wrong reads out of bounds.
 /// @note The two instantiations are the same arithmetic on the same words. Only
 /// the addressing differs, so the response is bit-identical between them.
-template <typename WordType, bool Bounded>
+/// @param groups Where the sweep's group skip compiles it in: told which eight-pixel
+/// groups may be non-zero.
+template <typename WordType, bool Bounded
+#if BINCV_CORNER_GROUP_SKIP
+          , typename Groups = GroupBits
+#endif
+          >
 inline void cornerMinEigenValWordSliced(const WordType* const (&mxr)[3],
                                         const WordType* const (&myr)[3],
                                         const WordType* const (&sxr)[3],
                                         const WordType* const (&syr)[3], size_t words, size_t w,
-                                        size_t lo, size_t hi, float* dstRow) {
+                                        size_t lo, size_t hi, float* dstRow
+#if BINCV_CORNER_GROUP_SKIP
+                                        , const Groups& groups = Groups{}
+#endif
+                                        ) {
     constexpr size_t kBits = bitsPerWord<WordType>();
     const auto at = [words](const WordType* row, long long ww) -> WordType {
         if constexpr (Bounded) {
@@ -1897,6 +2013,9 @@ inline void cornerMinEigenValWordSliced(const WordType* const (&mxr)[3],
             for (size_t j = 0; j < span; ++j) dstRow[x0 + j] = 0.0f;
             continue;
         }
+#if BINCV_CORNER_GROUP_SKIP
+        groups.mark(x0);
+#endif
         uint64_t gAB = 0, gPN = 0;
         for (size_t pp = 0; pp < 4; ++pp) {
             gAB |= static_cast<uint64_t>((vA[pp] >> b8) & WordType{0xFF}) << (8 * pp);
@@ -1936,17 +2055,39 @@ inline void cornerMinEigenValWordSliced(const WordType* const (&mxr)[3],
 /// -- row y - 1, y and y + 1 of each plane, null where the row is outside the frame --
 /// so a caller that holds only those rows computes the same response row. **INTERNAL.**
 /// `rowsPresent` says that none is null.
-template <typename WordType>
+/// Where the group skip compiles it in, `groups` is told which eight-pixel groups may be
+/// non-zero.
+template <typename WordType
+#if BINCV_CORNER_GROUP_SKIP
+          , typename Groups = GroupBits
+#endif
+          >
 inline void cornerMinEigenValRowSlicedRows(const WordType* const (&mxr)[3],
                                            const WordType* const (&myr)[3],
                                            const WordType* const (&sxr)[3],
                                            const WordType* const (&syr)[3], size_t width,
-                                           bool rowsPresent, float* dstRow) {
+                                           bool rowsPresent, float* dstRow
+#if BINCV_CORNER_GROUP_SKIP
+                                           , const Groups& groups = Groups{}
+#endif
+                                           ) {
     constexpr size_t kBits = bitsPerWord<WordType>();
     const size_t words = minRowWords<WordType>(width);
+#if BINCV_CORNER_GROUP_SKIP
+    groups.clear(width);
+#endif
     for (size_t w = 0; w < words; ++w) {
         const size_t lo = w * kBits;
         const size_t hi = (lo + kBits < width) ? (lo + kBits) : width;
+#if BINCV_CORNER_GROUP_SKIP
+        if (rowsPresent && w > 0 && w + 1 < words) {
+            cornerMinEigenValWordSliced<WordType, false>(mxr, myr, sxr, syr, words, w, lo, hi,
+                                                         dstRow, groups);
+        } else {
+            cornerMinEigenValWordSliced<WordType, true>(mxr, myr, sxr, syr, words, w, lo, hi,
+                                                        dstRow, groups);
+        }
+#else
         if (rowsPresent && w > 0 && w + 1 < words) {
             cornerMinEigenValWordSliced<WordType, false>(mxr, myr, sxr, syr, words, w, lo, hi,
                                                          dstRow);
@@ -1954,16 +2095,25 @@ inline void cornerMinEigenValRowSlicedRows(const WordType* const (&mxr)[3],
             cornerMinEigenValWordSliced<WordType, true>(mxr, myr, sxr, syr, words, w, lo, hi,
                                                         dstRow);
         }
+#endif
     }
 }
 
 /// @brief One row of `cornerMinEigenVal` at `blockSize == 3`, bit-sliced.
 /// @note Bit-identical to the per-pixel form; see the section comment above.
-template <typename WordType>
+template <typename WordType
+#if BINCV_CORNER_GROUP_SKIP
+          , typename Groups = GroupBits
+#endif
+          >
 inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
                                        BinMatConstView<WordType> magY,
                                        BinMatConstView<WordType> signX,
-                                       BinMatConstView<WordType> signY, size_t y, float* dstRow) {
+                                       BinMatConstView<WordType> signY, size_t y, float* dstRow
+#if BINCV_CORNER_GROUP_SKIP
+                                       , const Groups& groups = Groups{}
+#endif
+                                       ) {
     const size_t width = magX.width;
     const size_t height = magX.height;
 
@@ -1984,7 +2134,12 @@ inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
     // word test is per word, below -- together they are the precondition the
     // unguarded body is compiled against.
     const bool rowsPresent = y > 0 && y + 1 < height;
+#if BINCV_CORNER_GROUP_SKIP
+    cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width, rowsPresent, dstRow,
+                                             groups);
+#else
     cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width, rowsPresent, dstRow);
+#endif
 }
 
 } // namespace impl
@@ -2124,14 +2279,47 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
     // running threshold is then negative, which only UNDER-prunes -- and the
     // top-K argument in the section comment already tolerates any running
     // threshold at or below the final one, so the answer is unchanged.
+#if BINCV_CORNER_GROUP_SKIP
+    // The response rows' group flags, one bitmap a ring row, where a row hands them
+    // over: a `rowAt` that takes a third argument is given a `GroupBits` to fill.
+    constexpr bool kRowAtGroups = std::is_invocable_v<RowAt&, int, float*, const GroupBits&>;
+    uint32_t groupStore[kResponseRingRows][kGroupSkipWords];
+    const bool useGroups =
+        kRowAtGroups && cornerGroupSkipEnabled() && frameWidth <= kGroupSkipMaxWidth;
+    const auto groupsOf = [&](int y) -> const uint32_t* {
+        return groupStore[static_cast<size_t>(y) % kResponseRingRows];
+    };
+    const auto produce = [&](int y, float* dst) {
+        if constexpr (kRowAtGroups) {
+            if (useGroups) {
+                rowAt(y, dst, GroupBits{groupStore[static_cast<size_t>(y) % kResponseRingRows]});
+                return;
+            }
+        }
+        rowAt(y, dst);
+    };
+    // The largest admitted response of a run, or of a whole row.
+    const auto runMax = [&](const float* row, int y, size_t x0, size_t x1) {
+        return useGroups ? impl::rowMaxMarked(row, x0, x1, groupsOf(y))
+                         : impl::rowMax(row + x0, x1 - x0);
+    };
+#endif
     float* first = ring.row(0);
+#if BINCV_CORNER_GROUP_SKIP
+    produce(0, first);
+#else
     rowAt(0, first);
+#endif
     float runningMax;
     if (masked) {
         runningMax = -1.0f;
         if constexpr (AdmitHasRuns<Admit>::value) {
             masked_admit.runs(0, [&](size_t x0, size_t x1) {
+#if BINCV_CORNER_GROUP_SKIP
+                const float m = runMax(first, 0, x0, x1);
+#else
                 const float m = impl::rowMax(first + x0, x1 - x0);
+#endif
                 if (m > runningMax) runningMax = m;
             });
         } else {
@@ -2142,12 +2330,20 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
             }
         }
     } else {
+#if BINCV_CORNER_GROUP_SKIP
+        runningMax = runMax(first, 0, 0, static_cast<size_t>(width));
+#else
         runningMax = impl::rowMax(first, static_cast<size_t>(width));
+#endif
     }
 
     for (int y = 1; y < height; ++y) {
         float* cur = ring.row(static_cast<size_t>(y) % kResponseRingRows);
+#if BINCV_CORNER_GROUP_SKIP
+        produce(y, cur);
+#else
         rowAt(y, cur);
+#endif
         // The mask gates this the way it gates the frame-map form's maxVal: the
         // threshold is a fraction of the strongest ADMITTED response, because
         // that is the region cv::minMaxLoc is given. The unmasked twin is
@@ -2155,7 +2351,11 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
         if (masked) {
             if constexpr (AdmitHasRuns<Admit>::value) {
                 masked_admit.runs(static_cast<size_t>(y), [&](size_t x0, size_t x1) {
+#if BINCV_CORNER_GROUP_SKIP
+                    const float m = runMax(cur, y, x0, x1);
+#else
                     const float m = impl::rowMax(cur + x0, x1 - x0);
+#endif
                     if (m > runningMax) runningMax = m;
                 });
             } else {
@@ -2166,7 +2366,11 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
                 }
             }
         } else {
+#if BINCV_CORNER_GROUP_SKIP
+            const float m = runMax(cur, y, 0, static_cast<size_t>(width));
+#else
             const float m = impl::rowMax(cur, static_cast<size_t>(width));
+#endif
             runningMax = m > runningMax ? m : runningMax;
         }
 
@@ -2226,6 +2430,28 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
             std::memcpy(&u, row + c, sizeof u);
             return u;
         };
+#if BINCV_CORNER_GROUP_SKIP
+        const auto suppress = [&](size_t c) {
+            const uint32_t v = bitsAt(mid, c);
+            if (!(everyPasses || v > runBits)) return;  // permanently dead; see above
+            if (bitsAt(above, c - 1) > v || bitsAt(mid, c - 1) > v || bitsAt(below, c - 1) > v ||
+                bitsAt(above, c) > v || bitsAt(below, c) > v || bitsAt(above, c + 1) > v ||
+                bitsAt(mid, c + 1) > v || bitsAt(below, c + 1) > v)
+                return;
+            consider(static_cast<int>(c), mid[c]);
+        };
+        // A pixel whose response is 0 is never a candidate while the running threshold
+        // is not negative -- `v > runBits` fails for it -- so only the groups that may
+        // hold a non-zero response are read.
+        if (useGroups && !everyPasses) {
+            impl::forMarkedGroups(groupsOf(cy), static_cast<size_t>(x),
+                                  static_cast<size_t>(xEnd), [&](size_t x0, size_t x1) {
+                                      for (size_t c = x0; c < x1; ++c) suppress(c);
+                                  });
+            continue;
+        }
+        for (; x < xEnd; ++x) suppress(static_cast<size_t>(x));
+#else
         for (; x < xEnd; ++x) {
             const size_t c = static_cast<size_t>(x);
             const uint32_t v = bitsAt(mid, c);
@@ -2236,6 +2462,7 @@ inline float sweepCornerResponses(size_t frameWidth, size_t frameHeight,
                 continue;
             consider(x, mid[c]);
         }
+#endif
     }
 
     // A mask that admitted NOTHING leaves the seed untouched. The frame-map form
@@ -2256,7 +2483,22 @@ inline float sweepCornerCandidates(BinMatConstView<WordType> magX, BinMatConstVi
     const int blockSize = params.blockSize;
     return sweepCornerResponses<WordType>(
         magX.width, magX.height, params, ring, mask,
+#if BINCV_CORNER_GROUP_SKIP
+        [&](int y, float* dst, const auto&... groups) {
+            if constexpr (sizeof...(groups) > 0) {
+                // Only the bit-sliced row knows its groups; any other marks them all.
+                if (blockSize == 3) {
+                    cornerMinEigenValRowSliced<WordType>(magX, magY, signX, signY,
+                                                         static_cast<size_t>(y), dst, groups...);
+                    return;
+                }
+                cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, dst);
+                (groups.markAll(magX.width), ...);
+                return;
+            }
+#else
         [&](int y, float* dst) {
+#endif
             cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, dst);
         },
         onCandidate);
@@ -2801,7 +3043,11 @@ inline CornerResult goodFeaturesToTrackStreaming(const GradientSource<N, WordTyp
     };
     // Response row y reads derivative rows y - 1 .. y + 1, which the sweep reaches in
     // order: each row is made once per sweep, when the response first needs it.
+#if BINCV_CORNER_GROUP_SKIP
+    const auto rowAt = [&](int yi, float* dst, const auto&... groups) {
+#else
     const auto rowAt = [&](int yi, float* dst) {
+#endif
         const size_t y = static_cast<size_t>(yi);
         const size_t need = y + 1 < height ? y + 1 : height - 1;
         while (derived <= need) derive(derived++);
@@ -2817,8 +3063,13 @@ inline CornerResult goodFeaturesToTrackStreaming(const GradientSource<N, WordTyp
             sxr[k] = ok ? rowOf(slot, 0, N) : nullptr;
             syr[k] = ok ? rowOf(slot, 1, N) : nullptr;
         }
+#if BINCV_CORNER_GROUP_SKIP
+        impl::cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width,
+                                                       y > 0 && y + 1 < height, dst, groups...);
+#else
         impl::cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width,
                                                        y > 0 && y + 1 < height, dst);
+#endif
     };
     return impl::selectWithBoundedPool(
         width, height, params, ring, !mask.empty(),

@@ -340,7 +340,7 @@ crash. The dense-disparity kernel's first run on this core returned the exact di
 its test pair, and the same map at both word types.
 
 The assembled feature tracker runs there too, at the reference sequence's full 752×480 and
-bit-identical to the x86-64 run on every frame, in 512,600 bytes; the target page has its
+bit-identical to the x86-64 run on every frame, in 511,848 bytes; the target page has its
 speed and what moved it. What has **not** been measured there is as important: no comparison
 against OpenCV or any other library. Every figure above is at the part's full 480 MHz, with
 the clock checked against the board's 32.768 kHz crystal.

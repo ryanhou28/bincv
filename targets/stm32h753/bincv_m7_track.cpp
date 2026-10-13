@@ -10,6 +10,8 @@
 ///                      default on this core), for the same reason
 ///   SET nc <0|1>       Lucas–Kanade's conversions through 32 bits off or on (on by
 ///                      default on this core), for the same reason
+///   SET gs <0|1>       the corner sweep's skip of groups whose response is zero off
+///                      or on (on by default on this core), for the same reason
 ///   SET topup <0|1>    bincv_m7_track_grid only: after every frame, also time a top-up
 ///                      detection over the cells the live tracks hold, with
 ///                      `skipFullCells` off and on, and count the frames where the two
@@ -352,6 +354,9 @@ const Setting kSettings[] = {
     {"lkwc", &bincv::impl::lkWindowCountEnabled},
     {"rt", &bincv::impl::cornerRootTableEnabled},
     {"nc", &bincv::impl::lkNarrowConvertEnabled},
+#if BINCV_CORNER_GROUP_SKIP
+    {"gs", &bincv::impl::cornerGroupSkipEnabled},
+#endif
     {"topup", &topUpEnabled},
 };
 

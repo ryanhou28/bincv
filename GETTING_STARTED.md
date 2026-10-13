@@ -256,7 +256,7 @@ need not be stored at all: `LKLevelOnDemand` / `LKLevelsOnDemand`
 (`ops/opticalFlowOnDemand.hpp`) track from the two pyramids alone, computing each
 window's derivatives as they stage it, and `goodFeaturesToTrackStreaming` over a
 `GradientSource` derives the detector's gradient row by row. Both give the stored
-form's output bit for bit; on the Cortex-M7 tracker they remove 275,040 of 512,600
+form's output bit for bit; on the Cortex-M7 tracker they remove 275,040 of 511,848
 bytes at no measurable cost in time ([targets/stm32h753](targets/stm32h753/README.md)).
 
 ### Building for Cortex-M7
