@@ -2085,6 +2085,145 @@ BINCV_TEST(Corner, RootTable_EveryWindowCount) {
 }
 
 // ---------------------------------------------------------------------------
+// The sweep's skip of eight-pixel groups whose response is zero, against the same
+// sweep reading every pixel: every streaming form that carries the response row's
+// group flags -- stored planes with a bounded pool and without, and the on-demand
+// gradient -- over frames that are mostly empty and frames that are not, at widths
+// either side of a group, a word and a bitmap word, and one wider than the flags
+// are kept for. Masks include one that admits only pixels with no gradient, so the
+// masked seed must rise from -1 to 0 off groups the skip never reads. Count, sweeps,
+// positions and responses must all be the same. Compiled where the skip is
+// (tests/CMakeLists.txt asks for it).
+// ---------------------------------------------------------------------------
+#if BINCV_CORNER_GROUP_SKIP
+namespace {
+
+Frame sparseFrame(int w, int h, uint64_t seed) {
+    Frame f = makeFrame("sparse", w, h);
+    uint64_t s = seed;
+    const int blobs = 1 + w * h / 700;
+    for (int i = 0; i < blobs; ++i) {
+        const int bx = static_cast<int>(nextRandom(s) % static_cast<uint64_t>(w));
+        const int by = static_cast<int>(nextRandom(s) % static_cast<uint64_t>(h));
+        const int bw = 2 + static_cast<int>(nextRandom(s) % 7u);
+        const int bh = 2 + static_cast<int>(nextRandom(s) % 7u);
+        for (int y = by; y < by + bh && y < h; ++y)
+            for (int x = bx; x < bx + bw && x < w; ++x) f.set(y, x, 1u);
+    }
+    return f;
+}
+
+size_t resultMismatch(const CornerResult& ra, const std::vector<Corner>& a,
+                      const CornerResult& rb, const std::vector<Corner>& b) {
+    if (ra.count != rb.count || ra.passes != rb.passes ||
+        ra.candidatesRanked != rb.candidatesRanked ||
+        ra.candidatesTruncated != rb.candidatesTruncated)
+        return 1;
+    for (size_t i = 0; i < ra.count; ++i) {
+        if (a[i].x != b[i].x || a[i].y != b[i].y ||
+            std::memcmp(&a[i].response, &b[i].response, sizeof(float)) != 0)
+            return 1;
+    }
+    return 0;
+}
+
+/// Every form over one frame and mask, the skip on against off; `found` counts corners.
+size_t groupSkipMismatches(const Frame& f, bincv::BinMatConstView<uint32_t> mask, size_t& found) {
+    bool& sw = bincv::impl::cornerGroupSkipEnabled();
+    const bool saved = sw;
+    const Derived<uint32_t> d(f, BORDER_REFLECT_101);
+    const BinMat<uint32_t> src = pack<uint32_t>(f);
+    GoodFeaturesParams params;
+    params.blockSize = 3;
+    params.qualityLevel = 0.05;
+    params.minDistance = 3.0;
+    params.maxCorners = 0;
+    const size_t w = static_cast<size_t>(f.width), h = static_cast<size_t>(f.height);
+    std::vector<float> ringStorage(bincv::kResponseRingRows * w);
+    const ResponseMap ring{ringStorage.data(), w, bincv::kResponseRingRows, w};
+    const size_t cap = w * h + 1;
+    std::vector<bincv::CornerCandidate> pool(64);
+    bincv::GradientSource<1, uint32_t> gs;
+    gs.planes[0] = src.constView();
+    gs.border = BORDER_REFLECT_101;
+    std::vector<uint32_t> scratch(bincv::gradientRowWords<1, uint32_t>(w));
+    size_t bad = 0;
+    for (int form = 0; form < 3; ++form) {
+        std::vector<Corner> on(cap), off(cap);
+        CornerResult r[2];
+        for (int skip = 1; skip >= 0; --skip) {
+            sw = skip != 0;
+            std::vector<Corner>& out = skip ? on : off;
+            if (form == 0) {
+                r[skip] = bincv::goodFeaturesToTrackStreaming<uint32_t>(
+                    d.dx.constMagnitude(0), d.dy.constMagnitude(0), d.dx.constSign(),
+                    d.dy.constSign(), params, ring, out.data(), out.size(), mask);
+            } else if (form == 1) {
+                r[skip] = bincv::goodFeaturesToTrackStreaming<uint32_t>(
+                    d.dx.constMagnitude(0), d.dy.constMagnitude(0), d.dx.constSign(),
+                    d.dy.constSign(), params, ring, pool.data(), pool.size(), out.data(),
+                    out.size(), mask);
+            } else {
+                r[skip] = bincv::goodFeaturesToTrackStreaming(gs, params, ring, scratch.data(),
+                                                              scratch.size(), pool.data(),
+                                                              pool.size(), out.data(), out.size(),
+                                                              mask);
+            }
+        }
+        bad += resultMismatch(r[1], on, r[0], off);
+        found += r[1].count;
+    }
+    sw = saved;
+    return bad;
+}
+
+} // namespace
+
+BINCV_TEST(Corner, GroupSkipIsTheSweepThatReadsEveryPixel) {
+    static const int kWidths[] = {7, 8, 9, 31, 33, 63, 255, 256, 257, 300};
+    size_t bad = 0, cases = 0, found = 0;
+    for (int w : kWidths) {
+        for (int h : {3, 9, 40}) {
+            const uint64_t seed = UINT64_C(0x6A0F) + static_cast<uint64_t>(w) * 131u +
+                                  static_cast<uint64_t>(h);
+            for (const Frame& f : {sparseFrame(w, h, seed), randomFrame(w, h, seed),
+                                   uniformFrame(w, h, 0u)}) {
+                bad += groupSkipMismatches(f, {}, found);
+                // A mask over pixels with no edge near them only, and one over every
+                // third column.
+                BinMat<uint32_t> flat(w, h), cols(w, h);
+                for (int y = 0; y < h; ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        bool edge = false;
+                        for (int dy = -2; dy <= 2; ++dy)
+                            for (int dx = -2; dx <= 2; ++dx) {
+                                const int yy = y + dy, xx = x + dx;
+                                if (yy >= 0 && yy < h && xx >= 0 && xx < w && f.at(yy, xx))
+                                    edge = true;
+                            }
+                        flat.set(y, x, edge ? 0u : 1u);
+                        cols.set(y, x, x % 3 == 0 ? 1u : 0u);
+                    }
+                }
+                bad += groupSkipMismatches(f, flat.constView(), found);
+                bad += groupSkipMismatches(f, cols.constView(), found);
+                cases += 3;
+            }
+        }
+    }
+    // Wider than the sweep keeps flags for: it reads every pixel, and says the same.
+    const int wide = static_cast<int>(bincv::impl::kGroupSkipMaxWidth) + 9;
+    bad += groupSkipMismatches(sparseFrame(wide, 6, UINT64_C(0xB16)), {}, found);
+    ++cases;
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+    BINCV_CHECK(found > 0);
+    std::printf(" group skip == every pixel: %zu frame-mask pairs x 3 forms, %zu corners, "
+                "%zu differ\n",
+                cases, found, bad);
+}
+#endif
+
+// ---------------------------------------------------------------------------
 // 12d. DEGENERATE SHAPES AND NO HEAP, FOR THE STREAMING FORM TOO
 //
 // A frame shorter than the ring has no NMS row at all, and the one-pass form's

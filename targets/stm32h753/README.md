@@ -5,8 +5,8 @@ count and no vector unit, and 1 MB of RAM in five banks. Everything in this dire
 harness; binCV itself is `bincv_core`, the same headers every other target compiles.
 
 **The assembled feature tracker runs here at the reference sequence's full 752×480,
-bit-identical to the x86-64 host on every frame, in 512,600 bytes — or 238,712 with its
-derivatives made where they are read, 175,936 detecting on a grid** — section 3. Sparse stereo, the five-point RANSAC
+bit-identical to the x86-64 host on every frame, in 511,848 bytes — or 237,960 with its
+derivatives made where they are read, 175,184 detecting on a grid** — section 3. Sparse stereo, the five-point RANSAC
 and sub-pixel corner refinement run here too, each against the host's output (sections 5
 to 7).
 
@@ -32,10 +32,11 @@ changes, and one image compiling every kernel would age every figure on every ed
 |---|---|---|
 | `bincv_m7_reduce` | `REDUCE` | population count without an instruction (section 1) |
 | `bincv_m7_dense` | `DENSE` | dense disparity at both word types (section 2) |
-| `bincv_m7_track` | `TRACK`, `SET lkwc`, `SET rt`, `SET nc` | the assembled feature tracker over a sequence (section 3) |
-| `bincv_m7_track_ondemand` | `TRACK`, `SET lkwc`, `SET rt`, `SET nc` | the same tracker, its derivatives made where they are read (section 3) |
-| `bincv_m7_track_grid` | `TRACK`, `SET lkwc`, `SET rt`, `SET nc` | the on-demand tracker detecting on a grid (section 3) |
+| `bincv_m7_track` | `TRACK`, `SET lkwc`, `SET rt`, `SET nc`, `SET gs` | the assembled feature tracker over a sequence (section 3) |
+| `bincv_m7_track_ondemand` | `TRACK`, `SET lkwc`, `SET rt`, `SET nc`, `SET gs` | the same tracker, its derivatives made where they are read (section 3) |
+| `bincv_m7_track_grid` | `TRACK`, `SET lkwc`, `SET rt`, `SET nc`, `SET gs`, `SET topup` | the on-demand tracker detecting on a grid (section 3) |
 | `bincv_m7_sensor` | `SENSOR` | the sensor stage by part, DSP arms on and off (section 4) |
+| `bincv_m7_cycles` | `CYCLES` | what single instructions cost on this core: the model the DSP arms are written against (section 4) |
 | `bincv_m7_stereo` | `STEREO` | sparse stereo by stage, its arms off and on (section 5) |
 | `bincv_m7_essential` | `ESSENTIAL`, `ESSENTIALDUMP` | the five-point RANSAC, scoring both ways; the models and masks in full (section 6) |
 | `bincv_m7_subpix` | `SUBPIX`, `SUBPIXDUMP` | `cornerSubPix`, with and without reuse; the points in full (section 7) |
@@ -69,10 +70,11 @@ corrupted.
 
 **The images replace newlib-nano's `memcpy`, `memmove` and `memset`** with word-wide ones
 ([string.c](string.c)). Nano builds all three as byte loops, and binCV's kernels call them: the
-sensor stream copies each row it is given, and GCC compiles a kernel's own zero-filling loop
-into a `memset` call — thirty-two of them in the tracker image. Against nano's, the sensor
-stream is 13% faster (section 4) and dense disparity 14% (section 2): the logs before and
-after are in the repository's history. A build on nano pays that, whatever it runs.
+sensor stream copies the row a later push still reads, and GCC compiles a kernel's own
+zero-filling loop into a `memset` call — thirty-two of them in the tracker image. Against
+nano's, the sensor stream was 13% faster when it copied every row it was given (section 4
+reads them in place now) and dense disparity 14% (section 2): the logs before and after are
+in the repository's history. A build on nano pays that, whatever it runs.
 
 The tests do not build for this target as a whole (`threads/pool.hpp` needs `<thread>`,
 which newlib does not supply), which is why `BINCV_BUILD_TESTS=OFF` above.
@@ -348,12 +350,12 @@ Buffer geometry, so exact; the stack is measured by painting.
 | pyramids, two | 152,640 | AXI SRAM |
 | derivative ladders | 275,040 | AXI SRAM |
 | response ring | 9,024 | AXI SRAM |
-| sensor stream rows | 3,760 | D2 SRAM |
+| sensor stream rows | 3,008 | D2 SRAM |
 | corner pool (8,192) and the kept corners (200) | 67,936 | D2 SRAM |
 | tracks | 4,200 | D2 SRAM |
-| **everything the pipeline holds** | **512,600** | |
-| stack, measured | 8,420 | DTCM |
-| flash, the whole image | 105,372 | |
+| **everything the pipeline holds** | **511,848** | |
+| stack, measured | 8,492 | DTCM |
+| flash, the whole image | 112,936 | |
 
 The first three rows are the 436,704 bytes the published footprint counts. The pool's
 size is a cost in sweeps, never in the answer: 34 of the 82 detections outran it and
@@ -366,15 +368,15 @@ frames):
 
 | stage | cycles per frame | ms at 480 MHz | share |
 |---|---|---|---|
-| sensor stage | 4,246,284 | 8.85 | 24.7% |
-| pyramid | 482,080 | 1.00 | 2.8% |
-| derivatives | 459,037 | 0.96 | 2.7% |
-| detect | 1,195,793 | 2.49 | 7.0% |
-| track | 10,817,140 | 22.54 | 62.9% |
-| **the frame** | **17,200,335** | **35.83** | |
+| sensor stage | 2,879,702 | 6.00 | 18.1% |
+| pyramid | 480,238 | 1.00 | 3.0% |
+| derivatives | 452,329 | 0.94 | 2.9% |
+| detect | 1,083,175 | 2.26 | 6.8% |
+| track | 10,971,235 | 22.86 | 69.1% |
+| **the frame** | **15,866,680** | **33.06** | |
 
 For scale only — there is nothing on this part to compare it with yet: a full-resolution
-frame through the whole tracker in 36 ms.
+frame through the whole tracker in 33 ms.
 
 ### What moved it
 
@@ -386,8 +388,8 @@ runs — the published tracking code — over the same 60 frames, both bit-ident
 
 | | per-row count | window count | |
 |---|---|---|---|
-| track, cycles per frame | 88,968,401 | 18,458,134 | 4.82× |
-| whole frame | 95,794,378 | 25,284,332 | 3.79× |
+| track, cycles per frame | 89,565,333 | 18,689,106 | 4.79× |
+| whole frame | 95,019,040 | 24,142,989 | 3.94× |
 
 Its price is flash: **13,556 bytes**, measured by building the same image without it —
 0.7% of this part's 2 MB, and no RAM: the arm adds no buffer. It is on by default on every
@@ -455,8 +457,8 @@ bit-identical to the host ([off](../../docs/reports/logs/m7-track-nc0-cortex-m7.
 
 | | the 64-bit conversions | through 32 bits | |
 |---|---|---|---|
-| track, cycles per frame | 19,321,967 | 18,458,444 | 1.047× |
-| whole frame | 26,148,130 | 25,284,407 | 1.034× |
+| track, cycles per frame | 19,970,686 | 18,689,061 | 1.069× |
+| whole frame | 25,425,348 | 24,143,749 | 1.053× |
 
 2,976 bytes of flash, measured the same way, and no RAM. What it removes is a cost per
 iteration rather than per window row, so its share grows as the window shortens.
@@ -466,19 +468,20 @@ table on M-profile (`BINCV_CORNER_ROOT_TABLE`, switchable with `SET rt`): a 3×3
 counts are 0 to 9, so the discriminant has a hundred values, and the table holds their
 correctly rounded roots inside `minEigenValue`'s own double expression — the same float.
 It costs 2,984 bytes of flash, measured the same way, and over the 60 frames above, whose
-one detection sweeps three times, it takes `detect` from 2,404,856 cycles a frame to
-1,638,062 — 1.47×, the frame 3.0%
+one detection sweeps three times, it takes `detect` from 2,402,108 cycles a frame to
+1,640,966 — 1.46×, the frame 3.1%
 ([off](../../docs/reports/logs/m7-track-rt0-cortex-m7.log),
 [on](../../docs/reports/logs/m7-track-rt1-cortex-m7.log)). The scalar suppression compares the responses' bit patterns
 rather than the floats, which order the same way because a response is never negative, and
 which a Cortex-M branches on without moving flags out of the FPU. And the pool orders its
-candidates by one 64-bit compare. Over the sequence `detect` went from 1,410,239 cycles a
-frame to the 1,195,793 above, while its pool shrank from 240 KB to 64 KB and 34 of the 82
-detections sweep more than once.
+candidates by one 64-bit compare. Over the sequence those took `detect` from 1,410,239
+cycles a frame to 1,195,793, while its pool shrank from 240 KB to 64 KB and 34 of the 82
+detections sweep more than once; the sweep's skip of empty groups (below, under the grid's
+top-up) then took it to the 1,083,175 above.
 
 ### Derivatives where they are read
 
-The derivative ladders are 275,040 of the 512,600 bytes, and nothing reads them but the
+The derivative ladders are 275,040 of the 511,848 bytes, and nothing reads them but the
 tracker's window staging and the detector's sweep. Both can make what they read instead:
 `LKLevelOnDemand` ([ops/opticalFlowOnDemand.hpp](../../include/bincv/ops/opticalFlowOnDemand.hpp))
 stages each window's derivative words from the previous frame as it stages the window, and
@@ -489,22 +492,21 @@ sweep reaches them. The stored form stays the default; a caller picks by what it
 
 | | stored derivatives | made where read | |
 |---|---|---|---|
-| everything the pipeline holds, bytes | 512,600 | 238,712 | −53% |
-| derivatives, cycles per frame | 459,037 | 0 | |
-| detect | 1,195,793 | 1,219,740 | |
-| track | 10,817,140 | 11,299,519 | |
-| **the frame** | **17,200,335** | **17,276,804** | |
+| everything the pipeline holds, bytes | 511,848 | 237,960 | −54% |
+| derivatives, cycles per frame | 452,329 | 0 | |
+| detect | 1,083,175 | 1,115,154 | |
+| track | 10,971,235 | 11,161,012 | |
+| **the frame** | **15,866,680** | **15,654,503** | |
 | integer digests, points | equal, bit-identical | equal, bit-identical | |
 
-Making the derivatives where they are read costs tracking 4.5% and detection 2.0% — 506,000
-cycles a frame between them — against the 459,037 the derivative stage no longer takes, so
-the frame is 0.4% slower for holding less than half: 1,152 bytes of gradient rows replace
-275,040 of ladders, and the measured stack is smaller too, 7,708 bytes against 8,420. (The
-tracking difference was 0.6% before the conversions were narrowed. The arm measures the same
-in each image on its own — 1.047× stored, 1.054× on demand
+Making the derivatives where they are read costs tracking 1.7% and detection 3.0% — 222,000
+cycles a frame between them — against the 452,329 the derivative stage no longer takes, so
+the frame is 1.3% faster for holding less than half: 1,152 bytes of gradient rows replace
+275,040 of ladders, and the measured stack is smaller too, 7,724 bytes against 8,492. How
+much the tracking pays moves with where each build puts its code: one arm, the narrowed
+conversions, measures 1.069× in the stored image and 1.055× on demand
 ([off](../../docs/reports/logs/m7-track-ondemand-nc0-cortex-m7.log),
-[on](../../docs/reports/logs/m7-track-ondemand-nc1-cortex-m7.log)) — so the rest is where
-the two builds put their code.) The
+[on](../../docs/reports/logs/m7-track-ondemand-nc1-cortex-m7.log)). The
 window must stage — a word wide and `kStagedMaxRows` tall — or every point is reported lost.
 
 ### Detection on a grid
@@ -519,20 +521,21 @@ it is a different tracker; the table is what a caller choosing between them weig
 
 | | `goodFeaturesToTrackStreaming` | `gridCorners` |
 |---|---|---|
-| everything the pipeline holds, bytes | 238,712 | **175,936** |
+| everything the pipeline holds, bytes | 237,960 | **175,184** |
 | detections | 82 | 51 |
-| cycles a detection | 25.4 M, 1 to 3 sweeps | **15.6 M, one sweep** |
-| detect, cycles per frame | 1,219,740 | 464,657 |
+| cycles a detection | 23.2 M, 1 to 3 sweeps | **13.3 M, one sweep** |
+| detect, cycles per frame | 1,115,154 | 398,372 |
 | points tracked over the sequence | 159,510 | 199,970 |
-| track, cycles per frame | 11,299,519 | 14,079,219 |
-| **the frame** | **17,276,804** (36.0 ms) | **19,325,003** (40.3 ms) |
+| track, cycles per frame | 11,161,012 | 13,643,413 |
+| **the frame** | **15,654,503** (32.6 ms) | **17,416,095** (36.3 ms) |
 | tracks observed, median lifetime, survival | 10,286, 11 frames, 96.5% | 9,716, 14 frames, 96.6% |
 | integer digests, points | equal, bit-identical | equal, bit-identical |
 
 The grid drops the 64 KB pool for 2,760 bytes of slots, never sweeps twice, and its tracks
 live longer, so it detects less often. Its frame costs more because each detection fills the
 cap — 200 corners where the spacing walk often finds fewer — so a quarter more points are
-tracked; per point tracked the cost is the same, 121 thousand cycles either way.
+tracked; per point tracked the cost is about the same, 120 thousand cycles on demand and 117
+thousand on the grid.
 
 **A top-up skips the cells it has.** This tracker re-detects from nothing when too few tracks
 survive; a frontend that keeps its tracks instead detects in the cells they leave empty,
@@ -546,7 +549,7 @@ frames):
 
 | | `skipFullCells` off | on | |
 |---|---|---|---|
-| a top-up detection, cycles | 19,353,816 | 14,332,155 | 1.35× |
+| a top-up detection, cycles | 17,786,821 | 12,567,803 | 1.42× |
 | corners over the 299 frames | 41,631 | 41,631 | |
 | frames whose corners differ | | 0 | |
 
@@ -554,6 +557,25 @@ The two settings mean different things — with it on, the relative threshold is
 the strongest response in the open cells rather than in the frame — and on these frames they
 returned the same corners every time; `GridCorners.SkipFullCellsIsTheMaskOfOpenCells` holds
 the setting to the mask it stands for. What it saves grows with the share of cells full.
+
+**The sweep reads only the groups that can hold a corner** (`BINCV_CORNER_GROUP_SKIP`, on by
+default on M-profile, switchable with `SET gs`). The bit-sliced response already knows which
+eight-pixel groups have no gradient anywhere in their window, since it skips their gather, and
+it now hands that on as a bitmap: the running maximum and the suppression walk only the groups
+that may be non-zero, adjacent ones merged into one run. A zero response is never a candidate
+while the running threshold is non-negative, and while it is negative the sweep reads every
+pixel, so the work changes and the corners do not. The same 299 frames, in one image
+([off](../../docs/reports/logs/m7-track-grid-topup-gs0-cortex-m7.log),
+[on](../../docs/reports/logs/m7-track-grid-topup-cortex-m7.log)):
+
+| a top-up detection, cycles | every pixel | marked groups | |
+|---|---|---|---|
+| `skipFullCells` on | 14,126,067 | 12,567,803 | 1.12× |
+| `skipFullCells` off | 18,726,614 | 17,786,821 | 1.05× |
+
+It costs 4,944 bytes of flash in this image (4,584 in the stored tracker's), measured by
+building without it, and 192 bytes of stack; `Corner.GroupSkipIsTheSweepThatReadsEveryPixel`
+holds it to the sweep that reads every pixel, over every form and three kinds of mask.
 
 ### What this does not claim
 
@@ -571,21 +593,62 @@ On a core with no vector unit the widest arithmetic is the ARMv7E-M DSP extensio
 byte lanes in a general register. The median and the edge threshold each have an arm on it
 (`__ARM_FEATURE_SIMD32`, the compiler's own macro; switchable at run time like every vector
 arm): a byte min or max is `usub8` then `sel`, an absolute difference two `uqsub8`, and
-`usub8` against the threshold leaves each lane's answer in its GE flag, which one `sel` and
-one multiply gather into four bits.
+`usub8` against the threshold leaves each lane's answer in its GE flag.
 
-`bincv_m7_sensor` runs every row of both parts with the arms on and off and compares them
+### What an instruction costs here
+
+`bincv_m7_cycles` times single instructions in blocks of 32
+([log](../../docs/reports/logs/m7-cycles-cortex-m7-launches.log)). Three of its rows shaped the
+arms:
+
+- **An unaligned word load takes 3 cycles**, where aligned ones issue two a cycle. The edge
+  test reads each pixel's left and right neighbours, a byte either side, so two such loads
+  per four pixels were a quarter of the row.
+- **A DSP SIMD instruction issues one a cycle, and `uqsub8` takes two to deliver** where
+  `usub8` and `sel` take one. Forms that trade the GE flags for saturating arithmetic have
+  fewer instructions and measured slower.
+- **An immediate shift, and an `orr` with a shifted operand, issue beside a DSP
+  instruction.** So the word one byte along, `(c >> 8) | (q << 24)`, costs no DSP slot.
+
+### The edge test on aligned rows
+
+When the three rows are 4-byte aligned and the width is a multiple of 8, the edge row takes
+each pixel's neighbours out of the middle row's own aligned words by those shifts, keeps its
+thresholds on the GE flags, and gathers eight pixels' bits at once: `sel` picks each lane's
+bit out of a constant and one `usad8` sums the four lanes into a byte. Any other row takes
+the unaligned arm, so the switch (`impl::edgeAlignedRowEnabled`) must make no difference on a
+row a byte off alignment, and it does not (below). GCC's scheduling pass before register
+allocation makes this loop spill, so the row is compiled with that pass off: 1.19× on the row.
+1,196 bytes of flash.
+
+### The stream reads the caller's rows where they are
+
+A push no longer copies the rows it is given: the medians read them in place, and only the
+rows the next push's first median still reaches back to are kept — for the reference's L the
+last one, one row in sixteen when rows arrive sixteen at a time. The stream holds four rows
+instead of five, 3,008 bytes at 752 wide, and each starts on a word boundary when its scratch
+does, so the edge rows it hands over take the aligned arm.
+
+### Speed
+
+`bincv_m7_sensor` runs every row of both parts, and the aligned edge arm over all four of its
+predicates at thirteen thresholds either side of 0, 128 and 255, against the portable arms
 before it times anything; 0 values differ
 ([log](../../docs/reports/logs/m7-sensor-cortex-m7-launches.log)). Cycles for 480 rows of 752,
 median of 5:
 
 | | portable | DSP arm | |
 |---|---|---|---|
-| median rows | 4,334,880 | 1,211,778 | 3.58× |
-| edge rows | 8,953,198 | 2,268,987 | 3.95× |
-| the stream, both together | 12,803,171 | 3,555,291 | 3.60× |
+| median rows | 3,971,729 | 1,179,948 | 3.37× |
+| edge rows, the unaligned arm | 7,535,762 | 2,306,336 | 3.27× |
+| edge rows, the aligned arm | | **1,393,790** | 1.65× the unaligned |
+| edge rows a byte off alignment, aligned arm on / off | | 2,455,138 / 2,454,348 | its gate excludes them |
+| the stream, a row a push from rows in the cache | 12,700,726 | 2,872,800 | 4.42× |
+| **the stream, sixteen rows a push from a frame** | 12,374,149 | **2,694,698** | 4.59× |
 
-The tracker runs with them on, and its digests hold to the host's.
+The last row is the shape of a caller whose rows arrive in blocks and are checked as they
+land: each block of the frame is read once before it is pushed. In the tracker the stage went
+from 4,246,284 to 2,879,702 cycles a frame, 1.47× (section 3).
 
 ## 5. Sparse stereo
 

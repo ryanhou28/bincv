@@ -498,7 +498,11 @@ inline CornerResult gridCorners(const GradientSource<N, WordType>& src,
             magY[0][w] = static_cast<WordType>(magY[0][w] & k);
         }
     };
+#if BINCV_CORNER_GROUP_SKIP
+    const auto rowAt = [&](int yi, float* dst, const auto&... groups) {
+#else
     const auto rowAt = [&](int yi, float* dst) {
+#endif
         const size_t y = static_cast<size_t>(yi);
         const size_t need = y + 1 < height ? y + 1 : height - 1;
         while (derived <= need) derive(derived++);
@@ -514,8 +518,13 @@ inline CornerResult gridCorners(const GradientSource<N, WordType>& src,
             sxr[k] = ok ? rowOf(slot, 0, N) : nullptr;
             syr[k] = ok ? rowOf(slot, 1, N) : nullptr;
         }
+#if BINCV_CORNER_GROUP_SKIP
+        impl::cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width,
+                                                       y > 0 && y + 1 < height, dst, groups...);
+#else
         impl::cornerMinEigenValRowSlicedRows<WordType>(mxr, myr, sxr, syr, width,
                                                        y > 0 && y + 1 < height, dst);
+#endif
     };
     const GoodFeaturesParams sweepParams = impl::gridSweepParams(params);
     if (skip) {

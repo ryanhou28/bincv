@@ -1,0 +1,99 @@
+# launch sweep -- 3 system resets of one firmware image
+# benchmark: bincv_m7_cycles CYCLES
+# launches: 3
+# arch:     cortex-m7
+# host:     NUCLEO-H753ZI (STM32H753ZI)
+# compiler: arm-none-eabi-g++ (Arm GNU Toolchain 14.2.Rel1 (Build arm-14.52)) 14.2.1 20241119
+# commit:   a478569 (dirty)
+# sources:  include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 targets/stm32h753/bincv_m7_cycles.cpp=8fcb8a7c21f8 targets/stm32h753/board.c=ab5621aa2813 targets/stm32h753/board.h=3967e62ac995 targets/stm32h753/m7_harness.cpp=a308cda46d25 targets/stm32h753/m7_harness.hpp=4ae6cf7e2678 targets/stm32h753/startup.c=db5771d4d7f2 targets/stm32h753/string.c=85ca2e9bf016 targets/stm32h753/syscalls.c=cc70640148f0
+# image:    targets/stm32h753/bincv_m7_cycles.bin sha256 e3b497d7644c
+# board:    HELLO bincv-m7 image=cycles proto=1 clock_hz=480000000 baud=4000000 stack_bytes=16384 caches=ID
+# clock:    CLOCK configured_hz=480000000 measured_hz=479401281
+# date:     2026-10-12T23:28:53-07:00
+# Each launch is a system reset: caches, stack and statics start cold.
+# NO launch is discarded.
+
+### run 1
+CLOCK configured_hz=480000000 measured_hz=479468069
+OK
+-- cycles per instruction x100, 64 x 32 instructions, best of 3 --
+  orr, independent  53
+  orr, dependent  100
+  orr with a shifted operand, independent  100
+  lsr/lsl by an immediate, independent  56
+  uqsub8, independent  103
+  uqsub8, dependent  200
+  usub8, independent  103
+  usub8, dependent  103
+  sel, dependent  103
+  usub8 -> sel -> usub8 chain  103
+  uqsub8 with orr  53
+  uqsub8 with a shifted-operand orr  56
+  uqsub8 with usub8  103
+  pkhbt/pkhtb, independent  103
+  mul with orr  53
+  ldr, aligned  56
+  ldr, 1 byte off alignment  303
+  ldr, 2 bytes off alignment  303
+  ldrd, aligned  103
+  ldr with uqsub8  56
+  ldrb  53
+  str with uqsub8  56
+OK
+### run 2
+CLOCK configured_hz=480000000 measured_hz=479479913
+OK
+-- cycles per instruction x100, 64 x 32 instructions, best of 3 --
+  orr, independent  53
+  orr, dependent  100
+  orr with a shifted operand, independent  100
+  lsr/lsl by an immediate, independent  56
+  uqsub8, independent  103
+  uqsub8, dependent  200
+  usub8, independent  103
+  usub8, dependent  103
+  sel, dependent  103
+  usub8 -> sel -> usub8 chain  103
+  uqsub8 with orr  53
+  uqsub8 with a shifted-operand orr  56
+  uqsub8 with usub8  103
+  pkhbt/pkhtb, independent  103
+  mul with orr  53
+  ldr, aligned  56
+  ldr, 1 byte off alignment  303
+  ldr, 2 bytes off alignment  303
+  ldrd, aligned  103
+  ldr with uqsub8  56
+  ldrb  53
+  str with uqsub8  56
+OK
+### run 3
+CLOCK configured_hz=480000000 measured_hz=479324285
+OK
+-- cycles per instruction x100, 64 x 32 instructions, best of 3 --
+  orr, independent  53
+  orr, dependent  100
+  orr with a shifted operand, independent  100
+  lsr/lsl by an immediate, independent  56
+  uqsub8, independent  103
+  uqsub8, dependent  200
+  usub8, independent  103
+  usub8, dependent  103
+  sel, dependent  103
+  usub8 -> sel -> usub8 chain  103
+  uqsub8 with orr  53
+  uqsub8 with a shifted-operand orr  56
+  uqsub8 with usub8  103
+  pkhbt/pkhtb, independent  103
+  mul with orr  53
+  ldr, aligned  56
+  ldr, 1 byte off alignment  303
+  ldr, 2 bytes off alignment  303
+  ldrd, aligned  103
+  ldr with uqsub8  56
+  ldrb  53
+  str with uqsub8  56
+OK
+
+# date:     2026-10-12T23:28:56-07:00
+# done
