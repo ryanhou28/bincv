@@ -5,27 +5,38 @@
 // five accumulators are doubles, double addition is not associative, and any
 // warp- or block-level reduction sums them in an order the host did not use.
 // That changes their last bits, which changes `q`, which can change the
-// converged position and can flip a corner between refined, clamped and
-// diverged. A serial per-thread walk in the host's row-major, LSB-first order is
-// the only shape that agrees by construction.
+// converged position and can flip a corner between refined, singular, outside
+// and diverged. A serial per-thread walk in the host's row-major, column-ascending
+// order is the only shape that agrees by construction.
 //
-// TWO WINDOW ARMS, held to one answer. The default visits SET BITS: `nz = |dx| |
-// |dy|` a word at a time, trimmed to the window's columns, peeled low-first with
-// __ffs. The reference arm visits every pixel of the window and looks its bits
-// up. They are bit-identical rather than nearly so, and the reason is worth
-// stating: the pixels the skip removes contribute exactly zero to all five
-// accumulators, every accumulator starts at +0.0 and can only reach -0.0 by
-// adding -0.0 to -0.0, so adding the skipped terms is an exact no-op.
+// THE WINDOW IS SAMPLED AT THE SUB-PIXEL POSITION, as the host samples it: each
+// sample blends the four integer pixels around it, row by row, with the weights of
+// the position's fractional part, and the rows a window reads are staged once per
+// integer cell as 32-bit spans carrying cv::getRectSubPix's replicated border. The
+// host looks each row's half of the blend up in a table; this computes it. The two
+// are the same bits, because every product in the blend is a weight times -1, 0 or
+// +1, which is exact.
 //
-// THIS FILE IS COMPILED -fmad=false (backends/cuda/CMakeLists.txt). `bx += xx*px
-// + xy*py` has two multiplies and an add, `xx*px` rounds, and nvcc's default
-// -fmad=true would contract it where the host cannot. `det = gxx*gyy - gxy*gxy`
-// is the same shape. `gxx += w*gx*gx` is immune because `gx` is in {-1, 0, +1}
-// and the product is exact -- so the flag is covering three expressions, not
-// waved at the file.
+// TWO WINDOW ARMS, held to one answer, and ONE CODE PATH. The default visits
+// CANDIDATES: samples one of whose four neighbours has a gradient, found a word at
+// a time and peeled low-first with __ffs. The reference arm ORs the whole window
+// into that candidate set, so it visits every sample through the same loop -- the
+// switch changes which samples run and nothing about how, which is what lets its
+// gate-excluded control read 1.00x. The arms are bit-identical rather than nearly
+// so, and the reason is worth stating: the samples the skip removes contribute
+// exactly zero to all five accumulators, every accumulator starts at +0.0 and can
+// only reach -0.0 by adding -0.0 to -0.0, so adding the skipped terms is an exact
+// no-op.
+//
+// THIS FILE IS COMPILED -fmad=false (backends/cuda/CMakeLists.txt). The window's
+// gradient is a blend, not -1, 0 or +1, so `gxx += gx*gx*m` rounds its product
+// before the add on the host and would not under nvcc's default contraction;
+// `bx += xx*px + xy*py`, `det = gxx*gyy - gxy*gxy` and the position update are the
+// same shape.
 
 #include "bincv/cuda/subpix.hpp"
 
+#include <cfloat>
 #include <cstdint>
 
 #include "bincv/impl/kernel_util.hpp"
@@ -39,6 +50,9 @@ namespace {
 /// @brief The spread launch's block, in threads. One warp.
 constexpr unsigned kSpreadThreads = 32u;
 
+/// @brief The most rows, and columns, a window reads: `2 * kMaxWinHalf + 2`.
+constexpr int kSpanRows = 2 * bincv::impl::kMaxWinHalf + 2;
+
 struct SubPixViews {
     DeviceBinMatConstView magX;
     DeviceBinMatConstView magY;
@@ -46,155 +60,196 @@ struct SubPixViews {
     DeviceBinMatConstView signY;
 };
 
-/// @brief The five weighted sums over one window, accumulated in the host's
-/// exact order: rows top to bottom, columns left to right.
-/// @tparam Skip true for the set-bit arm, false for the dense reference arm.
-template <bool Skip>
-__device__ void accumulate(const SubPixViews& v, const double* mask, int winHalf, long long ix0,
-                           long long iy0, double& gxx, double& gxy, double& gyy, double& bx,
-                           double& by) {
-    const int side = 2 * winHalf + 1;
-    const size_t xLo = static_cast<size_t>(ix0 - winHalf);
-    const size_t xHi = static_cast<size_t>(ix0 + winHalf);  // inclusive
-
-    for (int wy = -winHalf; wy <= winHalf; ++wy) {
-        const size_t y = static_cast<size_t>(iy0 + wy);
-        const double* mrow = mask + static_cast<size_t>(wy + winHalf) * static_cast<size_t>(side);
-        const uint32_t* mx = v.magX.row(y);
-        const uint32_t* my = v.magY.row(y);
-        const uint32_t* sx = v.signX.row(y);
-        const uint32_t* sy = v.signY.row(y);
-
-        for (size_t wi = xLo / 32; wi <= xHi / 32; ++wi) {
-            // Which pixels of this word are inside the window's columns. `wi`
-            // may span either end.
-            const size_t lo = (wi * 32 > xLo) ? 0 : (xLo - wi * 32);
-            const size_t hiExcl = (xHi >= (wi + 1) * 32) ? 32 : (xHi - wi * 32 + 1);
-
-            if (Skip) {
-                // A pixel with zero gradient in both axes adds nothing to any of
-                // the five sums, and this finds all of them a word at a time.
-                uint32_t nz = mx[wi] | my[wi];
-                if (lo != 0) nz &= ~bincv::impl::lowBitsMask<uint32_t>(lo);
-                if (hiExcl < 32) nz &= bincv::impl::lowBitsMask<uint32_t>(hiExcl);
-                while (nz != 0u) {
-                    const unsigned b = static_cast<unsigned>(__ffs(static_cast<int>(nz)) - 1);
-                    nz &= nz - 1u;
-                    const size_t x = wi * 32 + b;
-                    const int wx = static_cast<int>(static_cast<long long>(x) - ix0);
-                    const double w = mrow[static_cast<size_t>(wx + winHalf)];
-                    if (w == 0.0) continue;  // the zero zone
-                    const uint32_t bit = uint32_t{1} << b;
-                    double vx = (mx[wi] & bit) ? 1.0 : 0.0;
-                    double vy = (my[wi] & bit) ? 1.0 : 0.0;
-                    if (sx[wi] & bit) vx = -vx;
-                    if (sy[wi] & bit) vy = -vy;
-                    const double xx = w * vx * vx;
-                    const double xy = w * vx * vy;
-                    const double yy = w * vy * vy;
-                    const double px = static_cast<double>(wx);
-                    const double py = static_cast<double>(wy);
-                    gxx += xx;
-                    gxy += xy;
-                    gyy += yy;
-                    bx += xx * px + xy * py;
-                    by += xy * px + yy * py;
-                }
-            } else {
-                for (size_t b = lo; b < hiExcl; ++b) {
-                    const size_t x = wi * 32 + b;
-                    const int wx = static_cast<int>(static_cast<long long>(x) - ix0);
-                    const double w = mrow[static_cast<size_t>(wx + winHalf)];
-                    if (w == 0.0) continue;
-                    const uint32_t bit = uint32_t{1} << b;
-                    double vx = (mx[wi] & bit) ? 1.0 : 0.0;
-                    double vy = (my[wi] & bit) ? 1.0 : 0.0;
-                    if (sx[wi] & bit) vx = -vx;
-                    if (sy[wi] & bit) vy = -vy;
-                    const double xx = w * vx * vx;
-                    const double xy = w * vx * vy;
-                    const double yy = w * vy * vy;
-                    const double px = static_cast<double>(wx);
-                    const double py = static_cast<double>(wy);
-                    gxx += xx;
-                    gxy += xy;
-                    gyy += yy;
-                    bx += xx * px + xy * py;
-                    by += xy * px + yy * py;
-                }
+/// @brief Bits `[x, x + len)` of a plane row, `len <= 32`, read from the image's
+/// columns only: a column outside them reads 0, or -- `replicate` -- the edge
+/// column's bit. The host's `impl::subPixSpan`, over device words.
+__device__ uint32_t span(const uint32_t* row, long long x, unsigned len, long long width,
+                         bool replicate) {
+    const long long lo = x < 0 ? 0 : x;
+    const long long hi = (x + len < width) ? x + len : width;  // exclusive
+    uint64_t acc = 0;
+    if (lo < hi) {
+        size_t wi = static_cast<size_t>(lo) / 32u;
+        const unsigned off = static_cast<unsigned>(static_cast<size_t>(lo) % 32u);
+        const unsigned n = static_cast<unsigned>(hi - lo);
+        uint64_t v = static_cast<uint64_t>(row[wi]) >> off;
+        unsigned got = 32u - off;
+        while (got < n) {
+            v |= static_cast<uint64_t>(row[++wi]) << got;
+            got += 32u;
+        }
+        acc = (v & ((uint64_t{1} << n) - 1u)) << (lo - x);
+    }
+    if (replicate) {
+        if (x < 0 && (row[0] & 1u)) acc |= (uint64_t{1} << (-x)) - 1u;
+        if (x + len > width) {
+            const size_t last = static_cast<size_t>(width - 1);
+            if ((row[last / 32u] >> (last % 32u)) & 1u) {
+                acc |= ((uint64_t{1} << len) - 1u) & ~((uint64_t{1} << (width - x)) - 1u);
             }
         }
     }
+    return static_cast<uint32_t>(acc);
 }
 
-template <bool Skip>
-__global__ void subPixKernel(SubPixViews v, float* cornersXY, uint32_t count,
-                             const double* mask, int winHalf, int maxIterations, double eps2,
+/// @brief The rows one window reads, staged per integer cell: `dx` reads zero left
+/// and right of the image and the edge rows above and below it, `dy` the transpose.
+struct StagedRows {
+    uint32_t magX[kSpanRows], signX[kSpanRows], magY[kSpanRows], signY[kSpanRows];
+    long long x0, y0;
+    bool valid;
+};
+
+__device__ void stage(const SubPixViews& v, int winHalf, long long x0, long long y0,
+                      long long width, long long height, StagedRows& r) {
+    if (r.valid && r.x0 == x0 && r.y0 == y0) return;
+    const unsigned len = static_cast<unsigned>(2 * winHalf + 2);
+    const long long xLo = x0 - winHalf;
+    for (int i = 0; i < 2 * winHalf + 2; ++i) {
+        const long long y = y0 - winHalf + i;
+        const size_t yc = static_cast<size_t>(y < 0 ? 0 : (y >= height ? height - 1 : y));
+        r.magX[i] = span(v.magX.row(yc), xLo, len, width, false);
+        r.signX[i] = span(v.signX.row(yc), xLo, len, width, false);
+        if (y < 0 || y >= height) {
+            r.magY[i] = 0u;
+            r.signY[i] = 0u;
+        } else {
+            r.magY[i] = span(v.magY.row(static_cast<size_t>(y)), xLo, len, width, true);
+            r.signY[i] = span(v.signY.row(static_cast<size_t>(y)), xLo, len, width, true);
+        }
+    }
+    r.x0 = x0;
+    r.y0 = y0;
+    r.valid = true;
+}
+
+/// @brief A staged pixel's value; a zero magnitude reads zero whatever its sign.
+__device__ double value(uint32_t mag, uint32_t sign, unsigned j) {
+    return ((mag >> j) & 1u) ? (((sign >> j) & 1u) ? -1.0 : 1.0) : 0.0;
+}
+
+struct Sums {
+    double gxx, gxy, gyy, bx, by;
+};
+
+/// @brief The five weighted sums over one window, accumulated in the host's exact
+/// order: rows top to bottom, columns left to right.
+/// @param fill 0 for the candidate arm; the whole window for the dense reference arm,
+/// which visits every sample through the same loop.
+__device__ Sums accumulate(const StagedRows& r, const float* mask, int winHalf, bool integer,
+                           uint32_t fill, double w00, double w10, double w01, double w11) {
+    Sums s{0.0, 0.0, 0.0, 0.0, 0.0};
+    const int side = 2 * winHalf + 1;
+    const uint32_t inWindow = static_cast<uint32_t>((uint64_t{1} << side) - 1u);
+    for (int i = 0; i < side; ++i) {
+        const double py = static_cast<double>(i - winHalf);
+        uint32_t cand;
+        if (integer) {
+            cand = r.magX[i] | r.magY[i];
+        } else {
+            const uint32_t m = r.magX[i] | r.magY[i] | r.magX[i + 1] | r.magY[i + 1];
+            cand = m | (m >> 1);
+        }
+        cand = (cand | fill) & inWindow;
+        while (cand != 0u) {
+            const unsigned j = static_cast<unsigned>(__ffs(static_cast<int>(cand)) - 1);
+            cand &= cand - 1u;
+            double gx, gy;
+            if (integer) {
+                gx = value(r.magX[i], r.signX[i], j);
+                gy = value(r.magY[i], r.signY[i], j);
+            } else {
+                gx = (w00 * value(r.magX[i], r.signX[i], j) +
+                      w10 * value(r.magX[i], r.signX[i], j + 1)) +
+                     (w01 * value(r.magX[i + 1], r.signX[i + 1], j) +
+                      w11 * value(r.magX[i + 1], r.signX[i + 1], j + 1));
+                gy = (w00 * value(r.magY[i], r.signY[i], j) +
+                      w10 * value(r.magY[i], r.signY[i], j + 1)) +
+                     (w01 * value(r.magY[i + 1], r.signY[i + 1], j) +
+                      w11 * value(r.magY[i + 1], r.signY[i + 1], j + 1));
+            }
+            const double m = static_cast<double>(mask[i * side + static_cast<int>(j)]);
+            const double px = static_cast<double>(static_cast<int>(j) - winHalf);
+            const double xx = gx * gx * m;
+            const double xy = gx * gy * m;
+            const double yy = gy * gy * m;
+            s.gxx += xx;
+            s.gxy += xy;
+            s.gyy += yy;
+            s.bx += xx * px + xy * py;
+            s.by += xy * px + yy * py;
+        }
+    }
+    return s;
+}
+
+__global__ void subPixKernel(SubPixViews v, float* cornersXY, uint32_t count, const float* mask,
+                             int winHalf, int maxIterations, double eps2, uint32_t fill,
                              DeviceSubPixResult* result) {
     const uint32_t c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= count) return;
 
     const long long width = static_cast<long long>(v.magX.width);
     const long long height = static_cast<long long>(v.magX.height);
+    const float widthF = static_cast<float>(width);
+    const float heightF = static_cast<float>(height);
+    const float startX = cornersXY[2 * static_cast<size_t>(c)];
+    const float startY = cornersXY[2 * static_cast<size_t>(c) + 1];
+    if (!(startX >= 0.0f && startX < widthF && startY >= 0.0f && startY < heightF)) {
+        atomicAdd(&result->outside, 1u);
+        return;
+    }
 
-    const double startX = static_cast<double>(cornersXY[2 * static_cast<size_t>(c)]);
-    const double startY = static_cast<double>(cornersXY[2 * static_cast<size_t>(c) + 1]);
-    double cx = startX;
-    double cy = startY;
+    StagedRows rows;
+    rows.valid = false;
+    float cx = startX;
+    float cy = startY;
+    uint32_t* outcome = &result->refined;
+    int iter = 0;
+    double err = 0.0;
+    do {
+        const float fx = floorf(cx);
+        const float fy = floorf(cy);
+        const long long x0 = static_cast<long long>(fx);
+        const long long y0 = static_cast<long long>(fy);
+        const double a = static_cast<double>(cx - fx);
+        const double b = static_cast<double>(cy - fy);
+        stage(v, winHalf, x0, y0, width, height, rows);
+        const Sums s = accumulate(rows, mask, winHalf, a == 0.0 && b == 0.0, fill,
+                                  (1.0 - a) * (1.0 - b), a * (1.0 - b), (1.0 - a) * b, a * b);
 
-    for (int it = 0; it < maxIterations; ++it) {
-        // The window is anchored on the ROUNDED position: a bit-plane derivative
-        // cannot be interpolated, so the samples are integer pixels and the
-        // refinement is the offset within them. The host says the same.
-        const long long ix0 = static_cast<long long>(floor(cx + 0.5));
-        const long long iy0 = static_cast<long long>(floor(cy + 0.5));
-        if (ix0 - winHalf < 0 || iy0 - winHalf < 0 || ix0 + winHalf >= width ||
-            iy0 + winHalf >= height) {
-            atomicAdd(&result->clamped, 1u);
+        const double det = s.gxx * s.gyy - s.gxy * s.gxy;
+        if (fabs(det) <= DBL_EPSILON * DBL_EPSILON) {
+            outcome = &result->singular;
             break;
         }
-
-        double gxx = 0.0, gxy = 0.0, gyy = 0.0, bx = 0.0, by = 0.0;
-        accumulate<Skip>(v, mask, winHalf, ix0, iy0, gxx, gxy, gyy, bx, by);
-
-        const double det = gxx * gyy - gxy * gxy;
-        if (det == 0.0) {
-            atomicAdd(&result->singular, 1u);
-            break;
-        }
-        const double qx = (gyy * bx - gxy * by) / det;
-        const double qy = (gxx * by - gxy * bx) / det;
-        // Outside the window is a divergence, not an answer -- OpenCV's rule.
-        if (fabs(qx) > static_cast<double>(winHalf) || fabs(qy) > static_cast<double>(winHalf)) {
-            atomicAdd(&result->clamped, 1u);
-            break;
-        }
-
-        const double nx = static_cast<double>(ix0) + qx;
-        const double ny = static_cast<double>(iy0) + qy;
-        const double stepX = nx - cx;
-        const double stepY = ny - cy;
+        const double scale = 1.0 / det;
+        const float nx = static_cast<float>(static_cast<double>(cx) + s.gyy * scale * s.bx -
+                                            s.gxy * scale * s.by);
+        const float ny = static_cast<float>(static_cast<double>(cy) - s.gxy * scale * s.bx +
+                                            s.gxx * scale * s.by);
+        const float ex = nx - cx;
+        const float ey = ny - cy;
+        err = static_cast<double>(ex * ex + ey * ey);
         cx = nx;
         cy = ny;
-        cornersXY[2 * static_cast<size_t>(c)] = static_cast<float>(cx);
-        cornersXY[2 * static_cast<size_t>(c) + 1] = static_cast<float>(cy);
-        if (stepX * stepX + stepY * stepY <= eps2) {
-            atomicAdd(&result->refined, 1u);
+        if (cx < 0.0f || cx >= widthF || cy < 0.0f || cy >= heightF) {
+            outcome = &result->outside;
             break;
         }
-        if (it + 1 == maxIterations) atomicAdd(&result->refined, 1u);
-    }
+    } while (++iter < maxIterations && err > eps2);
 
     // POOR CONVERGENCE -- cv::cornerSubPix's rule, applied after the loop exactly
-    // as it applies it. A point that has walked further than its own half-window
-    // from the seed has been captured by different structure, and the seed is the
-    // better answer.
-    if (fabs(cx - startX) > static_cast<double>(winHalf) ||
-        fabs(cy - startY) > static_cast<double>(winHalf)) {
-        cornersXY[2 * static_cast<size_t>(c)] = static_cast<float>(startX);
-        cornersXY[2 * static_cast<size_t>(c) + 1] = static_cast<float>(startY);
-        atomicAdd(&result->diverged, 1u);
+    // as it applies it.
+    const float limit = static_cast<float>(winHalf);
+    if (fabsf(cx - startX) > limit || fabsf(cy - startY) > limit) {
+        cx = startX;
+        cy = startY;
+        outcome = &result->diverged;
     }
+    cornersXY[2 * static_cast<size_t>(c)] = cx;
+    cornersXY[2 * static_cast<size_t>(c) + 1] = cy;
+    atomicAdd(outcome, 1u);
 }
 
 bool viewsAgree(const SubPixViews& v) {
@@ -229,20 +284,20 @@ DeviceSubPixMask::DeviceSubPixMask(const SubPixParams& params) {
     winHalf_ = params.winHalf;
     zeroHalf_ = params.zeroHalf;
     const size_t side = static_cast<size_t>(2 * winHalf_ + 1);
-    // THE HOST'S OWN MASK BUILDER. CUDA's exp(double) is documented at 1-2 ulp
-    // where glibc's is about 0.5, so a device-built mask is not required to be
-    // the same weights -- and one ulp of weight lands in the accumulators.
-    double host[(2 * bincv::impl::kMaxWinHalf + 1) * (2 * bincv::impl::kMaxWinHalf + 1)];
+    // THE HOST'S OWN MASK BUILDER. CUDA's expf is not required to round as the
+    // host's C library does, so a device-built mask is not required to be the same
+    // weights -- and one ulp of weight lands in the accumulators.
+    float host[(2 * bincv::impl::kMaxWinHalf + 1) * (2 * bincv::impl::kMaxWinHalf + 1)];
     bincv::impl::subPixMask(winHalf_, zeroHalf_, host);
-    mask_ = DeviceArray<double>(side * side);
-    BINCV_CUDA_CHECK(cudaMemcpy(mask_.data(), host, side * side * sizeof(double),
+    mask_ = DeviceArray<float>(side * side);
+    BINCV_CUDA_CHECK(cudaMemcpy(mask_.data(), host, side * side * sizeof(float),
                                 cudaMemcpyHostToDevice));
 }
 
 cudaError_t cornerSubPixAsync(DeviceBinMatConstView magX, DeviceBinMatConstView magY,
                               DeviceBinMatConstView signX, DeviceBinMatConstView signY,
                               float* cornersXY, uint32_t count, const SubPixParams& params,
-                              const double* mask, DeviceSubPixResult* result,
+                              const float* mask, DeviceSubPixResult* result,
                               cudaStream_t stream) {
     const SubPixViews v{magX, magY, signX, signY};
     BINCV_ASSERT(viewsAgree(v),
@@ -275,14 +330,18 @@ cudaError_t cornerSubPixAsync(DeviceBinMatConstView magX, DeviceBinMatConstView 
     // per instruction, which is the trade running the wrong way.
     const unsigned threads = impl::subPixSpreadEnabled() ? kSpreadThreads : 256u;
     const dim3 grid((count + threads - 1u) / threads);
-    const double eps2 = params.epsilon * params.epsilon;
-    if (impl::subPixSkipEnabled()) {
-        subPixKernel<true><<<grid, threads, 0, stream>>>(
-            v, cornersXY, count, mask, params.winHalf, params.maxIterations, eps2, result);
-    } else {
-        subPixKernel<false><<<grid, threads, 0, stream>>>(
-            v, cornersXY, count, mask, params.winHalf, params.maxIterations, eps2, result);
-    }
+    // cv::cornerSubPix's own normalizations, as the host makes them.
+    const int maxIterations =
+        params.maxIterations < 1
+            ? 1
+            : (params.maxIterations > bincv::impl::kSubPixMaxIterations
+                   ? bincv::impl::kSubPixMaxIterations
+                   : params.maxIterations);
+    const double eps = params.epsilon > 0.0 ? params.epsilon : 0.0;
+    const double eps2 = eps * eps;
+    const uint32_t fill = impl::subPixSkipEnabled() ? 0u : ~0u;
+    subPixKernel<<<grid, threads, 0, stream>>>(v, cornersXY, count, mask, params.winHalf,
+                                               maxIterations, eps2, fill, result);
     return cudaGetLastError();
 }
 
