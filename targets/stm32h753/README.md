@@ -39,7 +39,7 @@ changes, and one image compiling every kernel would age every figure on every ed
 | `bincv_m7_cycles` | `CYCLES` | what single instructions cost on this core: the model the DSP arms are written against (section 4) |
 | `bincv_m7_stereo` | `STEREO` | sparse stereo by stage, its arms off and on (section 5) |
 | `bincv_m7_essential` | `ESSENTIAL`, `ESSENTIALDUMP` | the five-point RANSAC, scoring both ways; the models and masks in full (section 6) |
-| `bincv_m7_subpix` | `SUBPIX`, `SUBPIXDUMP` | `cornerSubPix`, with and without reuse; the points in full (section 7) |
+| `bincv_m7_subpix` | `SUBPIX`, `SUBPIXDUMP` | `cornerSubPix`; the points in full (section 7) |
 | `bincv_m7_lkstages` | `TRACK` | diagnostic only, never a published figure: `track` by stage |
 
 `m7_reference` (a host benchmark) prints what the `*DUMP` commands print, from the same
@@ -886,34 +886,26 @@ that is the operation's expensive case: its word-wise skip of flat pixels has li
 
 ### Against the host
 
-All 200 refined points are the host's to the bit, with contraction on and off
+All 200 refined points are the host's to the bit
 ([log](../../docs/reports/logs/m7-subpix-cortex-m7-launches.log)).
 
 ### Speed
 
-Cycles for the 200 corners, median of 5:
+Cycles for the 200 corners, median of 5: **95,147,856**, 475,739 a corner (198 ms at 480 MHz).
 
-| | cycles | per corner | |
-|---|---|---|---|
-| every iteration's sums computed (published) | 7,588,395 | 37,942 | |
-| an anchor's sums reused | 5,588,211 | 27,941 | 1.36× |
+**This is `cv::cornerSubPix`'s walk, and the walk is the cost.** The window is sampled at the
+sub-pixel position, as OpenCV samples it, and on this scene the walk runs 30.8 window sums a
+corner. The rounded-anchor kernel this image measured before ran 3.4: re-anchoring on the
+rounded position reaches a fixed point within a few steps, which is why it was cheap and why
+it was a different refinement (7,588,395 cycles, ending a median of 0.73 px from
+`cv::cornerSubPix` on real frames). A sample also costs a little more to reach — 114 of a
+window's 121 are visited against 84, since its blend reads one column and one row beyond its
+own — but not to compute: about 135 cycles of double-precision arithmetic each, against 131
+before.
 
-**An iteration that anchors where the previous one did reuses its sums**
-(`BINCV_SUBPIX_REUSE`, M-profile, `impl::subPixReuseEnabled`). The window, its weights and
-its offsets all hang off the rounded position, so the five sums are a function of the anchor
-alone, and the step that proves convergence is nearly always one that moved less than half
-a pixel: here 192 of the 688 window sums repeat their predecessor's anchor, one for each
-corner that converged. With no zero zone every weight is at least e⁻², so the per-pixel test
-for a zero weight is not made either. Both are exact on any build — nothing is recomputed
-differently, only not recomputed — and `SubPix.AnchorReuseIsBitExact` holds them to the
-published loop over 180 parameter sets. 205 bytes of flash.
-
-What remains is the double-precision arithmetic of each pixel with a gradient: about 50
-instructions, seven multiplies and two fused multiply-adds among them. Rewriting it could
-change what GCC fuses, and so the answer's last bits, and is not done.
-
-The Gaussian mask is a stack buffer sized for the largest window, 7,688 bytes whatever the
-window is — half of this harness's 16 KB stack.
+The Gaussian mask is a stack buffer sized for the largest window, 3,844 bytes whatever the
+window is, and the rows a window reads are staged in 792 more — together under a third of
+this harness's 16 KB stack.
 
 ### What sections 5 to 7 do not claim
 

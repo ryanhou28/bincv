@@ -143,7 +143,7 @@ behind on memory, and the report publishes both numbers.
 
 **`cornerSubPixAsync` has no row above**, because it has no `cv::cuda` counterpart. Its own
 test is whether the device arm is cheaper than the whole-plane download-and-refine round trip
-it replaces, and below roughly 450 corners it is not: refine on the host there.
+it replaces, and at 200 corners it is not: refine on the host there.
 [cuda.md](../../docs/reports/cuda.md#what-is-not-delivered) has the measurement.
 
 ## Three contracts a caller has to know

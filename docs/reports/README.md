@@ -83,7 +83,7 @@ Three rows carry a qualification a table cell cannot:
   in the table on x86-64, and a very tight one on the device, whose two arms scatter 0.4%
   and 0.6% across launches.
 
-`cornerSubPix` is measured on the device only: 13.8× [13.7, 13.8] against `cv::cornerSubPix`
+`cornerSubPix` is measured on the device only: 1.68× [1.67, 1.69] against `cv::cornerSubPix`
 ([features.md](features.md)); no x86-64 sweep of it exists, so it has no row here.
 
 ### Speed, GPU

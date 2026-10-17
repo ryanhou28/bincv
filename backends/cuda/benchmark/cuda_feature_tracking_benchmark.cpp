@@ -252,7 +252,7 @@ void rule() {
 "      memory and the host comparison, no GPU speed comparison is possible, and\n"
 "      NO GPU-vs-GPU number is quoted or implied.\n"
 "   GATE   byte-identical Point2f arrays (exact float compare, no tolerance) and\n"
-"          identical {refined, singular, clamped, diverged} (the suite).\n"
+"          identical {refined, singular, outside, diverged} (the suite).\n"
 "   DECIDES  not a standalone speed ratio -- 200 corners x 121-pixel windows is\n"
 "          microseconds and a standalone ratio is dominated by the launch floor.\n"
 "          The device arm ships if and only if it is CHEAPER THAN THE ROUND TRIP\n"
@@ -263,7 +263,7 @@ void rule() {
 "          binary. AND the baseline is priced BOTH WAYS, because 'pick the right\n"
 "          baseline' applies to the thing being replaced: the whole four-plane\n"
 "          download (180 KB) AND the narrower alternative of downloading only the\n"
-"          11-row bands around the corners. If the narrow one wins, it is the\n"
+"          12-row bands around the corners. If the narrow one wins, it is the\n"
 "          denominator.\n"
 "   MEMORY required to allocate NOTHING frame-sized at any winHalf up to\n"
 "          kMaxWinHalf. Binary, checkable, not a ratio.\n"
@@ -1017,7 +1017,8 @@ const uint32_t kFastCapacity = 16384;
             5, kRounds, gStream);
 
         // The narrower alternative, priced rather than assumed away: only the
-        // 11-row bands around the corners. One pitched copy per corner is the
+        // 12-row bands around the corners -- the window's 11 rows and the one below
+        // them, which the sub-pixel blend reads. One pitched copy per corner is the
         // shape a caller would actually write.
         const Timing bandDownload = timeKernel(
             [&] {
@@ -1028,7 +1029,7 @@ const uint32_t kFastCapacity = 16384;
                                           : 0;
                     cudaMemcpyAsync(host.data(),
                                     dmagX.constView().ptr + y0 * dmagX.constView().stride,
-                                    11 * rowBytes, cudaMemcpyDeviceToHost, gStream);
+                                    12 * rowBytes, cudaMemcpyDeviceToHost, gStream);
                 }
             },
             1, kRounds, gStream);
@@ -1056,7 +1057,7 @@ const uint32_t kFastCapacity = 16384;
                     " %-44s %9.3f ms  [kernel, 200 pitched copies]\n"
                     " %-44s %9.3f ms  [wall, host]\n",
                     "RIGHT four-plane download (180 KB)", wholeDownload.medianMs,
-                    "RIGHT 11-row bands around 200 corners", bandDownload.medianMs,
+                    "RIGHT 12-row bands around 200 corners", bandDownload.medianMs,
                     "RIGHT host cornerSubPix, same 200 corners", hostMs);
         std::printf("   LEFT %.4f ms   vs   RIGHT(whole planes) %.4f ms   -> %s\n"
                     "   LEFT %.4f ms   vs   RIGHT(bands)        %.4f ms   -> %s\n",
@@ -1159,14 +1160,17 @@ const uint32_t kFastCapacity = 16384;
                     "   thread is the bit-exactness requirement, so 200 corners are 7 warps\n"
                     "   of work; spread one warp per block they occupy 7 SMs at ONE warp\n"
                     "   each, and a single warp cannot keep an SM's two FP64 pipes busy --\n"
-                    "   measured, sm__inst_executed_pipe_fp64 reads 45.7%% of peak on the\n"
-                    "   active SMs. So the spread buys 7 x 0.457 = 3.20x where a naive\n"
+                    "   measured, sm__inst_executed_pipe_fp64 reads 48.2%% of peak on each\n"
+                    "   spread SM against 82.9%% on the packed arm's one. And the seven are\n"
+                    "   not equal work: a walk runs anywhere from 1 to 40 iterations, so the\n"
+                    "   slowest warp's SM is active 1.33x the mean (sm__cycles_active, max\n"
+                    "   over mean). 7 x (0.482 / 0.829) / 1.33 = 3.05x, where a naive\n"
                     "   reading of 'seven times the SMs' predicts 7x, and the arm ratio\n"
-                    "   above reads 3.18x. The remaining 2.2x needs a SECOND warp per SM,\n"
-                    "   which needs about 450 corners; at 200 there is not enough work to\n"
-                    "   fill the part and no launch geometry changes that.\n\n");
+                    "   above reads 3.06x. More needs a SECOND warp per SM, which needs\n"
+                    "   about 450 corners; at 200 there is not enough work to fill the\n"
+                    "   part and no launch geometry changes that.\n\n");
         printMemoryHeader("cornerSubPixAsync");
-        printAllocSum("Gaussian mask, winHalf 5", mask.size() * sizeof(double));
+        printAllocSum("Gaussian mask, winHalf 5", mask.size() * sizeof(float));
         printAllocSum("corner positions, 200", kSubPixCorners * 2 * sizeof(float));
         printAllocSum("result counters", sizeof(bc::DeviceSubPixResult));
         std::printf("   Frame-sized device bytes: 0, at every winHalf up to kMaxWinHalf.\n"

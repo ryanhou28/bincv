@@ -281,8 +281,11 @@ target_compile_definitions(test_stereo PRIVATE BINCV_STEREO_WINDOW_COUNT=1
 target_compile_definitions(test_essential PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
 target_compile_definitions(test_ransac PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
 target_compile_definitions(test_essential_known_rotation PRIVATE BINCV_RANSAC_SQUARED_TEST=1)
-# And for cornerSubPix's reuse of an anchor's sums: SubPix.AnchorReuseIsBitExact.
-target_compile_definitions(test_subpix PRIVATE BINCV_SUBPIX_REUSE=1)
+# cornerSubPix is held to its dense oracle, and to cv::cornerSubPix, on a real binarized
+# frame as well as on synthetic ones: the corners a detector finds in real content are
+# where a refinement that agrees on clean synthetic corners has been seen to part.
+target_compile_definitions(test_subpix PRIVATE
+    BINCV_REALFRAME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../benchmark/realframe.bin")
 
 # ---------------------------------------------------------------------------
 # A translation unit that MUST NOT COMPILE

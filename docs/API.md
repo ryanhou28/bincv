@@ -551,7 +551,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `SubPixParams` *(struct)* | 2 | `cv::cornerSubPix`'s `winSize`, `zeroZone` and `criteria`, in one struct |
 | `SubPixResult` *(struct)* | 3 | What `cornerSubPix` did, per corner |
-| `cornerSubPix` | 2 | Refines corner positions to sub-pixel accuracy |
+| `cornerSubPix` | 2 | Refines corner positions to sub-pixel accuracy: `cv::cornerSubPix` on the image the derivative planes were taken from |
 
 ## `ops/threshold.hpp`
 

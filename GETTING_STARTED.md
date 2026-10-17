@@ -209,13 +209,12 @@ Zbb; the rest are M-profile only:
 | `BINCV_STEREO_WINDOW_COUNT` | sparse stereo's refinement reads its windows once and counts down them in byte lanes | refinement 6.48× faster; 1,137 B |
 | `BINCV_STEREO_INTEGER_ROW_GATE` | sparse stereo's descriptor stage tests rows on the coordinates' bit patterns (M-profile) | descriptor stage 2.89× faster; 2,209 B |
 | `BINCV_RANSAC_SQUARED_TEST` | RANSAC decides an inlier in single precision under a proven error bound, then on squares, taking the root only near the threshold (M-profile) | scoring 1.66× faster, the estimation up to 1.11×; 1,914 B |
-| `BINCV_SUBPIX_REUSE` | `cornerSubPix` reuses the sums of an anchor it has already summed (M-profile) | 1.36× faster; 205 B |
 
 Each has a run-time switch (`impl::lkWindowCountEnabled`, `impl::lkNarrowConvertEnabled`,
 `impl::cornerRootTableEnabled`,
 `impl::stereoWindowCountEnabled`, `impl::stereoIntegerRowGateEnabled`,
-`impl::ransacSquaredTestEnabled` and `impl::ransacFloatScorerEnabled`,
-`impl::subPixReuseEnabled`) so one image can time both
+`impl::ransacSquaredTestEnabled` and `impl::ransacFloatScorerEnabled`) so one image can
+time both
 arms, and each gives the published code's output bit for bit. They change inline bodies,
 so like `BINCV_NO_NEON` a define must be the same in every translation unit.
 

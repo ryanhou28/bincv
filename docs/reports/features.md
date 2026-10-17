@@ -26,7 +26,8 @@ carries that code.
 Each pair is one measurement against the other, in the unit the row names, so the smaller
 number is the faster side. Taken at `05ab53c` on x86-64 and `80ff0a8` on aarch64 (both on
 `main` as `086428c`), except the bit-plane FAST row, taken at `550d45a` (on `main` as
-`cb995e7`), and the `goodFeaturesToTrack` row, taken at `6d74d57` (on `main` as `8729e05`).
+`cb995e7`), the `goodFeaturesToTrack` row, taken at `6d74d57` (on `main` as `8729e05`), and
+the `cornerSubPix` row, taken at `549e311`.
 
 | operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
@@ -37,7 +38,7 @@ number is the faster side. Taken at `05ab53c` on x86-64 and `80ff0a8` on aarch64
 | FAST, 8-bit, synthetic 752×480 (4144 corners) | `cv::FAST` | 0.3591 ms | 0.3446 ms | 1.04× [1.03, 1.05] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] |
 | FAST, bit-plane, EuRoC frame (6724 corners) | `cv::FAST` | 267.7 µs | 161.7 µs | 1.65× [1.64, 1.66] | 2051 µs | 865.2 µs | 2.37× [2.37, 2.37] |
 | `goodFeaturesToTrack` ‡ | `cv::goodFeaturesToTrack` (stock) | 8.807 ns/px | 6.368 ns/px | 1.38× [1.35, 1.43] | 58.34 ns/px | 24.10 ns/px | 2.42× [2.41, 2.42] |
-| `cornerSubPix` | `cv::cornerSubPix` | — | — | — (no sweep) | 8.595 ms | 0.6250 ms | 13.8× [13.7, 13.8] |
+| `cornerSubPix` | `cv::cornerSubPix` | — | — | — (no sweep) | 8.616 ms | 5.112 ms | 1.68× [1.67, 1.69] |
 
 † `cv::ORB::compute` also computes orientation and rotates its pattern per keypoint. It is
 not a like-for-like comparison and is printed for scale rather than claimed.
@@ -73,7 +74,10 @@ and says why stock is the denominator. The footprint's byte-count row leads with
 binarized pipeline because that side's buffers are read off the objects, where stock's can
 only be accounted; the second row is the accounted comparison. `cornerSubPix` refines the
 same seeds from its already-computed ternary derivatives against `cv::cornerSubPix` on the
-8-bit image, each side's own natural input.
+8-bit image, each side's own natural input, and the two run the same refinement: binCV
+samples the window at the sub-pixel position from those derivatives, and lands within
+rounding of OpenCV's answer ([subpix.hpp](../../include/bincv/ops/subpix.hpp) states the
+agreement; `subpix_agreement` measures it over a sequence).
 
 ## Optical flow
 
@@ -349,3 +353,4 @@ the figure stands.
 | 2026-09-22 | `goodFeaturesToTrack`, both columns | 0.737× x86-64, 1.368× aarch64 | 1.38× [1.35, 1.43], 2.42× [2.41, 2.42] | selection stage optimized (bit-pattern running maximum, counting-sort rank, spacing filter): binCV 11.310 → 6.368 ns/px on x86-64 and 43.337 → 24.10 on the device, denominators unchanged within their intervals |
 | 2026-09-23 | FAST bit-plane, x86-64 | 1.472× (180.85 µs) | 1.65× (161.7 µs) | the vector arm's runtime switch was read once per image row, keeping the scalar body live; read once per call |
 | 2026-09-29 | Lucas–Kanade, aarch64 column | 23.40 / 2.838 ms, 8.23× [8.19, 8.28]; `1/1/1/1` 0.6030 ms, 38.8× | 23.47 / 2.837 ms, 8.27× [8.20, 8.36]; 0.6070 ms, 38.7× | re-taken at `4c4b3bf` after the NEON covariance arm gained its runtime off-switch; every cell inside the previous interval |
+| 2026-10-17 | `cornerSubPix`, aarch64 | 13.8× [13.7, 13.8], 8.595 against 0.6250 ms | 1.68× [1.67, 1.69], 8.616 against 5.112 ms | the figure before was a different refinement: each iteration's window anchored on the rounded position, a mean 1.69 px from `cv::cornerSubPix` on this benchmark's corners, whose walks stopped after 3.8 window sums where OpenCV's run 25. binCV now samples the window at the sub-pixel position and runs OpenCV's walk; the cost is the iterations |

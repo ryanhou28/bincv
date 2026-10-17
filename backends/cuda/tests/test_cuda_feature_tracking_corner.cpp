@@ -1031,13 +1031,16 @@ void checkSubPixMatches(const BinMat<Word>& frame, const SubPixParams& params,
         }
         BINCV_CHECK_EQ(static_cast<size_t>(dr.refined), hr.refined);
         BINCV_CHECK_EQ(static_cast<size_t>(dr.singular), hr.singular);
-        BINCV_CHECK_EQ(static_cast<size_t>(dr.clamped), hr.clamped);
+        BINCV_CHECK_EQ(static_cast<size_t>(dr.outside), hr.outside);
         BINCV_CHECK_EQ(static_cast<size_t>(dr.diverged), hr.diverged);
     }
     bc::impl::subPixSkipEnabled() = true;
     bc::impl::subPixSpreadEnabled() = true;
 }
 
+/// Seeds on a grid, each on its pixel and again between pixels: a walk that starts on
+/// an integer position samples its first window at the pixels themselves, and one
+/// that starts between them blends from the first step.
 std::vector<Point2f> gridSeeds(size_t w, size_t h, int step) {
     std::vector<Point2f> seeds;
     for (size_t y = 0; y < h; y += static_cast<size_t>(step)) {
@@ -1045,6 +1048,9 @@ std::vector<Point2f> gridSeeds(size_t w, size_t h, int step) {
             Point2f p;
             p.x = static_cast<float>(x);
             p.y = static_cast<float>(y);
+            seeds.push_back(p);
+            p.x += 0.25f;
+            p.y += 0.625f;
             seeds.push_back(p);
         }
     }
@@ -1094,11 +1100,12 @@ BINCV_TEST(CudaSubPix, MatchesHostOnAllOnesWindowsWhereTheSkipSavesNothing) {
 
 BINCV_TEST(CudaSubPix, MatchesHostOnBordersAndEmptySets) {
     const BinMat<Word> frame = structuredBits(65, 33, 0x5A5A);
-    // Seeds whose window leaves the image: the host counts them `clamped` and
-    // leaves them where they were, and so must this.
+    // Seeds whose window reaches past the image: the host refines them over the
+    // replicated border, and so must this -- and seeds outside the image, which
+    // both leave where they are.
     std::vector<Point2f> seeds;
-    const float xs[] = {0.0f, 1.0f, 4.0f, 32.0f, 60.0f, 64.0f};
-    const float ys[] = {0.0f, 2.0f, 16.0f, 30.0f, 32.0f};
+    const float xs[] = {-1.0f, 0.0f, 0.5f, 1.0f, 4.25f, 32.0f, 60.0f, 63.75f, 64.0f, 65.0f};
+    const float ys[] = {-0.5f, 0.0f, 2.0f, 16.0f, 30.5f, 32.0f, 32.75f, 33.0f};
     for (float x : xs) {
         for (float y : ys) {
             Point2f p;
@@ -1145,11 +1152,10 @@ BINCV_TEST(CudaSubPix, RefusesOutsideItsDocumentedDomain) {
 }
 
 BINCV_TEST(CudaSubPix, TheMaskIsTheHostsOwn) {
-    // CUDA's exp(double) is documented at 1-2 ulp where glibc's is about 0.5, so
-    // the weights must come from the host's builder rather than be recomputed.
-    // This is the standing check that the container did not quietly stop doing
-    // that: the uploaded doubles are compared bit for bit against
-    // impl::subPixMask's output.
+    // CUDA's expf is not required to round as the host's C library does, so the
+    // weights must come from the host's builder rather than be recomputed. This is
+    // the standing check that the container did not quietly stop doing that: the
+    // uploaded floats are compared bit for bit against impl::subPixMask's output.
     for (int winHalf : {1, 5, 15}) {
         for (int zeroHalf : {-1, 2}) {
             SubPixParams p;
@@ -1158,12 +1164,12 @@ BINCV_TEST(CudaSubPix, TheMaskIsTheHostsOwn) {
             bc::DeviceSubPixMask mask(p);
             const size_t side = static_cast<size_t>(2 * winHalf + 1);
             BINCV_CHECK_EQ(mask.size(), side * side);
-            std::vector<double> host(side * side, 0.0);
+            std::vector<float> host(side * side, 0.0f);
             bincv::impl::subPixMask(winHalf, zeroHalf, host.data());
-            std::vector<double> dev(side * side, -1.0);
-            cudaMemcpy(dev.data(), mask.devicePtr(), dev.size() * sizeof(double),
+            std::vector<float> dev(side * side, -1.0f);
+            cudaMemcpy(dev.data(), mask.devicePtr(), dev.size() * sizeof(float),
                        cudaMemcpyDeviceToHost);
-            BINCV_CHECK(std::memcmp(dev.data(), host.data(), dev.size() * sizeof(double)) == 0);
+            BINCV_CHECK(std::memcmp(dev.data(), host.data(), dev.size() * sizeof(float)) == 0);
         }
     }
 }

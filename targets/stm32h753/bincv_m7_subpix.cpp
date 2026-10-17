@@ -4,9 +4,7 @@
 ///
 ///   SUBPIX          build the scene and its seeds; refine them; a digest of the refined
 ///                   points' bits, for the host's (m7_reference subpix) to be held to;
-///                   then cycles, median of 5 (each repeat refines the same seeds),
-///                   every sum computed and an anchor's sums reused (digests of both,
-///                   which must agree)
+///                   then cycles, median of 5 (each repeat refines the same seeds)
 ///   SUBPIXDUMP      the seeds and the refined points in full, for a difference from the
 ///                   host's to be measured rather than only detected (m7_reference subpix
 ///                   --dump prints the same lines)
@@ -46,20 +44,10 @@ void cmdSubpix(const char*) {
     const bincv::SignedQuantMat<1, uint32_t> dx = view(g_dx), dy = view(g_dy);
     const bincv::SubPixParams p;
     bincv::SubPixResult r;
-    uint32_t cycles[kRepeats], fresh[kRepeats], freshPoints = 0;
+    uint32_t cycles[kRepeats];
     for (size_t k = 0; k < kRepeats; ++k) {
-        // The published loop, every iteration's sums computed, then the reuse of an
-        // anchor's sums, which this image runs by default.
-        bincv::impl::subPixReuseEnabled() = false;
         std::memcpy(g_pts, g_seeds, n * sizeof(bincv::Point2f));
-        uint32_t t0 = boardCycles();
-        bincv::cornerSubPix<1, uint32_t>(dx, dy, g_pts, n, p);
-        fresh[k] = boardCycles() - t0;
-        freshPoints =
-            stereoscene::fnv1a(stereoscene::kFnvSeed, g_pts, n * sizeof(bincv::Point2f));
-        bincv::impl::subPixReuseEnabled() = true;
-        std::memcpy(g_pts, g_seeds, n * sizeof(bincv::Point2f));
-        t0 = boardCycles();
+        const uint32_t t0 = boardCycles();
         r = bincv::cornerSubPix<1, uint32_t>(dx, dy, g_pts, n, p);
         cycles[k] = boardCycles() - t0;
     }
@@ -69,11 +57,7 @@ void cmdSubpix(const char*) {
     boardPutU32(static_cast<uint32_t>(r.refined));
     boardPuts(" refined, points ");
     boardPutHex32(stereoscene::fnv1a(stereoscene::kFnvSeed, g_pts, n * sizeof(bincv::Point2f)));
-    boardPuts(", every sum computed ");
-    boardPutHex32(freshPoints);
-    boardPuts("\n  cycles, every sum computed  ");
-    boardPutU32(m7::medianOf(fresh, kRepeats));
-    boardPuts(" cyc\n  cycles, an anchor's sums reused  ");
+    boardPuts("\n  cycles  ");
     boardPutU32(m7::medianOf(cycles, kRepeats));
     boardPuts(" cyc\nOK\n");
 }

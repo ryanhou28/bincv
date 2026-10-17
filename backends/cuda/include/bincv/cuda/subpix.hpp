@@ -27,11 +27,10 @@
 ///
 /// A weighted sum is not a bit count -- the host header says so itself -- so
 /// nothing collapses into popcounts. What the representation buys is the SKIP:
-/// a pixel with no gradient in either axis contributes nothing to any of the
-/// five accumulators, and `|dx| | |dy|` finds all of them a WORD at a time, so
-/// the loop visits set bits through `__ffs` instead of every window pixel. The
-/// host header states the quantity: "the dense spelling would touch 961 pixels;
-/// this touches the edges."
+/// a window sample whose four neighbouring pixels have no gradient in either
+/// axis contributes nothing to any of the five accumulators, and `|dx| | |dy|`,
+/// OR-ed with itself one column and one row on, finds all of them a WORD at a
+/// time, so the loop visits candidates through `__ffs` instead of every sample.
 ///
 /// `impl::subPixSkipEnabled()` turns the skip off and runs the dense window
 /// loop instead. Both arms are held to byte-identical positions and identical
@@ -45,7 +44,7 @@
 /// Double addition is not associative, so any warp- or block-level reduction
 /// sums the five accumulators in an order the host did not use and changes their
 /// last bits -- which changes `q`, which can change the converged position and
-/// can flip a corner between `refined`, `clamped` and `diverged`. A serial
+/// can flip a corner between `refined`, `singular`, `outside` and `diverged`. A serial
 /// per-thread walk in the host's row-major, LSB-first order is the only shape
 /// that is bit-exact by construction. Two hundred corners is about seven warps;
 /// the work is microseconds, and the decision rule prices this op against the
@@ -54,18 +53,16 @@
 /// ---------------------------------------------------------------------------
 /// TWO PIECES OF FLOATING-POINT CARE, BOTH LOAD-BEARING
 ///
-/// * **`src/subpix.cu` is compiled `-fmad=false`.** `bx += xx*px + xy*py` has two
-/// multiplies and an add; `xx*px` is a weight times a small integer and
-/// therefore ROUNDS, so a fused multiply-add gives a different result from the
-/// host's separate mul-and-add. `det = gxx*gyy - gxy*gxy` is the same shape.
-/// By contrast `gxx += w*gx*gx` with `gx` in {-1, 0, +1} is immune -- the
-/// product is exactly `+-w` or zero and a fused add of an exact product rounds
-/// identically -- which is worth stating so the flag reads as covering
-/// `bx`, `by` and `det` rather than as superstition.
+/// * **`src/subpix.cu` is compiled `-fmad=false`.** The window is sampled at the
+/// sub-pixel position, so its gradient is a blend and not -1, 0 or +1:
+/// `gxx += gx*gx*m` rounds its product before the add on the host, and a fused
+/// multiply-add would not. `bx += xx*px + xy*py`, `det = gxx*gyy - gxy*gxy` and
+/// the position update are the same shape. Only the blend itself is immune --
+/// each of its products is a weight times -1, 0 or +1, which is exact.
 /// * **The Gaussian mask is host-built and uploaded, never computed on device.**
-/// `impl::subPixMask` calls `std::exp`; CUDA's `exp(double)` is documented at
-/// 1-2 ulp where glibc's is about 0.5, so the two are not required to agree,
-/// and a one-ulp weight difference propagates straight into the accumulators.
+/// `impl::subPixMask` builds cv::cornerSubPix's `float` weights with the C
+/// library's `expf`, and CUDA's is not required to round as it does; a one-ulp
+/// weight difference propagates straight into the accumulators.
 /// `DeviceSubPixMask` runs the HOST's own mask builder and uploads the result.
 /// A future "optimisation" that computes the mask on device reintroduces
 /// exactly that.
@@ -101,16 +98,16 @@ namespace cuda {
 /// @note The four counters are per-corner and independent, so `atomicAdd` into
 /// them is exact regardless of the order threads finish in.
 struct DeviceSubPixResult {
-    uint32_t refined = 0;   ///< corners whose position moved and converged
-    uint32_t singular = 0;  ///< corners left untouched because `G` was not invertible
-    uint32_t clamped = 0;   ///< corners whose step left the window
+    uint32_t refined = 0;   ///< corners whose walk converged or ran its iterations
+    uint32_t singular = 0;  ///< corners whose walk stopped on a singular `G`
+    uint32_t outside = 0;   ///< corners whose walk left the image, or began outside it
     uint32_t diverged = 0;  ///< corners reverted for walking outside their own window
 
     SubPixResult toHost() const {
         SubPixResult r;
         r.refined = refined;
         r.singular = singular;
-        r.clamped = clamped;
+        r.outside = outside;
         r.diverged = diverged;
         return r;
     }
@@ -121,7 +118,7 @@ struct DeviceSubPixResult {
 /// exactly as it does on the host -- and because the whole point is that the
 /// weights come from `bincv::impl::subPixMask`, whose `std::exp` the device's
 /// is not required to agree with. Build it once per pipeline, not per frame.
-/// @note `(2*winHalf + 1)^2` doubles: 968 B at the shipped `winHalf` 5, 7,688 B
+/// @note `(2*winHalf + 1)^2` floats: 484 B at the shipped `winHalf` 5, 3,844 B
 /// at the `kMaxWinHalf` cap. **No frame-sized allocation at any winHalf**,
 /// which is a checkable binary property rather than a ratio.
 class DeviceSubPixMask {
@@ -132,14 +129,14 @@ public:
     /// and a setup path's failure is not a kernel's `cudaError_t`.
     explicit DeviceSubPixMask(const SubPixParams& params);
 
-    const double* devicePtr() const { return mask_.data(); }
+    const float* devicePtr() const { return mask_.data(); }
     int winHalf() const { return winHalf_; }
     int zeroHalf() const { return zeroHalf_; }
-    /// @brief Doubles the mask holds -- `(2*winHalf + 1)^2`.
+    /// @brief Weights the mask holds -- `(2*winHalf + 1)^2`.
     size_t size() const { return mask_.size(); }
 
 private:
-    DeviceArray<double> mask_;
+    DeviceArray<float> mask_;
     int winHalf_ = 0;
     int zeroHalf_ = -1;
 };
@@ -147,14 +144,15 @@ private:
 /// @brief Refines corner positions to sub-pixel accuracy, on the device.
 /// **API TIER 2.** Bit-exact against `bincv::cornerSubPix` over a
 /// `TernaryMat<uint32_t>` pair: byte-identical positions (exact `float`
-/// compare, no tolerance) and identical `{refined, singular, clamped,
+/// compare, no tolerance) and identical `{refined, singular, outside,
 /// diverged}`.
 /// @param magX,magY Magnitude planes of the x- and y-derivatives.
 /// @param signX,signY Sign planes; a SET bit is NEGATIVE.
 /// @param cornersXY In/out, in DEVICE memory: `count` interleaved `(x, y)`
 /// float pairs, which is the byte layout of the host's `Point2f*`.
-/// Positions are refined in place; a corner whose window leaves the image,
-/// or whose `G` is singular, is left exactly where it was.
+/// Positions are refined in place, as the host refines them -- over the
+/// replicated border where a window reaches past the image, and returned
+/// outside the image where a walk ends there.
 /// @param count Number of corners.
 /// @param params `winHalf`, `zeroHalf`, `maxIterations`, `epsilon`. **Must be
 /// the params `mask` was built from** -- asserted, and refused in release.
@@ -171,7 +169,7 @@ private:
 cudaError_t cornerSubPixAsync(DeviceBinMatConstView magX, DeviceBinMatConstView magY,
                               DeviceBinMatConstView signX, DeviceBinMatConstView signY,
                               float* cornersXY, uint32_t count, const SubPixParams& params,
-                              const double* mask, DeviceSubPixResult* result,
+                              const float* mask, DeviceSubPixResult* result,
                               cudaStream_t stream = nullptr);
 
 namespace impl {

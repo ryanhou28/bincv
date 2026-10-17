@@ -207,12 +207,13 @@ on or near the launch floor at 752×480, which is why the 1920×1080 rows are ca
 
 ## What is not delivered
 
-- **`cornerSubPixAsync` below roughly 450 corners: refine on the host.** Measured as one paired
+- **`cornerSubPixAsync` at 200 corners: refine on the host.** Measured as one paired
   comparison against the whole-plane download-and-refine round trip in
-  `cuda_feature_tracking_benchmark` (no committed log), the device arm reads 0.5656 ms against
-  0.3911 ms, 72 of 77 rounds favouring the round trip. At 200 corners the kernel is 6.25 warps
-  of work on a part that holds 2,304, and a warp per corner is what `subpix.hpp`'s bit-exactness
-  argument forbids, since double addition is not associative.
+  `cuda_feature_tracking_benchmark` (no committed log), the device arm reads 2.095 ms against
+  1.144 ms on the wall clock, all 11 rounds favouring the round trip. At 200 corners the kernel
+  is 6.25 warps of work on a part that holds 2,304, and a warp per corner is what `subpix.hpp`'s
+  bit-exactness argument forbids, since double addition is not associative. A second warp per
+  SM needs about 450 corners; no count above 200 has been measured.
 - **The census entry is larger than `cv::cuda::StereoBM`** (0.681×) and faster (1.50×) on the
   same run: published as both numbers, above.
 - **Block matching is not shipped.** It has no `cv::cuda` counterpart, no accuracy bar has been
@@ -345,6 +346,7 @@ figure stands.
 
 | date | row | previous | current | why |
 |---|---|---|---|---|
+| 2026-10-17 | `cornerSubPixAsync` against the round trip | 0.5656 against 0.3911 ms, 72 of 77 rounds favouring the round trip | 2.095 against 1.144 ms, 11 of 11 | both sides now sample the window at the sub-pixel position, as `cv::cornerSubPix` does; the walk they run is OpenCV's, several times as many window sums per corner as the rounded-anchor walk it replaced. The device arm still loses, as it did |
 | 2026-09-28 | every ratio | four significant figures (11.16×, 1.504×, 6.015×, 2.597×, 6.857×) | three (11.2×, 1.50×, 6.02×, 2.60×, 6.86×), with the range over 7 runs | precision rule; no result moved |
 | 2026-09-28 | noise bar, every speed row | the widest within-run swing among the 7 runs (3.46× on the binary row) | the median within-run swing, as `scripts/aggregate_cuda_runs.py` computes it (2.28×) | reproducible from the committed log; no result moved |
 | 2026-09-28 | memory: `computeBriefSteered`, `matchDescriptors`, `detectFastAsync` | 2048.0 / 48.0 / 42.67×; 8277.3 / 400.0 / 20.7×; 680.0 / 432.0 / 1.574× | 2048.0 / 44.0 / 46.5×; 8192.0 / 368.0 / 22.3×; 768.0 / 432.0 / 1.78× | re-sourced to the committed sweep; the earlier sweep's log was not committed |
